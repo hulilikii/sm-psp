@@ -26,7 +26,7 @@ static inline uint16_t Rgb565(const uint8_t *p) {
   const uint8_t b = p[0];
   const uint8_t g = p[1];
   const uint8_t r = p[2];
-  return (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+  return (uint16_t)(((b >> 3) << 11) | ((g >> 2) << 5) | (r >> 3));
 }
 
 static void PspRenderer_Convert(void) {
