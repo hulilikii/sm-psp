@@ -3,10 +3,8 @@
 
 #include "types.h"
 
-typedef struct SDL_Window SDL_Window;
-
 struct RendererFuncs {
-  bool (*Initialize)(SDL_Window *window);
+  bool (*Initialize)(void);
   void (*Destroy)();
   void (*BeginDraw)(int width, int height, uint8 **pixels, int *pitch);
   void (*EndDraw)();

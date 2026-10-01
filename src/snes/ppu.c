@@ -9,12 +9,7 @@
 #include "ppu.h"
 #include "snes.h"
 #include "../types.h"
-typedef uint64_t uint64;
-typedef uint32_t uint32;
-typedef uint32_t uint;
-typedef uint16_t uint16;
-typedef int16_t int16;
-typedef uint8_t uint8;
+
 
 extern bool g_new_ppu;
 static void PpuDrawWholeLine(Ppu *ppu, uint y);

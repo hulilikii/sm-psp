@@ -1,33 +1,35 @@
-TARGET_EXEC:=sm
+TARGET := smpsp
 
-SRCS:=$(wildcard src/*.c src/snes/*.c) third_party/gl_core/gl_core_3_1.c
-OBJS:=$(SRCS:%.c=%.o)
+PSPSDK := $(shell psp-config --pspsdk-path)
 
-PYTHON:=/usr/bin/env python3
-CFLAGS:=$(if $(CFLAGS),$(CFLAGS),-O2 -fno-strict-aliasing -Werror )
-CFLAGS:=${CFLAGS} $(shell sdl2-config --cflags) -DSYSTEM_VOLUME_MIXER_AVAILABLE=0 -I.
+SRCS := $(filter-out src/opengl.c,$(wildcard src/*.c src/snes/*.c))
+SRCS += src/platform/psp/psp_renderer.c
+SRCS += src/platform/psp/psp_input.c
 
-ifeq (${OS},Windows_NT)
-    WINDRES:=windres
-#    RES:=sm.res
-    SDLFLAGS:=-Wl,-Bstatic $(shell sdl2-config --static-libs)
-else
-    SDLFLAGS:=$(shell sdl2-config --libs) -lm
-endif
+OBJS := $(SRCS:%.c=%.o)
 
-.PHONY: all clean clean_obj
+CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
+CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 
-all: $(TARGET_EXEC)
-$(TARGET_EXEC): $(OBJS) $(RES)
-	$(CC) $^ -o $@ $(LDFLAGS) $(SDLFLAGS)
+# PSP-only build. PSPSDK supplies its standard libraries through build.mak.
+LIBS := -lpspaudiolib \
+        -lpspaudio \
+        -lpsppower \
+        -lpspgu \
+        -lm
 
-%.o : %.c
-	$(CC) -c $(CFLAGS) $< -o $@
+BUILD_PRX := 1
 
-#$(RES): src/platform/win32/sm.rc
-#	@echo "Generating Windows resources"
-#	@$(WINDRES) $< -O coff -o $@
+EXTRA_TARGETS := EBOOT.PBP
+PSP_EBOOT_TITLE := Super Metroid PSP
 
-clean: clean_obj
-clean_obj:
-	@$(RM) $(OBJS) $(TARGET_EXEC)
+include $(PSPSDK)/lib/build.mak
+
+.PHONY: all package
+
+all: $(TARGET).prx EBOOT.PBP
+
+package: EBOOT.PBP
+	@mkdir -p PSP/GAME/SMPSP
+	cp EBOOT.PBP PSP/GAME/SMPSP/
+	cp sm.smc PSP/GAME/SMPSP/

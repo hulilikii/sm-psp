@@ -18,7 +18,6 @@ uint8 g_runmode = RM_BOTH;
 
 extern int g_got_mismatch_count;
 
-Snes *g_snes;
 Cpu *g_cpu;
 
 bool g_calling_asm_from_c;
