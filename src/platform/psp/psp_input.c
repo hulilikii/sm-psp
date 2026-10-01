@@ -17,22 +17,22 @@ uint16_t PspInput_Read(void) {
   uint16_t buttons = 0;
 
   if (pad.Buttons & PSP_CTRL_UP)
-    buttons |= kJoypadH_Up;
+    buttons |= 1 << 4;
 
   if (pad.Buttons & PSP_CTRL_DOWN)
-    buttons |= kJoypadH_Down;
+    buttons |= 1 << 5;
 
   if (pad.Buttons & PSP_CTRL_LEFT)
-    buttons |= kJoypadH_Left;
+    buttons |= 1 << 6;
 
   if (pad.Buttons & PSP_CTRL_RIGHT)
-    buttons |= kJoypadH_Right;
+    buttons |= 1 << 7;
 
   if (pad.Buttons & PSP_CTRL_SELECT)
-    buttons |= kJoypadH_Select;
+    buttons |= 1 << 2;
 
   if (pad.Buttons & PSP_CTRL_START)
-    buttons |= kJoypadH_Start;
+    buttons |= 1 << 3;
 
   /*
    * PSP face-button convention:
@@ -44,10 +44,10 @@ uint16_t PspInput_Read(void) {
    */
 
   if (pad.Buttons & PSP_CTRL_CROSS)
-    buttons |= kJoypadH_B;
+    buttons |= 1 << 0;
 
   if (pad.Buttons & PSP_CTRL_CIRCLE)
-    buttons |= kJoypadL_A;
+    buttons |= 1 << 8;
 
   if (pad.Buttons & PSP_CTRL_SQUARE)
     buttons |= kJoypadH_Y;
