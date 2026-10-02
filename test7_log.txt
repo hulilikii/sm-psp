@@ -1,0 +1,870 @@
+14:54:625 root         N[G3D]: GLES/ShaderManagerGLES.cpp:1155 Precompile: Compiled and linked 14 programs (5 vertex, 9 fragment) in 0.1 milliseconds
+14:54:625 root         N[G3D]: GLES/GPU_GLES.cpp:105 Precompiling the shader cache from '/home/sean/.var/app/org.ppsspp.PPSSPP/config/ppsspp/PSP/SYSTEM/CACHE/EBOO00649.glshadercache'
+14:54:657 idle0        N[BOOT]: UI/EmuScreen.cpp:391 Booted /run/flatpak/doc/iN7adEOZHsRu4gAhTfnbuQ/sm-psp-profiling/EBOOT.PBP...
+14:54:793 user_main    W[SCEIO]: HLE/sceIo.cpp:1600 ERRNO_FILE_NOT_FOUND=sceIoOpen(umd0:/sm.user.ini, 1, 438): file not found
+14:54:824 user_main    W[FRAMEBUF]: Common/FramebufferManagerCommon.cpp:2 Memcpy fbo upload 04000000 -> 04000000 (size: 44000)
+14:55:242 user_main    N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 0.00ms / inffps, actual = 0.78ms (+0.78ms) / 1277.9fps
+Kernel processing time: 0.01 ms
+Slowest syscall: sceAudioOutputPannedBlocking : 0.00 ms
+Most active syscall: sceAudioOutputPannedBlocking : 0.00 ms
+DL processing time: 0.00 ms, 0 drawsync, 0 listsync
+Draw: 0 (0 dec, 0 culled), flushes 0, clears 0, bbox jumps 0 (0 updates)
+Vertices: 0 dec: 0 drawn: 0
+FBOs active: 1 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 0 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 0 (0.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+14:55:247 user_main    W[FRAMEBUF]: Common/FramebufferManagerCommon.cpp:2 Memcpy fbo upload 04044000 -> 04044000 (size: 44000)
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 42
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+14:57:197 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 89
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 28
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+14:57:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 23
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 83
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+14:59:198 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 79
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 83
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+14:59:213 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 27
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 52
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 59
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:01:534 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 163
+15:01:535 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:01:547 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:01:547 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:01:547 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:01:547 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:01:547 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:01:547 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 98
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 7
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 77
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:01:548 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 30
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 88
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 85
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 171
+15:04:120 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 3
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 05
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:04:134 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 8
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 04
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:04:135 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 27
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 40
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 74
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 148
+15:06:154 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 97
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 71
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:06:155 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:07:038 user_main    N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 0.00ms / inffps, actual = 0.55ms (+0.55ms) / 1823.6fps
+Kernel processing time: 0.01 ms
+Slowest syscall: sceAudioOutputPannedBlocking : 0.01 ms
+Most active syscall: sceAudioOutputPannedBlocking : 0.01 ms
+DL processing time: 0.00 ms, 0 drawsync, 0 listsync
+Draw: 0 (0 dec, 0 culled), flushes 0, clears 0, bbox jumps 0 (0 updates)
+Vertices: 0 dec: 0 drawn: 0
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 0 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 0 (0.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 27
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 13
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 76
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 153
+15:08:325 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 3
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 02
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 48
+15:08:338 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:08:339 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:08:339 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:08:339 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:08:339 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:08:640 user_main    N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 0.00ms / inffps, actual = 1.34ms (+1.34ms) / 747.6fps
+Kernel processing time: 0.02 ms
+Slowest syscall: sceAudioOutputPannedBlocking : 0.01 ms
+Most active syscall: sceAudioOutputPannedBlocking : 0.01 ms
+DL processing time: 0.00 ms, 0 drawsync, 0 listsync
+Draw: 0 (0 dec, 0 culled), flushes 0, clears 0, bbox jumps 0 (0 updates)
+Vertices: 0 dec: 0 drawn: 0
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 0 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 0 (0.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 21
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 81
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 74
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 148
+15:10:344 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:10:359 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:10:359 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:10:359 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:10:359 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 3
+15:10:359 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:10:359 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 13
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 7
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 7
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 46
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:10:360 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 46
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+15:12:347 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 99
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 4
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 87
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:12:348 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:13:417 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 905.97ms (+872.61ms) / 1.1fps
+Kernel processing time: 0.10 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.05 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.06 ms
+DL processing time: 0.06 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:13:952 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 718.81ms (+685.44ms) / 1.4fps
+Kernel processing time: 0.26 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.15 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.16 ms
+DL processing time: 0.16 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:13:978 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 209.65ms (+176.29ms) / 4.8fps
+Kernel processing time: 0.14 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.05 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.06 ms
+DL processing time: 0.06 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:006 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 203.79ms (+170.42ms) / 4.9fps
+Kernel processing time: 0.13 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.06 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.07 ms
+DL processing time: 0.07 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:023 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 188.00ms (+154.63ms) / 5.3fps
+Kernel processing time: 0.11 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.05 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.05 ms
+DL processing time: 0.05 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:040 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 170.67ms (+137.30ms) / 5.9fps
+Kernel processing time: 0.13 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.06 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.07 ms
+DL processing time: 0.07 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:053 user_main    N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 16.68ms / 59.9fps, actual = 151.14ms (+134.46ms) / 6.6fps
+Kernel processing time: 0.06 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.03 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.03 ms
+DL processing time: 0.03 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:075 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 50.05ms / 20.0fps, actual = 113.19ms (+63.14ms) / 8.8fps
+Kernel processing time: 0.09 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.03 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.03 ms
+DL processing time: 0.03 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:090 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 78.29ms (+44.93ms) / 12.8fps
+Kernel processing time: 0.08 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.03 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.04 ms
+DL processing time: 0.04 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:105 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 60.49ms (+27.12ms) / 16.5fps
+Kernel processing time: 0.11 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.05 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.05 ms
+DL processing time: 0.05 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:14:123 idle0        N[SCEDISP]: HLE/sceDisplay.cpp:399 Dropping frames - budget = 33.37ms / 30.0fps, actual = 44.53ms (+11.16ms) / 22.5fps
+Kernel processing time: 0.08 ms
+Slowest syscall: sceGeListUpdateStallAddr : 0.03 ms
+Most active syscall: sceGeListUpdateStallAddr : 0.03 ms
+DL processing time: 0.03 ms, 1 drawsync, 0 listsync
+Draw: 1 (1 dec, 0 culled), flushes 1, clears 0, bbox jumps 0 (0 updates)
+Vertices: 2 dec: 4 drawn: 2
+FBOs active: 2 (evaluations: 0, created 0)
+Textures: 1, dec: 0, invalidated: 0, hashed: 256 kB, clut 0
+readbacks 0 (0 non-block), upload 0 (cached 0), depal 0
+block transfers: 0
+replacer: tracks 0 references, 0 unique textures
+Cpy: depth 0, color 0, reint 0, blend 0, self 0
+GPU cycles: 162 (20.0 per vertex)
+Z-rast: 0.00+0.00+0.00 (total 0.00/0.00) ms
+Z-rast: 0 prim, 0 nopix, 0 small, 0 earlysize, 0 zcull, 0 box
+Vertex, Fragment, Programs loaded: 5, 9, 14
+
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 39
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 147
+15:15:568 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 89
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 13
+15:15:579 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:15:580 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:15:580 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:15:580 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:15:580 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 44
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 94
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:17:584 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 6
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 4
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 93
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:17:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:19:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:19:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:19:585 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 37
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+15:19:586 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 89
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 15
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:19:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:21:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:21:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:21:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:21:588 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 44
+15:21:589 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:21:589 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:21:589 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:21:589 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:21:589 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:21:589 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 147
+15:21:589 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 94
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 4
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 95
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:21:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 45
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+15:23:590 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 89
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 07
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:23:591 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 43
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 147
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 94
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:25:592 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:25:593 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 45
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:27:594 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 94
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 5
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 08
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:27:595 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 24
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 41
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 73
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 146
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:29:596 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 2
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 99
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 4
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 97
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:29:597 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/main: frames=60 RtlRunFrame=
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 21
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 07
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_lock_wait=
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 78
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms audio_locks=
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 157
+15:31:818 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: PSP profile/renderer: frames=
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 60
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr:  convert=
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 3
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 10
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms cache=
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms gu_sync=
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 1
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms vblank=
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 12
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 10
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms swap=
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 0
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: .
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: 00
+15:31:829 user_main    I[PRINTF]: HLE/sceIo.cpp:1206 stderr: ms

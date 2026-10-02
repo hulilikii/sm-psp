@@ -48,6 +48,9 @@ static int g_ppu_render_flags;
 static int g_snes_width = 256;
 static int g_snes_height = 240;
 static uint32_t g_frame_ctr;
+static uint64_t g_profile_runframe_us;
+static uint64_t g_profile_audio_wait_us;
+static uint32_t g_profile_audio_lock_count;
 
 void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
@@ -60,8 +63,12 @@ void Warning(const char *error) {
 }
 
 void RtlApuLock(void) {
-  if (g_audio_sema >= 0)
+  if (g_audio_sema >= 0) {
+    const uint64_t start = sceKernelGetSystemTimeWide();
     sceKernelWaitSema(g_audio_sema, 1, NULL);
+    g_profile_audio_wait_us += sceKernelGetSystemTimeWide() - start;
+    ++g_profile_audio_lock_count;
+  }
 }
 
 void RtlApuUnlock(void) {
@@ -179,8 +186,22 @@ int main(int argc, char **argv) {
     }
 
     uint16 inputs = PspInput_Read();
+    const uint64_t runframe_start = sceKernelGetSystemTimeWide();
     uint8 is_replay = RtlRunFrame(inputs);
+    g_profile_runframe_us += sceKernelGetSystemTimeWide() - runframe_start;
     ++g_frame_ctr;
+
+    if ((g_frame_ctr % 60) == 0) {
+      fprintf(stderr,
+              "PSP profile/main: frames=60 RtlRunFrame=%.2fms "
+              "audio_lock_wait=%.2fms audio_locks=%u\n",
+              (double)g_profile_runframe_us / 60.0 / 1000.0,
+              (double)g_profile_audio_wait_us / 1000.0,
+              (unsigned)g_profile_audio_lock_count);
+      g_profile_runframe_us = 0;
+      g_profile_audio_wait_us = 0;
+      g_profile_audio_lock_count = 0;
+    }
 
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
                              (g_frame_ctr & (g_turbo ? 0xf : 0x7f)) != 0;

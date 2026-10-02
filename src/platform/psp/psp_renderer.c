@@ -1,6 +1,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
+
+#include <pspkernel.h>
 
 #include <pspdisplay.h>
 #include <pspge.h>
@@ -22,6 +25,46 @@ static uint32_t g_gu_list[GU_LIST_WORDS] __attribute__((aligned(16)));
 static uint16_t g_texture[TEX_WIDTH * TEX_HEIGHT] __attribute__((aligned(16)));
 static uint8_t g_framebuffer[GAME_WIDTH * GAME_HEIGHT * 4] __attribute__((aligned(16)));
 
+static uint64_t g_profile_convert_us;
+static uint64_t g_profile_cache_us;
+static uint64_t g_profile_gu_sync_us;
+static uint64_t g_profile_vblank_us;
+static uint64_t g_profile_swap_us;
+static uint64_t g_profile_frames;
+static uint64_t g_profile_last_report_us;
+
+static uint64_t ProfileNowUs(void) {
+  return sceKernelGetSystemTimeWide();
+}
+
+static void ProfileReport(void) {
+  if (g_profile_frames < 60)
+    return;
+
+  const uint64_t now = ProfileNowUs();
+  if (now - g_profile_last_report_us < 1000000)
+    return;
+
+  const uint64_t n = g_profile_frames;
+  fprintf(stderr,
+          "PSP profile/renderer: frames=%llu convert=%.2fms cache=%.2fms "
+          "gu_sync=%.2fms vblank=%.2fms swap=%.2fms\n",
+          (unsigned long long)n,
+          (double)g_profile_convert_us / n / 1000.0,
+          (double)g_profile_cache_us / n / 1000.0,
+          (double)g_profile_gu_sync_us / n / 1000.0,
+          (double)g_profile_vblank_us / n / 1000.0,
+          (double)g_profile_swap_us / n / 1000.0);
+
+  g_profile_convert_us = 0;
+  g_profile_cache_us = 0;
+  g_profile_gu_sync_us = 0;
+  g_profile_vblank_us = 0;
+  g_profile_swap_us = 0;
+  g_profile_frames = 0;
+  g_profile_last_report_us = now;
+}
+
 static inline uint16_t Rgb565(const uint8_t *p) {
   const uint8_t b = p[0];
   const uint8_t g = p[1];
@@ -30,12 +73,14 @@ static inline uint16_t Rgb565(const uint8_t *p) {
 }
 
 static void PspRenderer_Convert(void) {
+  const uint64_t start = ProfileNowUs();
   for (int y = 0; y < GAME_HEIGHT; ++y) {
     const uint8_t *src = g_framebuffer + y * GAME_WIDTH * 4;
     uint16_t *dst = g_texture + y * TEX_WIDTH;
     for (int x = 0; x < GAME_WIDTH; ++x)
       dst[x] = Rgb565(src + x * 4);
   }
+  g_profile_convert_us += ProfileNowUs() - start;
 }
 
 static bool PspRenderer_Initialize(void) {
@@ -90,7 +135,10 @@ typedef struct PspVertex {
 static void PspRenderer_EndDraw(void) {
   PspRenderer_Convert();
 
+  uint64_t start = ProfileNowUs();
   sceKernelDcacheWritebackAll();
+  g_profile_cache_us += ProfileNowUs() - start;
+
   sceGuStart(GU_DIRECT, g_gu_list);
   sceGuTexImage(0, TEX_WIDTH, TEX_HEIGHT, TEX_WIDTH, g_texture);
 
@@ -105,9 +153,21 @@ static void PspRenderer_EndDraw(void) {
                  GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D,
                  2, NULL, v);
   sceGuFinish();
+
+  start = ProfileNowUs();
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  g_profile_gu_sync_us += ProfileNowUs() - start;
+
+  start = ProfileNowUs();
   sceDisplayWaitVblankStart();
+  g_profile_vblank_us += ProfileNowUs() - start;
+
+  start = ProfileNowUs();
   sceGuSwapBuffers();
+  g_profile_swap_us += ProfileNowUs() - start;
+
+  ++g_profile_frames;
+  ProfileReport();
 }
 
 static const struct RendererFuncs kPspRendererFuncs = {
