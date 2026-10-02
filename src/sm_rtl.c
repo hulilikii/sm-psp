@@ -1,3 +1,5 @@
+#include <pspkernel.h>
+
 #include "sm_rtl.h"
 #include "sm_cpu_infra.h"
 #include "types.h"
@@ -6,6 +8,12 @@
 #include "funcs.h"
 #include "spc_player.h"
 #include "util.h"
+
+uint64_t g_profile_audio_render_us;
+uint64_t g_profile_audio_generate_us;
+uint64_t g_profile_audio_dsp_us;
+uint32_t g_profile_audio_callback_count;
+uint64_t g_profile_audio_samples;
 
 struct StateRecorder;
 
@@ -677,6 +685,7 @@ void RtlSaveMusicStateToRam_Locked(void) {
 
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
   assert(channels == 2);
+  const uint64_t render_start = sceKernelGetSystemTimeWide();
   RtlApuLock();
 
   RtlPopApuState_Locked();
@@ -685,14 +694,21 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
     if (!is_uploading_apu) {
       while (g_snes->apu->dsp->sampleOffset < 534)
         apu_cycle(g_snes->apu);
+      const uint64_t dsp_start = sceKernelGetSystemTimeWide();
       dsp_getSamples(g_snes->apu->dsp, audio_buffer, samples);
+      g_profile_audio_dsp_us += sceKernelGetSystemTimeWide() - dsp_start;
     }
   } else {
+    const uint64_t generate_start = sceKernelGetSystemTimeWide();
     SpcPlayer_GenerateSamples(g_spc_player);
+    g_profile_audio_generate_us += sceKernelGetSystemTimeWide() - generate_start;
+    const uint64_t dsp_start = sceKernelGetSystemTimeWide();
     dsp_getSamples(g_spc_player->dsp, audio_buffer, samples);
+    g_profile_audio_dsp_us += sceKernelGetSystemTimeWide() - dsp_start;
   }
 
   RtlApuUnlock();
+  g_profile_audio_render_us += sceKernelGetSystemTimeWide() - render_start;
 }
 
 void RtlCheat(char c) {

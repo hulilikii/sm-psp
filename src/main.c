@@ -51,6 +51,11 @@ static uint32_t g_frame_ctr;
 static uint64_t g_profile_runframe_us;
 static uint64_t g_profile_audio_wait_us;
 static uint32_t g_profile_audio_lock_count;
+extern uint64_t g_profile_audio_render_us;
+extern uint64_t g_profile_audio_generate_us;
+extern uint64_t g_profile_audio_dsp_us;
+extern uint32_t g_profile_audio_callback_count;
+extern uint64_t g_profile_audio_samples;
 
 void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
@@ -78,6 +83,8 @@ void RtlApuUnlock(void) {
 
 static void AudioCallback(void *buf, unsigned int reqn, void *pdata) {
   (void)pdata;
+  ++g_profile_audio_callback_count;
+  g_profile_audio_samples += reqn;
   RtlRenderAudio((int16 *)buf, (int)reqn, 2);
 }
 
@@ -198,9 +205,22 @@ int main(int argc, char **argv) {
               (double)g_profile_runframe_us / 60.0 / 1000.0,
               (double)g_profile_audio_wait_us / 1000.0,
               (unsigned)g_profile_audio_lock_count);
+      fprintf(stderr,
+              "PSP profile/audio: callbacks=%u samples=%llu render=%.2fms "
+              "generate=%.2fms dsp=%.2fms\n",
+              (unsigned)g_profile_audio_callback_count,
+              (unsigned long long)g_profile_audio_samples,
+              (double)g_profile_audio_render_us / 1000.0,
+              (double)g_profile_audio_generate_us / 1000.0,
+              (double)g_profile_audio_dsp_us / 1000.0);
       g_profile_runframe_us = 0;
       g_profile_audio_wait_us = 0;
       g_profile_audio_lock_count = 0;
+      g_profile_audio_render_us = 0;
+      g_profile_audio_generate_us = 0;
+      g_profile_audio_dsp_us = 0;
+      g_profile_audio_callback_count = 0;
+      g_profile_audio_samples = 0;
     }
 
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
