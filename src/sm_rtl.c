@@ -689,36 +689,40 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
   const uint64_t render_start = sceKernelGetSystemTimeWide();
   RtlApuLock();
 
-  // If ME audio is enabled and initialized, use it
-  if (AudioMeGetSharedBuffer() != NULL) {
-    int16_t *me_frame = AudioMeGetFrame();
-    if (me_frame != NULL) {
-      // Copy ME-rendered audio to output buffer
-      memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
-      RtlApuUnlock();
-      const uint64_t render_time = sceKernelGetSystemTimeWide() - render_start;
-      g_profile_audio_render_us += render_time;
-      return;
-    }
-    // Fall back to CPU rendering if ME frame not ready
-  }
-
   RtlPopApuState_Locked();
 
   if (!g_use_my_apu_code) {
     if (!is_uploading_apu) {
       while (g_snes->apu->dsp->sampleOffset < 534)
         apu_cycle(g_snes->apu);
+
       const uint64_t dsp_start = sceKernelGetSystemTimeWide();
-      dsp_getSamples(g_snes->apu->dsp, audio_buffer, samples);
+
+      AudioMeWriteDspSamples(g_snes->apu->dsp->sampleBuffer, 534);
+      int16_t *me_frame = AudioMeGetFrame();
+      if (me_frame != NULL) {
+        memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
+      } else {
+        dsp_getSamples(g_snes->apu->dsp, audio_buffer, samples);
+      }
+
       g_profile_audio_dsp_us += sceKernelGetSystemTimeWide() - dsp_start;
     }
   } else {
     const uint64_t generate_start = sceKernelGetSystemTimeWide();
     SpcPlayer_GenerateSamples(g_spc_player);
     g_profile_audio_generate_us += sceKernelGetSystemTimeWide() - generate_start;
+
     const uint64_t dsp_start = sceKernelGetSystemTimeWide();
-    dsp_getSamples(g_spc_player->dsp, audio_buffer, samples);
+
+    AudioMeWriteDspSamples(g_spc_player->dsp->sampleBuffer, 534);
+    int16_t *me_frame = AudioMeGetFrame();
+    if (me_frame != NULL) {
+      memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
+    } else {
+      dsp_getSamples(g_spc_player->dsp, audio_buffer, samples);
+    }
+
     g_profile_audio_dsp_us += sceKernelGetSystemTimeWide() - dsp_start;
   }
 
