@@ -566,12 +566,15 @@ void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
 }
 
 void dsp_getSamples(Dsp* dsp, int16_t* sampleData, int samplesPerFrame) {
-  // resample from 534 samples per frame to wanted value
-  double adder = 534.0 / samplesPerFrame;
-  double location = 0.0;
+  // resample from 534 samples per frame to wanted value.
+  // 12.20 fixed point: the PSP FPU is single precision only, so a `double`
+  // accumulator here is emulated in software for every output sample.
+  uint32_t adder = (uint32_t)(((uint64_t)534 << 20) / (uint32_t)samplesPerFrame);
+  uint32_t location = 0;
   for(int i = 0; i < samplesPerFrame; i++) {
-    sampleData[i * 2] = dsp->sampleBuffer[((int) location) * 2];
-    sampleData[i * 2 + 1] = dsp->sampleBuffer[((int) location) * 2 + 1];
+    uint32_t idx = location >> 20;
+    sampleData[i * 2] = dsp->sampleBuffer[idx * 2];
+    sampleData[i * 2 + 1] = dsp->sampleBuffer[idx * 2 + 1];
     location += adder;
   }
   dsp->sampleOffset = 0;
