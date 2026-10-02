@@ -16,6 +16,9 @@ uint64_t g_profile_audio_dsp_us;
 uint32_t g_profile_audio_callback_count;
 uint64_t g_profile_audio_samples;
 
+AudioMeBuffer g_audio_me_buffer;
+static int g_audio_me_initialized = 0;
+
 struct StateRecorder;
 
 static void RtlSaveMusicStateToRam_Locked();
@@ -166,9 +169,19 @@ void RtlReset(int mode) {
   snes_reset(g_snes, true);
   if (!(mode & 1))
     memset(g_sram, 0, 0x2000);
-
+  
   coroutine_state_0 = 1;
 
+  if (!g_audio_me_initialized) {
+    int rc = AudioMeBufferInit(&g_audio_me_buffer, 735, 534);
+    if (rc == 0) {
+      g_audio_me_initialized = 1;
+    } else {
+      fprintf(stderr, "Failed to initialize ME audio buffer: %d\n", rc);
+      g_audio_me_initialized = 0;
+    }
+  }
+    
   RtlApuLock();
   RtlRestoreMusicAfterLoad_Locked(true);
   RtlApuUnlock();
@@ -695,13 +708,22 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
     if (!is_uploading_apu) {
       while (g_snes->apu->dsp->sampleOffset < 534)
         apu_cycle(g_snes->apu);
-
       const uint64_t dsp_start = sceKernelGetSystemTimeWide();
 
-      AudioMeWriteDspSamples(g_snes->apu->dsp->sampleBuffer, 534);
-      int16_t *me_frame = AudioMeGetFrame();
-      if (me_frame != NULL) {
-        memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
+      if (g_audio_me_initialized) {
+        int rc = AudioMeEnqueueDspSamples(&g_audio_me_buffer,
+                                         g_snes->apu->dsp->sampleBuffer,
+                                         534);
+        if (rc == 0) {
+          int16_t *me_frame = AudioMeGetNextFrame(&g_audio_me_buffer);
+          if (me_frame != NULL) {
+            memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
+          } else {
+            dsp_getSamples(g_snes->apu->dsp, audio_buffer, samples);
+          }
+        } else {
+          dsp_getSamples(g_snes->apu->dsp, audio_buffer, samples);
+        }
       } else {
         dsp_getSamples(g_snes->apu->dsp, audio_buffer, samples);
       }
@@ -712,13 +734,22 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
     const uint64_t generate_start = sceKernelGetSystemTimeWide();
     SpcPlayer_GenerateSamples(g_spc_player);
     g_profile_audio_generate_us += sceKernelGetSystemTimeWide() - generate_start;
-
     const uint64_t dsp_start = sceKernelGetSystemTimeWide();
 
-    AudioMeWriteDspSamples(g_spc_player->dsp->sampleBuffer, 534);
-    int16_t *me_frame = AudioMeGetFrame();
-    if (me_frame != NULL) {
-      memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
+    if (g_audio_me_initialized) {
+      int rc = AudioMeEnqueueDspSamples(&g_audio_me_buffer,
+                                       g_spc_player->dsp->sampleBuffer,
+                                       534);
+      if (rc == 0) {
+        int16_t *me_frame = AudioMeGetNextFrame(&g_audio_me_buffer);
+        if (me_frame != NULL) {
+          memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
+        } else {
+          dsp_getSamples(g_spc_player->dsp, audio_buffer, samples);
+        }
+      } else {
+        dsp_getSamples(g_spc_player->dsp, audio_buffer, samples);
+      }
     } else {
       dsp_getSamples(g_spc_player->dsp, audio_buffer, samples);
     }

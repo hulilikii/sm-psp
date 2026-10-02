@@ -23,13 +23,17 @@ BUILD_PRX := 1
 EXTRA_TARGETS := EBOOT.PBP
 PSP_EBOOT_TITLE := Super Metroid PSP
 
+
 include $(PSPSDK)/lib/build.mak
 
-.PHONY: all package
+.PHONY: all package cleanbuild
 
 all: $(TARGET).prx EBOOT.PBP
 
 package: EBOOT.PBP
-	@mkdir -p PSP/GAME/SMPSP
-	cp EBOOT.PBP PSP/GAME/SMPSP/
-	cp sm.smc PSP/GAME/SMPSP/
+	@mkdir -p  Build/SMPSP
+	cp EBOOT.PBP Build/SMPSP/
+	cp sm.smc Build/SMPSP/
+	
+cleanbuild:
+	rm -rf Build

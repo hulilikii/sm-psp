@@ -140,7 +140,7 @@ static void Audio_Shutdown(void) {
 }
 
 void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
-  (void)render_flags;
+    (void)render_flags;
   const uint8 *src = g_other_image ? g_my_pixels : g_pixels;
   for (int y = 0; y < 240; ++y)
     memcpy(pixel_buffer + y * pitch, src + y * 256 * 4, 256 * 4);
