@@ -3,6 +3,7 @@
 #include "sm_rtl.h"
 #include "sm_cpu_infra.h"
 #include "types.h"
+#include "audio_me.h"
 //#include "ida_types.h"
 #include "variables.h"
 #include "funcs.h"
@@ -165,9 +166,9 @@ void RtlReset(int mode) {
   snes_reset(g_snes, true);
   if (!(mode & 1))
     memset(g_sram, 0, 0x2000);
-  
+
   coroutine_state_0 = 1;
-    
+
   RtlApuLock();
   RtlRestoreMusicAfterLoad_Locked(true);
   RtlApuUnlock();
@@ -687,6 +688,20 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
   assert(channels == 2);
   const uint64_t render_start = sceKernelGetSystemTimeWide();
   RtlApuLock();
+
+  // If ME audio is enabled and initialized, use it
+  if (AudioMeGetSharedBuffer() != NULL) {
+    int16_t *me_frame = AudioMeGetFrame();
+    if (me_frame != NULL) {
+      // Copy ME-rendered audio to output buffer
+      memcpy(audio_buffer, me_frame, samples * 2 * sizeof(int16_t));
+      RtlApuUnlock();
+      const uint64_t render_time = sceKernelGetSystemTimeWide() - render_start;
+      g_profile_audio_render_us += render_time;
+      return;
+    }
+    // Fall back to CPU rendering if ME frame not ready
+  }
 
   RtlPopApuState_Locked();
 
