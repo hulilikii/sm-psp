@@ -51,6 +51,12 @@ static uint32_t g_frame_ctr;
 static uint64_t g_profile_runframe_us;
 static uint64_t g_profile_audio_wait_us;
 static uint32_t g_profile_audio_lock_count;
+static uint32_t g_profile_audio_reqn_min;
+static uint32_t g_profile_audio_reqn_max;
+static uint32_t g_profile_audio_reqn_changes;
+static uint32_t g_profile_audio_reqn_last;
+static uint32_t g_profile_audio_reqn_values[16];
+static uint32_t g_profile_audio_reqn_counts[16];
 extern uint64_t g_profile_audio_render_us;
 extern uint64_t g_profile_audio_generate_us;
 extern uint64_t g_profile_audio_dsp_us;
@@ -85,6 +91,30 @@ static void AudioCallback(void *buf, unsigned int reqn, void *pdata) {
   (void)pdata;
   ++g_profile_audio_callback_count;
   g_profile_audio_samples += reqn;
+  if (g_profile_audio_callback_count == 1) {
+    g_profile_audio_reqn_min = reqn;
+    g_profile_audio_reqn_max = reqn;
+  } else {
+    if (reqn < g_profile_audio_reqn_min)
+      g_profile_audio_reqn_min = reqn;
+    if (reqn > g_profile_audio_reqn_max)
+      g_profile_audio_reqn_max = reqn;
+  }
+  if (g_profile_audio_callback_count > 1 && reqn != g_profile_audio_reqn_last)
+    ++g_profile_audio_reqn_changes;
+  g_profile_audio_reqn_last = reqn;
+  for (int i = 0; i < 16; i++) {
+    if (g_profile_audio_reqn_values[i] == reqn) {
+      ++g_profile_audio_reqn_counts[i];
+      goto reqn_recorded;
+    }
+    if (g_profile_audio_reqn_counts[i] == 0) {
+      g_profile_audio_reqn_values[i] = reqn;
+      g_profile_audio_reqn_counts[i] = 1;
+      goto reqn_recorded;
+    }
+  }
+reqn_recorded:
   RtlRenderAudio((int16 *)buf, (int)reqn, 2);
 }
 
@@ -213,6 +243,20 @@ int main(int argc, char **argv) {
               (double)g_profile_audio_render_us / 1000.0,
               (double)g_profile_audio_generate_us / 1000.0,
               (double)g_profile_audio_dsp_us / 1000.0);
+      fprintf(stderr,
+              "PSP profile/audio reqn: min=%u max=%u changes=%u values=",
+              (unsigned)g_profile_audio_reqn_min,
+              (unsigned)g_profile_audio_reqn_max,
+              (unsigned)g_profile_audio_reqn_changes);
+      for (int i = 0; i < 16; i++) {
+        if (g_profile_audio_reqn_counts[i] == 0)
+          break;
+        fprintf(stderr, "%s%u:%u",
+                i ? "," : "",
+                (unsigned)g_profile_audio_reqn_values[i],
+                (unsigned)g_profile_audio_reqn_counts[i]);
+      }
+      fprintf(stderr, "\n");
       g_profile_runframe_us = 0;
       g_profile_audio_wait_us = 0;
       g_profile_audio_lock_count = 0;
@@ -221,6 +265,12 @@ int main(int argc, char **argv) {
       g_profile_audio_dsp_us = 0;
       g_profile_audio_callback_count = 0;
       g_profile_audio_samples = 0;
+      g_profile_audio_reqn_min = 0;
+      g_profile_audio_reqn_max = 0;
+      g_profile_audio_reqn_changes = 0;
+      g_profile_audio_reqn_last = 0;
+      memset(g_profile_audio_reqn_values, 0, sizeof(g_profile_audio_reqn_values));
+      memset(g_profile_audio_reqn_counts, 0, sizeof(g_profile_audio_reqn_counts));
     }
 
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
