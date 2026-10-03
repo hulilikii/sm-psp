@@ -36,7 +36,7 @@ Snes* snes_init(uint8_t *ram) {
   snes->apu = apu_init();
   snes->dma = dma_init(snes);
   snes->my_ppu = ppu_init(snes);
-  snes->snes_ppu = ppu_init(snes);
+  snes->snes_ppu = ppu_init((Snes*)snes);
   snes->ppu = snes->snes_ppu;
   snes->cart = cart_init(snes);
   snes->input1 = input_init(snes);
@@ -199,7 +199,7 @@ uint8_t snes_readBBus(Snes* snes, uint8_t adr) {
 }
 
 
-#define is_uploading_apu (*(uint16_t*)(g_ram+0x617))
+#define is_uploading_apu (*(unaligned_uint16*)(g_ram+0x617))
 
 void snes_writeBBus(Snes* snes, uint8_t adr, uint8_t val) {
   if(adr < 0x40) {

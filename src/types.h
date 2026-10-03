@@ -24,6 +24,8 @@ typedef int32_t int32;
 typedef uint64_t uint64;
 typedef int64_t int64;
 typedef unsigned int uint;
+typedef uint16 unaligned_uint16 __attribute__((aligned(1), may_alias));
+typedef uint32 unaligned_uint32 __attribute__((aligned(1), may_alias));
 
 typedef uint16 VoidP;
 
@@ -64,8 +66,8 @@ static FORCEINLINE uint UintMax(uint a, uint b) { return a > b ? a : b; }
 #endif
 
 #define BYTE(x) (*(uint8*)&(x))
-#define WORD(x) (*(uint16*)&(x))
-#define DWORD(x) (*(uint32*)&(x))
+#define WORD(x) (*(unaligned_uint16*)&(x))
+#define DWORD(x) (*(unaligned_uint32*)&(x))
 #define XY(x, y) ((y)*64+(x))
 
 static inline uint16 swap16(uint16 v) { return (v << 8) | (v >> 8); }
@@ -140,7 +142,7 @@ typedef struct Rect16U {
 #define LOW_IND(x,part_type)   0
 // first unsigned macros:
 #define BYTEn(x, n)   (*((uint8*)&(x)+n))
-#define WORDn(x, n)   (*((uint16*)&(x)+n))
+#define WORDn(x, n)   (*((unaligned_uint16*)&(x)+n))
 
 #define LOBYTE(x)  BYTEn(x,LOW_IND(x,uint8))
 #define LOWORD(x)  WORDn(x,LOW_IND(x,uint16))
