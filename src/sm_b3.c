@@ -5,20 +5,20 @@
 #include "enemy_types.h"
 
 
-#define g_off_B3882B ((uint16*)RomFixedPtr(0xb3882b))
-#define g_off_B38833 ((uint16*)RomFixedPtr(0xb38833))
-#define g_word_B3949B ((uint16*)RomFixedPtr(0xb3949b))
-#define g_word_B394BB ((uint16*)RomFixedPtr(0xb394bb))
-#define g_word_B39675 ((uint16*)RomFixedPtr(0xb39675))
-#define kBotwoonHealthThresForPalChange ((uint16*)RomFixedPtr(0xb3981b))
-#define kBotwoonHealthBasedPalette ((uint16*)RomFixedPtr(0xb3971b))
-#define g_off_B3946B ((uint16*)RomFixedPtr(0xb3946b))
-#define g_off_B3948B ((uint16*)RomFixedPtr(0xb3948b))
-#define g_word_B3E718 ((uint16*)RomFixedPtr(0xb3e718))
-#define g_word_B3E71E ((uint16*)RomFixedPtr(0xb3e71e))
-#define g_off_B3E72A ((uint16*)RomFixedPtr(0xb3e72a))
-#define g_off_B3E724 ((uint16*)RomFixedPtr(0xb3e724))
-#define g_word_B3E730 ((uint16*)RomFixedPtr(0xb3e730))
+#define g_off_B3882B ((const unaligned_uint16*)RomFixedPtr(0xb3882b))
+#define g_off_B38833 ((const unaligned_uint16*)RomFixedPtr(0xb38833))
+#define g_word_B3949B ((const unaligned_uint16*)RomFixedPtr(0xb3949b))
+#define g_word_B394BB ((const unaligned_uint16*)RomFixedPtr(0xb394bb))
+#define g_word_B39675 ((const unaligned_uint16*)RomFixedPtr(0xb39675))
+#define kBotwoonHealthThresForPalChange ((const unaligned_uint16*)RomFixedPtr(0xb3981b))
+#define kBotwoonHealthBasedPalette ((const unaligned_uint16*)RomFixedPtr(0xb3971b))
+#define g_off_B3946B ((const unaligned_uint16*)RomFixedPtr(0xb3946b))
+#define g_off_B3948B ((const unaligned_uint16*)RomFixedPtr(0xb3948b))
+#define g_word_B3E718 ((const unaligned_uint16*)RomFixedPtr(0xb3e718))
+#define g_word_B3E71E ((const unaligned_uint16*)RomFixedPtr(0xb3e71e))
+#define g_off_B3E72A ((const unaligned_uint16*)RomFixedPtr(0xb3e72a))
+#define g_off_B3E724 ((const unaligned_uint16*)RomFixedPtr(0xb3e724))
+#define g_word_B3E730 ((const unaligned_uint16*)RomFixedPtr(0xb3e730))
 
 
 

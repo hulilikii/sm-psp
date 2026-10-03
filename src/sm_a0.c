@@ -5,13 +5,13 @@
 #include "funcs.h"
 #include "enemy_types.h"
 
-#define kEnemyLayerToQueuePtr ((uint16*)RomFixedPtr(0xa0b133))
-#define kStandardSpriteTiles ((uint16*)RomFixedPtr(0x9ad200))
+#define kEnemyLayerToQueuePtr ((const unaligned_uint16*)RomFixedPtr(0xa0b133))
+#define kStandardSpriteTiles ((const unaligned_uint16*)RomFixedPtr(0x9ad200))
 #define kSine8bit ((uint8*)RomFixedPtr(0xa0b143))
-#define kEquationForQuarterCircle ((uint16*)RomFixedPtr(0xa0b7ee))
-#define g_off_A0C2DA ((uint16*)RomFixedPtr(0xa0c2da))
+#define kEquationForQuarterCircle ((const unaligned_uint16*)RomFixedPtr(0xa0b7ee))
+#define g_off_A0C2DA ((const unaligned_uint16*)RomFixedPtr(0xa0c2da))
 #define CHECK_locret_A0C434(Ek) (byte_A0C435[Ek] & 0x80 ? -1 : 0)
-#define g_word_A0C49F ((uint16*)RomFixedPtr(0xa0c49f))
+#define g_word_A0C49F ((const unaligned_uint16*)RomFixedPtr(0xa0c49f))
 #define kAlignYPos_Tab0 ((uint8*)RomFixedPtr(0x948b2b))
 
 typedef struct EnemyBlockCollInfo {
@@ -363,7 +363,7 @@ void LoadEnemies(void) {  // 0xA08A1E
 
 void ClearEnemyDataAndProcessEnemySet(void) {  // 0xA08A6D
   memset(g_ram + 0xF78, 0, 2048);
-  if (*(uint16 *)RomPtr_A1(room_enemy_population_ptr) != 0xFFFF)
+  if (*(unaligned_uint16 *)RomPtr_A1(room_enemy_population_ptr) != 0xFFFF)
     ProcessEnemyTilesets();
 }
 
@@ -1910,7 +1910,7 @@ add_enemy:
 
 void DrawOneEnemy(void) {  // 0xA09423
   uint16 varE34 = 2 * gEnemyData(cur_enemy_index)->layer;
-  *(uint16 *)RomPtr_RAM(enemy_drawing_queue_sizes[varE34 >> 1] + kEnemyLayerToQueuePtr[varE34 >> 1]) = cur_enemy_index;
+  *(unaligned_uint16 *)RomPtr_RAM(enemy_drawing_queue_sizes[varE34 >> 1] + kEnemyLayerToQueuePtr[varE34 >> 1]) = cur_enemy_index;
   enemy_drawing_queue_sizes[varE34 >> 1] += 2;
 }
 
@@ -2078,7 +2078,7 @@ void EprojSamusCollDetect(void) {  // 0xA09894
 void HandleEprojCollWithSamus(uint16 k) {  // 0xA09923
   samus_invincibility_timer = 96;
   samus_knockback_timer = 5;
-  uint16 v1 = *((uint16 *)RomPtr_86(*(uint16 *)((uint8 *)eproj_id + k)) + 5);
+  uint16 v1 = *((const unaligned_uint16*)RomPtr_86(*(uint16 *)((uint8 *)eproj_id + k)) + 5);
   if (v1) {
     int v2 = k >> 1;
     eproj_instr_list_ptr[v2] = v1;

@@ -5,8 +5,8 @@
 #include "enemy_types.h"
 
 
-#define kWallSpacePirates_Palette_3 ((uint16*)RomFixedPtr(0xb28727))
-#define g_off_B2F959 ((uint16*)RomFixedPtr(0xb2f959))
+#define kWallSpacePirates_Palette_3 ((const unaligned_uint16*)RomFixedPtr(0xb28727))
+#define g_off_B2F959 ((const unaligned_uint16*)RomFixedPtr(0xb2f959))
 
 
 
@@ -174,7 +174,7 @@ const uint16 *SpacePirates_Instr_PrepareWallJumpL(uint16 k, const uint16 *jp) { 
 
 const uint16 *SpacePirates_Instr_FireLaserL(uint16 k, const uint16 *jp) {  // 0xB2EF2A
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
-  eproj_init_param_1 = *((uint16 *)RomPtr_A0(E->base.enemy_ptr) + 3);
+  eproj_init_param_1 = *((const unaligned_uint16*)RomPtr_A0(E->base.enemy_ptr) + 3);
   eproj_spawn_pt = (Point16U){ E->base.x_pos - 24, E->base.y_pos - 16 };
   eproj_spawn_r22 = 0;
   SpawnEprojWithRoomGfx(addr_stru_86A17B, 0);

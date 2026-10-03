@@ -129,7 +129,7 @@ PairU16 PalInstr_Delete(uint16 k, uint16 j) {  // 0x8DC5CF
 }
 
 PairU16 PalInstr_SetPreInstr(uint16 k, uint16 j) {  // 0x8DC5D4
-  palettefx_pre_instr[k >> 1] = *(uint16 *)RomPtr_8D(j);
+  palettefx_pre_instr[k >> 1] = *(unaligned_uint16 *)RomPtr_8D(j);
   return MakePairU16(k, j + 2);
 }
 
@@ -139,7 +139,7 @@ PairU16 PalInstr_ClearPreInstr(uint16 k, uint16 j) {  // 0x8DC5DD
 }
 
 PairU16 PalInstr_Goto(uint16 k, uint16 j) {  // 0x8DC61E
-  uint16 v2 = *(uint16 *)RomPtr_8D(j);
+  uint16 v2 = *(unaligned_uint16 *)RomPtr_8D(j);
   return MakePairU16(k, v2);
 }
 
@@ -159,7 +159,7 @@ PairU16 PalInstr_SetTimer(uint16 k, uint16 j) {  // 0x8DC648
 }
 
 PairU16 PalInstr_SetColorIndex(uint16 k, uint16 j) {  // 0x8DC655
-  palettefx_color_indexes[k >> 1] = *(uint16 *)RomPtr_8D(j);
+  palettefx_color_indexes[k >> 1] = *(unaligned_uint16 *)RomPtr_8D(j);
   return MakePairU16(k, j + 2);
 }
 

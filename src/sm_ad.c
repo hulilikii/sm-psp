@@ -4,14 +4,14 @@
 #include "enemy_types.h"
 
 
-#define kMotherBrain_HealthBasedPalettes_Brain ((uint16*)RomFixedPtr(0xade6a2))
-#define kMotherBrain_HealthBasedPalettes_BackLeg ((uint16*)RomFixedPtr(0xade742))
-#define kMotherBrain_FadePalToBlack ((uint16*)RomFixedPtr(0xade9e8))
-#define kMotherBrain_TransitionToFromGrey_Incr ((uint16*)RomFixedPtr(0xaded8a))
-#define kMotherBrain_TransitionToFromGrey_Decr ((uint16*)RomFixedPtr(0xaded9c))
-#define kMotherBrain_FadeToGray_Drained ((uint16*)RomFixedPtr(0xadef87))
-#define kMotherBrain_FadeToGray_RealDeath ((uint16*)RomFixedPtr(0xadf107))
-#define kMotherBrain_Phase3_TurnLightsBackOn ((uint16*)RomFixedPtr(0xadf273))
+#define kMotherBrain_HealthBasedPalettes_Brain ((const unaligned_uint16*)RomFixedPtr(0xade6a2))
+#define kMotherBrain_HealthBasedPalettes_BackLeg ((const unaligned_uint16*)RomFixedPtr(0xade742))
+#define kMotherBrain_FadePalToBlack ((const unaligned_uint16*)RomFixedPtr(0xade9e8))
+#define kMotherBrain_TransitionToFromGrey_Incr ((const unaligned_uint16*)RomFixedPtr(0xaded8a))
+#define kMotherBrain_TransitionToFromGrey_Decr ((const unaligned_uint16*)RomFixedPtr(0xaded9c))
+#define kMotherBrain_FadeToGray_Drained ((const unaligned_uint16*)RomFixedPtr(0xadef87))
+#define kMotherBrain_FadeToGray_RealDeath ((const unaligned_uint16*)RomFixedPtr(0xadf107))
+#define kMotherBrain_Phase3_TurnLightsBackOn ((const unaligned_uint16*)RomFixedPtr(0xadf273))
 
 void nullsub_341(void) {}
 
@@ -28,7 +28,7 @@ void MotherBrain_CalcHdma(void) {  // 0xADDE00
   uint16 r18 = HIBYTE(E->mbn_var_33) >> 1;
   E->mbn_var_3A = E->mbn_var_31 - r18;
   E->mbn_var_3B = r18 + E->mbn_var_31;
-  uint16 v2 = (*(uint16 *)((uint8 *)&E1->base.enemy_ptr + 1) + 3584) & 0xFF00;
+  uint16 v2 = (*(unaligned_uint16 *)((uint8*)&E1->base.enemy_ptr  + 1) + 3584) & 0xFF00;
   E->mbn_var_3C = v2;
   E->mbn_var_3E = v2;
   uint16 v3 = E1->base.y_pos + 5;
@@ -386,7 +386,7 @@ uint8 MotherBrain_FadeFromGray_Drained(uint16 a) {  // 0xADEF0D
   WriteColorsToPalette(0x82, 0xad, j, 13);
   WriteColorsToPalette(0x122, 0xad, j, 13);
   WriteColorsToPalette(0x168, 0xad, j + 26, 5);
-  *(uint16 *)&g_ram[0x17C] = *(uint16 *)RomPtr_AD(j + 36);
+  *(uint16 *)&g_ram[0x17C] = *(unaligned_uint16 *)RomPtr_AD(j + 36);
   return 0;
 }
 
@@ -398,7 +398,7 @@ uint8 MotherBrain_FadeToGray_Drained(uint16 a) {  // 0xADEF4A
   WriteColorsToPalette(0x82, 0xad, j, 15);
   WriteColorsToPalette(0x122, 0xad, j, 15);
   WriteColorsToPalette(0x168, 0xad, j + 30, 5);
-  *(uint16 *)&g_ram[0x17C] = *(uint16 *)RomPtr_AD(j + 40);
+  *(uint16 *)&g_ram[0x17C] = *(unaligned_uint16 *)RomPtr_AD(j + 40);
   return 0;
 }
 

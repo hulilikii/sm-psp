@@ -5,7 +5,7 @@
 #include "enemy_types.h"
 
 
-#define kCreateSprite_Ilists ((uint16*)RomFixedPtr(0xb4bda8))
+#define kCreateSprite_Ilists ((const unaligned_uint16*)RomFixedPtr(0xb4bda8))
 
 
 
@@ -27,7 +27,7 @@ uint16 CreateSpriteAtPos(uint16 x_r18, uint16 y_r20, uint16 ilist_r22, uint16 pa
   sprite_palettes[v1] = pal_r24;
   uint16 v2 = kCreateSprite_Ilists[ilist_r22];
   sprite_instr_list_ptrs[v1] = v2;
-  sprite_instr_timer[v1] = *(uint16 *)RomPtr_B4(v2);
+  sprite_instr_timer[v1] = *(unaligned_uint16 *)RomPtr_B4(v2);
 //  R18 = v0;
   return v0;
 }
@@ -63,7 +63,7 @@ BREAKLABEL:
     if (v1 == 1) {
       uint16 v3 = sprite_instr_list_ptrs[v0] + 4;
       sprite_instr_list_ptrs[v0] = v3;
-      v1 = *(uint16 *)RomPtr_B4(v3);
+      v1 = *(unaligned_uint16 *)RomPtr_B4(v3);
       if (sign16(v1))
         goto BREAKLABEL;
       sprite_instr_timer[sprite_object_index >> 1] = v1;

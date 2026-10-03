@@ -6,13 +6,13 @@
 #include "funcs.h"
 
 #define kSamusFramesForUnderwaterSfx ((uint8*)RomFixedPtr(0x90a514))
-#define kPauseMenuMapData ((uint16*)RomFixedPtr(0x829717))
+#define kPauseMenuMapData ((const unaligned_uint16*)RomFixedPtr(0x829717))
 #define kPauseMenuMapTilemaps ((LongPtr*)RomFixedPtr(0x82964a))
-#define kBeamTilePtrs ((uint16*)RomFixedPtr(0x90c3b1))
-#define kBeamPalettePtrs ((uint16*)RomFixedPtr(0x90c3c9))
-#define off_90B5BB ((uint16*)RomFixedPtr(0x90b5bb))
-#define off_90B609 ((uint16*)RomFixedPtr(0x90b609))
-#define kFlareAnimDelays ((uint16*)RomFixedPtr(0x90c481))
+#define kBeamTilePtrs ((const unaligned_uint16*)RomFixedPtr(0x90c3b1))
+#define kBeamPalettePtrs ((const unaligned_uint16*)RomFixedPtr(0x90c3c9))
+#define off_90B5BB ((const unaligned_uint16*)RomFixedPtr(0x90b5bb))
+#define off_90B609 ((const unaligned_uint16*)RomFixedPtr(0x90b609))
+#define kFlareAnimDelays ((const unaligned_uint16*)RomFixedPtr(0x90c481))
 
 static Pair_Bool_Amt Samus_CalcBaseSpeed_NoDecel_X(uint16 k);
 
@@ -331,7 +331,7 @@ static Func_AnimDelay *const kAnimDelayFuncs[16] = {  // 0x9082DC
 };
 
 
-#define kDefaultAnimFramePtr ((uint16 *)RomFixedPtr(0x91B5D1))
+#define kDefaultAnimFramePtr ((const unaligned_uint16*)RomFixedPtr(0x91B5D1))
 
 static uint8 Samus_HandleSpeedBoosterAnimDelay(const uint8 *jp) {  // 0x90852C
   if (!samus_has_momentum_flag || (button_config_run_b & joypad1_lastkeys) == 0 || samus_movement_type != 1)
@@ -673,10 +673,10 @@ void HandleAtmosphericEffects(void) {
       if (v4 < 0) {
         if (v4 != (int16)0x8000)
           continue;
-        atmospheric_gfx_anim_timer[v1] = *(uint16 *)RomPtr_90(r18 + kAtmosphericGraphicAnimationTimers[v3 >> 1]);
+        atmospheric_gfx_anim_timer[v1] = *(unaligned_uint16 *)RomPtr_90(r18 + kAtmosphericGraphicAnimationTimers[v3 >> 1]);
       }
     } else {
-      atmospheric_gfx_anim_timer[v1] = *(uint16 *)RomPtr_90(r18 + kAtmosphericGraphicAnimationTimers[v3 >> 1]);
+      atmospheric_gfx_anim_timer[v1] = *(unaligned_uint16 *)RomPtr_90(r18 + kAtmosphericGraphicAnimationTimers[v3 >> 1]);
       uint16 v5 = atmospheric_gfx_frame_and_type[v1] + 1;
       atmospheric_gfx_frame_and_type[v1] = v5;
       if ((int16)((uint8)v5 - kAtmosphericTypeNumFrames[v3 >> 1]) >= 0) {
@@ -705,7 +705,7 @@ void AtmosphericTypeFunc_1_FootstepSplash(uint16 k, uint16 j) {  // 0x908AC5
       if (v6 >= 0) {
         if (sign16(atmospheric_gfx_y_pos[v2] - layer1_y_pos - 260)) {
           v5->ycoord = v6;
-          *(uint16 *)&v5->charnum = *(uint16 *)RomPtr_90(r18 + g_off_908BFF[k >> 1]);
+          *(uint16 *)&v5->charnum = *(unaligned_uint16 *)RomPtr_90(r18 + g_off_908BFF[k >> 1]);
           oam_next_ptr = v3 + 4;
         }
       }
@@ -1916,12 +1916,12 @@ void Samus_Movement_03_SpinJumping(void) {  // 0x90A436
       if (samus_y_dir != 2)
         goto LABEL_24;
       if (liquid_physics_type) {
-        if ((int16)(*(uint16 *)((uint8 *)&samus_y_subspeed + 1) - kSamusPhys_JumpMinYVelWater) < 0
-          || (int16)(*(uint16 *)((uint8 *)&samus_y_subspeed + 1) - kSamusPhys_JumpMaxYVelWater) >= 0) {
+        if ((int16)(*(unaligned_uint16 *)((uint8*)&samus_y_subspeed  + 1) - kSamusPhys_JumpMinYVelWater) < 0
+          || (int16)(*(unaligned_uint16 *)((uint8*)&samus_y_subspeed  + 1) - kSamusPhys_JumpMaxYVelWater) >= 0) {
           goto LABEL_24;
         }
-      } else if ((int16)(*(uint16 *)((uint8 *)&samus_y_subspeed + 1) - kSamusPhys_JumpMinYVelAir) < 0
-        || (int16)(*(uint16 *)((uint8 *)&samus_y_subspeed + 1) - kSamusPhys_JumpMaxYVelAir) >= 0) {
+      } else if ((int16)(*(unaligned_uint16 *)((uint8*)&samus_y_subspeed  + 1) - kSamusPhys_JumpMinYVelAir) < 0
+        || (int16)(*(unaligned_uint16 *)((uint8*)&samus_y_subspeed  + 1) - kSamusPhys_JumpMaxYVelAir) >= 0) {
         goto LABEL_24;
       }
       UNUSED_word_7E0DFA = UNUSED_word_7E0DFA & 0xFF00 | 1;
@@ -2979,7 +2979,7 @@ void InitializeProjectileSpeed(uint16 k, uint16 r22) {  // 0x90B1F3
   case 0:
   case 18: {
     if ((uint8)projectile_init_speed_samus_moved_up)
-      r18 = (*(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_right_fract + 1) >> 2) | 0xC000;
+      r18 = (*(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_right_fract  + 1) >> 2) | 0xC000;
     else
       r18 = 0;
     projectile_bomb_y_speed[kh] = r18 - r22;
@@ -2988,46 +2988,46 @@ void InitializeProjectileSpeed(uint16 k, uint16 r22) {  // 0x90B1F3
   }
   case 2: {
     if ((uint8)projectile_init_speed_samus_moved_up)
-      r18 = (*(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_right_fract + 1) >> 2) | 0xC000;
+      r18 = (*(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_right_fract  + 1) >> 2) | 0xC000;
     else
       r18 = 0;
     projectile_bomb_y_speed[kh] = r18 - r22;
-    projectile_bomb_x_speed[kh] = *(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_left_fract + 1) + r22;
+    projectile_bomb_x_speed[kh] = *(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_left_fract  + 1) + r22;
     break;
   }
   case 4: {
     projectile_bomb_y_speed[kh] = 0;
-    projectile_bomb_x_speed[kh] = *(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_left_fract + 1) + r22;
+    projectile_bomb_x_speed[kh] = *(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_left_fract  + 1) + r22;
     break;
   }
   case 6: {
-    projectile_bomb_y_speed[kh] = *(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_up_fract + 1) + r22;
-    projectile_bomb_x_speed[kh] = *(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_left_fract + 1) + r22;
+    projectile_bomb_y_speed[kh] = *(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_up_fract  + 1) + r22;
+    projectile_bomb_x_speed[kh] = *(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_left_fract  + 1) + r22;
     break;
   }
   case 8:
   case 10: {
-    projectile_bomb_y_speed[kh] = *(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_up_fract + 1) + r22;
+    projectile_bomb_y_speed[kh] = *(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_up_fract  + 1) + r22;
     projectile_bomb_x_speed[kh] = 0;
     break;
   }
   case 12: {
-    projectile_bomb_y_speed[kh] = *(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_up_fract + 1) + r22;
-    projectile_bomb_x_speed[kh] = *(uint16 *)((uint8 *)&absolute_moved_last_frame_y_fract + 1) - r22;
+    projectile_bomb_y_speed[kh] = *(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_up_fract  + 1) + r22;
+    projectile_bomb_x_speed[kh] = *(unaligned_uint16 *)((uint8*)&absolute_moved_last_frame_y_fract  + 1) - r22;
     break;
   }
   case 14: {
     projectile_bomb_y_speed[kh] = 0;
-    projectile_bomb_x_speed[kh] = *(uint16 *)((uint8 *)&absolute_moved_last_frame_y_fract + 1) - r22;
+    projectile_bomb_x_speed[kh] = *(unaligned_uint16 *)((uint8*)&absolute_moved_last_frame_y_fract  + 1) - r22;
     break;
   }
   case 16: {
     if ((uint8)projectile_init_speed_samus_moved_up)
-      r18 = (*(uint16 *)((uint8 *)&projectile_init_speed_samus_moved_right_fract + 1) >> 2) | 0xC000;
+      r18 = (*(unaligned_uint16 *)((uint8*)&projectile_init_speed_samus_moved_right_fract  + 1) >> 2) | 0xC000;
     else
       r18 = 0;
     projectile_bomb_y_speed[kh] = r18 - r22;
-    projectile_bomb_x_speed[kh] = *(uint16 *)((uint8 *)&absolute_moved_last_frame_y_fract + 1) - r22;
+    projectile_bomb_x_speed[kh] = *(unaligned_uint16 *)((uint8*)&absolute_moved_last_frame_y_fract  + 1) - r22;
     break;
   }
   default:
@@ -3251,7 +3251,7 @@ LABEL_14:;
         v19 = v0 >> 1;
         projectiletrail_right_instr_timer[v19] = v18;
         if (v18) {
-          projectiletrail_right_tile_and_attribs[v19] = *((uint16 *)RomPtr_90(j) + 1);
+          projectiletrail_right_tile_and_attribs[v19] = *((const unaligned_uint16*)RomPtr_90(j) + 1);
           projectiletrail_right_instr_list_ptr[v19] = j + 4;
 LABEL_21:;
           uint16 v20 = oam_next_ptr;
@@ -3275,7 +3275,7 @@ LABEL_21:;
       if ((v0 & 0x8000) != 0)
         return;
     }
-    projectiletrail_left_tile_and_attribs[v7] = *((uint16 *)RomPtr_90(i) + 1);
+    projectiletrail_left_tile_and_attribs[v7] = *((const unaligned_uint16*)RomPtr_90(i) + 1);
     projectiletrail_left_instr_list_ptr[v7] = i + 4;
 LABEL_10:;
     uint16 v8 = oam_next_ptr;
@@ -4227,7 +4227,7 @@ void Samus_ArmCannon_Draw(void) {  // 0x90C663
     uint16 v14 = vram_write_queue_tail;
     gVramWriteEntry(vram_write_queue_tail)->size = 32;
     v14 += 2;
-    uint16 v15 = *(uint16 *)RomPtr_90(v13);
+    uint16 v15 = *(unaligned_uint16 *)RomPtr_90(v13);
     gVramWriteEntry(v14)->size = v15;
     v14 += 2;
     LOBYTE(gVramWriteEntry(v14++)->size) = -102;

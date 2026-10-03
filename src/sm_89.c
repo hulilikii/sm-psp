@@ -5,11 +5,11 @@
 #include "funcs.h"
 
 
-#define g_word_89AA02 ((uint16*)RomFixedPtr(0x89aa02))
-#define kFxTypeTilemapPtrs ((uint16*)RomFixedPtr(0x83abf0))
-#define kAreaPalFxListPointers ((uint16*)RomFixedPtr(0x83ac46))
-#define kAreaAnimtilesListPtrs ((uint16*)RomFixedPtr(0x83ac56))
-#define g_word_89AD5F ((uint16*)RomFixedPtr(0x89ad5f))
+#define g_word_89AA02 ((const unaligned_uint16*)RomFixedPtr(0x89aa02))
+#define kFxTypeTilemapPtrs ((const unaligned_uint16*)RomFixedPtr(0x83abf0))
+#define kAreaPalFxListPointers ((const unaligned_uint16*)RomFixedPtr(0x83ac46))
+#define kAreaAnimtilesListPtrs ((const unaligned_uint16*)RomFixedPtr(0x83ac56))
+#define g_word_89AD5F ((const unaligned_uint16*)RomFixedPtr(0x89ad5f))
 
 
 

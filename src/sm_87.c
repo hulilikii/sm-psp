@@ -99,7 +99,7 @@ void ProcessAnimtilesObject(void) {  // 0x878085
     }
     int v6 = v0 >> 1;
     animtiles_instr_timers[v6] = v5;
-    animtiles_src_ptr[v6] = *((uint16 *)RomPtr_87(v3) + 1);
+    animtiles_src_ptr[v6] = *((const unaligned_uint16*)RomPtr_87(v3) + 1);
     animtiles_instr_list_ptrs[v6] = v3 + 4;
   }
 }
@@ -110,7 +110,7 @@ uint16 AnimtilesInstr_Delete(uint16 k, uint16 j) {  // 0x8780B2
 }
 
 uint16 AnimtilesInstr_Goto(uint16 k, uint16 j) {  // 0x8780B7
-  return *(uint16 *)RomPtr_87(j);
+  return *(unaligned_uint16 *)RomPtr_87(j);
 }
 
 uint16 AnimtilesInstr_GotoRel(uint16 k, uint16 j) {  // 0x8780BC
@@ -238,17 +238,17 @@ uint16 AnimtilesInstr_GotoIfTourianStatueBusy(uint16 k, uint16 j) {  // 0x87833E
 }
 
 uint16 AnimtilesInstr_TourianStatueSetState(uint16 k, uint16 j) {  // 0x878349
-  tourian_entrance_statue_animstate |= *(uint16 *)RomPtr_87(j);
+  tourian_entrance_statue_animstate |= *(unaligned_uint16 *)RomPtr_87(j);
   return j + 2;
 }
 
 uint16 AnimtilesInstr_TourianStatueClearState(uint16 k, uint16 j) {  // 0x878352
-  tourian_entrance_statue_animstate &= ~*(uint16 *)RomPtr_87(j);
+  tourian_entrance_statue_animstate &= ~*(unaligned_uint16 *)RomPtr_87(j);
   return j + 2;
 }
 
 uint16 AnimtilesInstr_Clear3PaletteColors(uint16 k, uint16 j) {  // 0x87835B
-  int v2 = *(uint16 *)RomPtr_87(j) >> 1;
+  int v2 = *(unaligned_uint16 *)RomPtr_87(j) >> 1;
   palette_buffer[v2] = 0;
   palette_buffer[v2 + 1] = 0;
   palette_buffer[v2 + 2] = 0;
@@ -264,7 +264,7 @@ uint16 AnimtilesInstr_SpawnPalfxObj(uint16 k, uint16 j) {  // 0x878372
 uint16 AnimtilesInstr_Write8PaletteColors(uint16 k, uint16 j) {  // 0x87837F
   static const uint16 kAnimtilesInstr_Write8PaletteColors[8] = { 0x3800, 0x7f58, 0x6ed5, 0x5a71, 0x49ee, 0x356a, 0x24e7, 0x1083 };
 
-  uint16 v2 = *(uint16 *)RomPtr_87(j);
+  uint16 v2 = *(unaligned_uint16 *)RomPtr_87(j);
   for (int i = 0; i != 16; i += 2) {
     target_palettes[v2 >> 1] = kAnimtilesInstr_Write8PaletteColors[i >> 1];
     v2 += 2;

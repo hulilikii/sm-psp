@@ -5,29 +5,29 @@
 #include "enemy_types.h"
 
 
-#define g_off_AAC967 ((uint16*)RomFixedPtr(0xaac967))
-#define g_off_AAD810 ((uint16*)RomFixedPtr(0xaad810))
-#define g_word_AAD765 ((uint16*)RomFixedPtr(0xaad765))
-#define g_word_AAD785 ((uint16*)RomFixedPtr(0xaad785))
-#define g_off_AADF13 ((uint16*)RomFixedPtr(0xaadf13))
-#define g_off_AADF21 ((uint16*)RomFixedPtr(0xaadf21))
-#define kSine ((uint16*)RomFixedPtr(0xaae0bd))
-#define kCosine ((uint16*)RomFixedPtr(0xaae13d))
-#define kNegativeSine ((uint16*)RomFixedPtr(0xaae1bd))
-#define kNegativeCosine_0 ((uint16*)RomFixedPtr(0xaae23d))
-#define kNegativeCosine ((uint16*)RomFixedPtr(0xaae03d))
-#define g_off_AADD15 ((uint16*)RomFixedPtr(0xaadd15))
-#define g_word_AADE95 ((uint16*)RomFixedPtr(0xaade95))
-#define g_word_AADEA3 ((uint16*)RomFixedPtr(0xaadea3))
-#define g_word_AADEB1 ((uint16*)RomFixedPtr(0xaadeb1))
-#define g_off_AADEDB ((uint16*)RomFixedPtr(0xaadedb))
-#define g_word_AADEF7 ((uint16*)RomFixedPtr(0xaadef7))
-#define g_word_AADECD ((uint16*)RomFixedPtr(0xaadecd))
-#define g_word_AAE630 ((uint16*)RomFixedPtr(0xaae630))
-#define g_word_AAE670 ((uint16*)RomFixedPtr(0xaae670))
-#define g_word_AAE6B0 ((uint16*)RomFixedPtr(0xaae6b0))
-#define kN00bTubeCracks_Palette2 ((uint16*)RomFixedPtr(0xaae2dd))
-#define g_off_AAE7A2 ((uint16*)RomFixedPtr(0xaae7a2))
+#define g_off_AAC967 ((const unaligned_uint16*)RomFixedPtr(0xaac967))
+#define g_off_AAD810 ((const unaligned_uint16*)RomFixedPtr(0xaad810))
+#define g_word_AAD765 ((const unaligned_uint16*)RomFixedPtr(0xaad765))
+#define g_word_AAD785 ((const unaligned_uint16*)RomFixedPtr(0xaad785))
+#define g_off_AADF13 ((const unaligned_uint16*)RomFixedPtr(0xaadf13))
+#define g_off_AADF21 ((const unaligned_uint16*)RomFixedPtr(0xaadf21))
+#define kSine ((const unaligned_uint16*)RomFixedPtr(0xaae0bd))
+#define kCosine ((const unaligned_uint16*)RomFixedPtr(0xaae13d))
+#define kNegativeSine ((const unaligned_uint16*)RomFixedPtr(0xaae1bd))
+#define kNegativeCosine_0 ((const unaligned_uint16*)RomFixedPtr(0xaae23d))
+#define kNegativeCosine ((const unaligned_uint16*)RomFixedPtr(0xaae03d))
+#define g_off_AADD15 ((const unaligned_uint16*)RomFixedPtr(0xaadd15))
+#define g_word_AADE95 ((const unaligned_uint16*)RomFixedPtr(0xaade95))
+#define g_word_AADEA3 ((const unaligned_uint16*)RomFixedPtr(0xaadea3))
+#define g_word_AADEB1 ((const unaligned_uint16*)RomFixedPtr(0xaadeb1))
+#define g_off_AADEDB ((const unaligned_uint16*)RomFixedPtr(0xaadedb))
+#define g_word_AADEF7 ((const unaligned_uint16*)RomFixedPtr(0xaadef7))
+#define g_word_AADECD ((const unaligned_uint16*)RomFixedPtr(0xaadecd))
+#define g_word_AAE630 ((const unaligned_uint16*)RomFixedPtr(0xaae630))
+#define g_word_AAE670 ((const unaligned_uint16*)RomFixedPtr(0xaae670))
+#define g_word_AAE6B0 ((const unaligned_uint16*)RomFixedPtr(0xaae6b0))
+#define kN00bTubeCracks_Palette2 ((const unaligned_uint16*)RomFixedPtr(0xaae2dd))
+#define g_off_AAE7A2 ((const unaligned_uint16*)RomFixedPtr(0xaae7a2))
 
 
 
@@ -1123,12 +1123,12 @@ const uint16 *Shaktool_Instr_3(uint16 k, const uint16 *jp) {  // 0xAAD93F
 
 const uint16 *Shaktool_Instr_4(uint16 k, const uint16 *jp) {  // 0xAAD94A
   Enemy_Shaktool *E = Get_Shaktool(k);
-  return Shaktool_D956(k, jp, *(uint16 *)((uint8 *)&E->shakt_var_A + 1) ^ 0x80);
+  return Shaktool_D956(k, jp, *(unaligned_uint16 *)((uint8*)&E->shakt_var_A  + 1) ^ 0x80);
 }
 
 const uint16 *Shaktool_Instr_5(uint16 k, const uint16 *jp) {  // 0xAAD953
   Enemy_Shaktool *E = Get_Shaktool(k);
-  return Shaktool_D956(k, jp, *(uint16 *)((uint8 *)&E->shakt_var_A + 1));
+  return Shaktool_D956(k, jp, *(unaligned_uint16 *)((uint8*)&E->shakt_var_A  + 1));
 }
 
 const uint16 *Shaktool_D956(uint16 k, const uint16 *jp, uint16 a) {  // 0xAAD956

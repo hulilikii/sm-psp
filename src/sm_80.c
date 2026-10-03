@@ -9,9 +9,9 @@
 
 
 #define kMusicPointers (*(LongPtr*)RomFixedPtr(0x8fe7e1))
-#define kTimerDigitsSpritemapPtr ((uint16*)RomFixedPtr(0x809fd4))
-#define kLoadStationLists ((uint16*)RomFixedPtr(0x80c4b5))
-#define off_80CD46 ((uint16*)RomFixedPtr(0x80cd46))
+#define kTimerDigitsSpritemapPtr ((const unaligned_uint16*)RomFixedPtr(0x809fd4))
+#define kLoadStationLists ((const unaligned_uint16*)RomFixedPtr(0x80c4b5))
+#define off_80CD46 ((const unaligned_uint16*)RomFixedPtr(0x80cd46))
 
 void APU_UploadBank(uint32 addr) {  // 0x808028
   if (!g_use_my_apu_code)

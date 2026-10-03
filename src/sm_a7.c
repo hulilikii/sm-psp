@@ -7,43 +7,43 @@
 
 #undef r18
 
-#define kKraid_Palette2 ((uint16*)RomFixedPtr(0xa786c7))
-#define kKraid_Palette2 ((uint16*)RomFixedPtr(0xa786c7))
-#define kKraid_BgTargetPalette3 ((uint16*)RomFixedPtr(0xa7aaa6))
-#define g_word_A7ACB3 ((uint16*)RomFixedPtr(0xa7acb3))
+#define kKraid_Palette2 ((const unaligned_uint16*)RomFixedPtr(0xa786c7))
+#define kKraid_Palette2 ((const unaligned_uint16*)RomFixedPtr(0xa786c7))
+#define kKraid_BgTargetPalette3 ((const unaligned_uint16*)RomFixedPtr(0xa7aaa6))
+#define g_word_A7ACB3 ((const unaligned_uint16*)RomFixedPtr(0xa7acb3))
 #define g_stru_A796D2 (*(KraidInstrList*)RomFixedPtr(0xa796d2))
 #define g_stru_A796DA (*(KraidInstrList*)RomFixedPtr(0xa796da))
-#define g_word_A7B161 ((uint16*)RomFixedPtr(0xa7b161))
-#define kKraid_BgPalette7 ((uint16*)RomFixedPtr(0xa7b3d3))
-#define kKraid_BgPalette7_KraidDeath ((uint16*)RomFixedPtr(0xa7b4f3))
-#define kKraid_SprPalette7_KraidDeath ((uint16*)RomFixedPtr(0xa7b513))
+#define g_word_A7B161 ((const unaligned_uint16*)RomFixedPtr(0xa7b161))
+#define kKraid_BgPalette7 ((const unaligned_uint16*)RomFixedPtr(0xa7b3d3))
+#define kKraid_BgPalette7_KraidDeath ((const unaligned_uint16*)RomFixedPtr(0xa7b4f3))
+#define kKraid_SprPalette7_KraidDeath ((const unaligned_uint16*)RomFixedPtr(0xa7b513))
 #define g_stru_A7974A ((KraidInstrList*)RomFixedPtr(0xa7974a))
 #define g_stru_A79764 ((KraidInstrList*)RomFixedPtr(0xa79764))
 #define g_stru_A792B7 (*(Hitbox*)RomFixedPtr(0xa792b7))
-#define g_word_A7BA7D ((uint16*)RomFixedPtr(0xa7ba7d))
-#define g_word_A7BC65 ((uint16*)RomFixedPtr(0xa7bc65))
+#define g_word_A7BA7D ((const unaligned_uint16*)RomFixedPtr(0xa7ba7d))
+#define g_word_A7BC65 ((const unaligned_uint16*)RomFixedPtr(0xa7bc65))
 #define kKraid_Ilist_8B0A (*(SpriteDrawInstr*)RomFixedPtr(0xa78b0a))
-#define g_off_A7BE3E ((uint16*)RomFixedPtr(0xa7be3e))
-#define g_off_A7BE46 ((uint16*)RomFixedPtr(0xa7be46))
-#define g_word_A7BF1D ((uint16*)RomFixedPtr(0xa7bf1d))
+#define g_off_A7BE3E ((const unaligned_uint16*)RomFixedPtr(0xa7be3e))
+#define g_off_A7BE46 ((const unaligned_uint16*)RomFixedPtr(0xa7be46))
+#define g_word_A7BF1D ((const unaligned_uint16*)RomFixedPtr(0xa7bf1d))
 #define kKraidSinkEntry ((KraidSinkTable*)RomFixedPtr(0xa7c5e7))
-#define g_off_A7CE8E ((uint16*)RomFixedPtr(0xa7ce8e))
-#define g_word_A7CDED ((uint16*)RomFixedPtr(0xa7cded))
+#define g_off_A7CE8E ((const unaligned_uint16*)RomFixedPtr(0xa7ce8e))
+#define g_word_A7CDED ((const unaligned_uint16*)RomFixedPtr(0xa7cded))
 #define g_stru_A7902D ((ExtendedSpriteMap*)RomFixedPtr(0xa7902d))
 #define g_byte_A7CFC2 ((uint8*)RomFixedPtr(0xa7cfc2))
-#define g_off_A7CCFD ((uint16*)RomFixedPtr(0xa7ccfd))
-#define g_word_A7CD41 ((uint16*)RomFixedPtr(0xa7cd41))
-#define g_word_A7CD53 ((uint16*)RomFixedPtr(0xa7cd53))
-#define g_word_A7CD63 ((uint16*)RomFixedPtr(0xa7cd63))
-#define g_off_A7D40D ((uint16*)RomFixedPtr(0xa7d40d))
-#define g_word_A7CDAD ((uint16*)RomFixedPtr(0xa7cdad))
+#define g_off_A7CCFD ((const unaligned_uint16*)RomFixedPtr(0xa7ccfd))
+#define g_word_A7CD41 ((const unaligned_uint16*)RomFixedPtr(0xa7cd41))
+#define g_word_A7CD53 ((const unaligned_uint16*)RomFixedPtr(0xa7cd53))
+#define g_word_A7CD63 ((const unaligned_uint16*)RomFixedPtr(0xa7cd63))
+#define g_off_A7D40D ((const unaligned_uint16*)RomFixedPtr(0xa7d40d))
+#define g_word_A7CDAD ((const unaligned_uint16*)RomFixedPtr(0xa7cdad))
 #define g_byte_A7DA1D ((uint8*)RomFixedPtr(0xa7da1d))
-#define g_off_A7DC4A ((uint16*)RomFixedPtr(0xa7dc4a))
-#define g_off_A7F787 ((uint16*)RomFixedPtr(0xa7f787))
-#define g_off_A7F92D ((uint16*)RomFixedPtr(0xa7f92d))
-#define g_word_A7CA41 ((uint16*)RomFixedPtr(0xa7ca41))
-#define g_word_A7CA61 ((uint16*)RomFixedPtr(0xa7ca61))
-#define g_off_A7F55F ((uint16*)RomFixedPtr(0xa7f55f))
+#define g_off_A7DC4A ((const unaligned_uint16*)RomFixedPtr(0xa7dc4a))
+#define g_off_A7F787 ((const unaligned_uint16*)RomFixedPtr(0xa7f787))
+#define g_off_A7F92D ((const unaligned_uint16*)RomFixedPtr(0xa7f92d))
+#define g_word_A7CA41 ((const unaligned_uint16*)RomFixedPtr(0xa7ca41))
+#define g_word_A7CA61 ((const unaligned_uint16*)RomFixedPtr(0xa7ca61))
+#define g_off_A7F55F ((const unaligned_uint16*)RomFixedPtr(0xa7f55f))
 
 static const uint16 g_word_A7A916 = 0x120;
 static const uint16 g_word_A7A918 = 0xa0;
@@ -1289,7 +1289,7 @@ void Kraid_Main_AttackWithMouthOpen(void) {  // 0xA7BBEA
       E->kraid_mouth_flags = 0;
     }
   } else {
-    if (*((uint16 *)RomPtr_A7(E->kraid_var_B - 8) + 1) == addr_kKraidTilemaps_3 && (E->kraid_var_C & 0xF) == 0) {
+    if (*((const unaligned_uint16*)RomPtr_A7(E->kraid_var_B - 8) + 1) == addr_kKraidTilemaps_3 && (E->kraid_var_C & 0xF) == 0) {
       SpawnEprojWithGfx(g_word_A7BC65[(random_number & 0xE) >> 1], random_number & 0xE, addr_kEproj_RocksKraidSpits);
       QueueSfx3_Max6(0x1E);
     }
@@ -1489,7 +1489,7 @@ void Kraid_HandleFirstPhase(void) {  // 0xA7C005
     E0->kraid_var_A = FUNC16(KraidEnemy_ProcessInstrEnemyTimer);
     E0->kraid_var_F = 180;
     E0->kraid_next = FUNC16(Kraid_GetsBig_ReleaseCamera);
-    uint16 v2 = *((uint16 *)RomPtr_A7(E0->kraid_var_B) + 1);
+    uint16 v2 = *((const unaligned_uint16*)RomPtr_A7(E0->kraid_var_B) + 1);
     uint16 v3 = 50;
     if (v2 != addr_kKraidTilemaps_0) {
       v3 = 42;
@@ -1613,7 +1613,7 @@ void PauseHook_Kraid(void) {  // 0xA7C325
   v1 = vram_read_queue_tail;
   *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + vram_read_queue_tail) = ((reg_BG12NBA & 0xFC) << 8) + 15872;
   *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v1) = 129;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0 + 1) = 57;
+  *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = 20480;
   *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
   *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 1024;
@@ -2176,7 +2176,7 @@ void Phantoon_Func_1(void) {  // 0xA7CEED
 
 void Phantoon_Func_2(uint16 k) {  // 0xA7CF0C
   if (!k && (joypad1_newkeys & 0x4000) != 0)
-    *(uint16 *)((uint8 *)&g_stru_A7902D[0].ypos + 1) = *(uint16 *)((uint8 *)&g_stru_A7902D[0].ypos + 1) == 0;
+    *(unaligned_uint16 *)((uint8*)&g_stru_A7902D[0].ypos  + 1) = *(unaligned_uint16 *)((uint8*)&g_stru_A7902D[0].ypos  + 1) == 0;
 }
 
 uint8 Phantoon_Func_3(int32 amt) {  // 0xA7CF27
@@ -2238,9 +2238,9 @@ void Phantoon_Func_7(uint16 k) {  // 0xA7CFCA
       bool v8 = (--E->phant_var_C & 0x8000) != 0;
       if (v3 || v8) {
         E->phant_var_C = -1;
-        E->phant_var_B = *((uint16 *)RomPtr_A7(g_off_A7CCFD[E->phant_var_A]) + 1);
+        E->phant_var_B = *((const unaligned_uint16*)RomPtr_A7(g_off_A7CCFD[E->phant_var_A]) + 1);
       } else {
-        E->phant_var_B = *((uint16 *)RomPtr_A7(2 * E->phant_var_C + g_off_A7CCFD[E->phant_var_A]) + 1);
+        E->phant_var_B = *((const unaligned_uint16*)RomPtr_A7(2 * E->phant_var_C + g_off_A7CCFD[E->phant_var_A]) + 1);
       }
       E->base.instruction_timer = 1;
       E->base.current_instruction = addr_kKraid_Ilist_CCEB;
@@ -2248,9 +2248,9 @@ void Phantoon_Func_7(uint16 k) {  // 0xA7CFCA
       uint16 v5 = NextRandom() & 3;
       E->phant_var_A = v5;
       uint16 v6 = g_off_A7CCFD[v5];
-      uint16 v7 = *(uint16 *)RomPtr_A7(v6);
+      uint16 v7 = *(unaligned_uint16 *)RomPtr_A7(v6);
       E->phant_var_C = v7;
-      E->phant_var_B = *((uint16 *)RomPtr_A7(2 * v7 + v6) + 1);
+      E->phant_var_B = *((const unaligned_uint16*)RomPtr_A7(2 * v7 + v6) + 1);
     }
   }
 }

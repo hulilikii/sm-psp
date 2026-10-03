@@ -10,38 +10,38 @@ uint16 eproj_spawn_r22;
 Point16U eproj_spawn_pt; // R18/R20
 uint16 eproj_spawn_varE24;
 
-#define kScreenShakeOffsets ((uint16*)RomFixedPtr(0x86846b))
+#define kScreenShakeOffsets ((const unaligned_uint16*)RomFixedPtr(0x86846b))
 #define kAlignYPos_Tab0 ((uint8*)RomFixedPtr(0x948b2b))
 #define kAlignPos_Tab1 ((uint8*)RomFixedPtr(0x94892b))
-#define off_868A75 ((uint16*)RomFixedPtr(0x868a75))
-#define word_869105 ((uint16*)RomFixedPtr(0x869105))
-#define off_86A64D ((uint16*)RomFixedPtr(0x86a64d))
-#define off_86BB1E ((uint16*)RomFixedPtr(0x86bb1e))
-#define kCommonEnemySpeeds_Quadratic_Copy ((uint16*)RomFixedPtr(0xa0cbc7))
+#define off_868A75 ((const unaligned_uint16*)RomFixedPtr(0x868a75))
+#define word_869105 ((const unaligned_uint16*)RomFixedPtr(0x869105))
+#define off_86A64D ((const unaligned_uint16*)RomFixedPtr(0x86a64d))
+#define off_86BB1E ((const unaligned_uint16*)RomFixedPtr(0x86bb1e))
+#define kCommonEnemySpeeds_Quadratic_Copy ((const unaligned_uint16*)RomFixedPtr(0xa0cbc7))
 #define kCommonEnemySpeeds_Quadratic32 ((uint32*)RomFixedPtr(0xa0cbc7))
-#define off_86C040 ((uint16*)RomFixedPtr(0x86c040))
-#define off_86C929 ((uint16*)RomFixedPtr(0x86c929))
+#define off_86C040 ((const unaligned_uint16*)RomFixedPtr(0x86c040))
+#define off_86C929 ((const unaligned_uint16*)RomFixedPtr(0x86c929))
 #define CHECK_locret_868728(i) (unk_868729[i] & 0x80 ? -1 : 0)
-#define g_word_869059 ((uint16*)RomFixedPtr(0x869059))
-#define off_86A2E2 ((uint16*)RomFixedPtr(0x86a2e2))
-#define kEprojInit_BombTorizoStatueBreaking_InstrList ((uint16*)RomFixedPtr(0x86a7ab))
-#define off_86B209 ((uint16*)RomFixedPtr(0x86b209))
-#define kEproj_MotherBrainRoomTurrets_DirectionIndexes ((uint16*)RomFixedPtr(0x86bee1))
-#define kEproj_MotherBrainRoomTurrets_AllowedRotations ((uint16*)RomFixedPtr(0x86bec9))
-#define kEproj_MotherBrainRoomTurrets_InstrLists ((uint16*)RomFixedPtr(0x86beb9))
-#define g_off_86C040 ((uint16*)RomFixedPtr(0x86c040))
-#define kEprojInit_MotherBrainGlassShatteringShard_InstrPtrs ((uint16*)RomFixedPtr(0x86ce41))
-#define kEprojInit_N00bTubeShards_InstrPtrs ((uint16*)RomFixedPtr(0x86d760))
-#define off_86D96A ((uint16*)RomFixedPtr(0x86d96a))
+#define g_word_869059 ((const unaligned_uint16*)RomFixedPtr(0x869059))
+#define off_86A2E2 ((const unaligned_uint16*)RomFixedPtr(0x86a2e2))
+#define kEprojInit_BombTorizoStatueBreaking_InstrList ((const unaligned_uint16*)RomFixedPtr(0x86a7ab))
+#define off_86B209 ((const unaligned_uint16*)RomFixedPtr(0x86b209))
+#define kEproj_MotherBrainRoomTurrets_DirectionIndexes ((const unaligned_uint16*)RomFixedPtr(0x86bee1))
+#define kEproj_MotherBrainRoomTurrets_AllowedRotations ((const unaligned_uint16*)RomFixedPtr(0x86bec9))
+#define kEproj_MotherBrainRoomTurrets_InstrLists ((const unaligned_uint16*)RomFixedPtr(0x86beb9))
+#define g_off_86C040 ((const unaligned_uint16*)RomFixedPtr(0x86c040))
+#define kEprojInit_MotherBrainGlassShatteringShard_InstrPtrs ((const unaligned_uint16*)RomFixedPtr(0x86ce41))
+#define kEprojInit_N00bTubeShards_InstrPtrs ((const unaligned_uint16*)RomFixedPtr(0x86d760))
+#define off_86D96A ((const unaligned_uint16*)RomFixedPtr(0x86d96a))
 #define kSporeMovementData ((uint8*)RomFixedPtr(0x86dd6c))
-#define word_86DEB6 ((uint16*)RomFixedPtr(0x86deb6))
-#define off_86E42C ((uint16*)RomFixedPtr(0x86e42c))
-#define word_86E47E ((uint16*)RomFixedPtr(0x86e47e))
-#define kEprojInit_BotwoonsBody_InstrLists ((uint16*)RomFixedPtr(0x86e9f1))
-#define off_86EF04 ((uint16*)RomFixedPtr(0x86ef04))
-#define off_86EFD5 ((uint16*)RomFixedPtr(0x86efd5))
+#define word_86DEB6 ((const unaligned_uint16*)RomFixedPtr(0x86deb6))
+#define off_86E42C ((const unaligned_uint16*)RomFixedPtr(0x86e42c))
+#define word_86E47E ((const unaligned_uint16*)RomFixedPtr(0x86e47e))
+#define kEprojInit_BotwoonsBody_InstrLists ((const unaligned_uint16*)RomFixedPtr(0x86e9f1))
+#define off_86EF04 ((const unaligned_uint16*)RomFixedPtr(0x86ef04))
+#define off_86EFD5 ((const unaligned_uint16*)RomFixedPtr(0x86efd5))
 #define kEnemyDef_F3D3 (*(EnemyDef_B2*)RomFixedPtr(0xa0f3d3))
-#define g_word_86F3D4 ((uint16*)RomFixedPtr(0x86f3d4))  // bug:: oob read
+#define g_word_86F3D4 ((const unaligned_uint16*)RomFixedPtr(0x86f3d4))  // bug:: oob read
 
 typedef struct EprojCollInfo {
   uint16 eci_r20;
@@ -341,7 +341,7 @@ const uint8 *EprojInstr_WriteColorsToPalette(uint16 k, const uint8 *epjp) {  // 
   int n = epjp[4];
   uint16 v4 = GET_WORD(epjp);
   do {
-    palette_buffer[v3 >> 1] = *(uint16 *)RomPtr_86(v4);
+    palette_buffer[v3 >> 1] = *(unaligned_uint16 *)RomPtr_86(v4);
     v4 += 2;
     v3 += 2;
   } while ((--n & 0x8000) == 0);
@@ -1806,7 +1806,7 @@ static void EprojInit_PirateMotherBrainLaser(uint16 j) {  // 0x86A009
   eproj_x_pos[v2] = eproj_spawn_pt.x;
   eproj_y_pos[v2] = eproj_spawn_pt.y;
   EnemyData *v3 = gEnemyData(cur_enemy_index);
-  eproj_properties[v2] = *((uint16 *)RomPtr_A0(v3->enemy_ptr) + 3) | 0x1000;
+  eproj_properties[v2] = *((const unaligned_uint16*)RomPtr_A0(v3->enemy_ptr) + 3) | 0x1000;
   eproj_E[v2] = v3->parameter_1;
   QueueSfx2_Max6(0x67);
 }
@@ -3825,7 +3825,7 @@ void EprojPreInstr_WreckedShipRobotLaser(uint16 k) {  // 0x86D3BF
 const uint8 *EprojInstr_AssignNewN00bTubeShardVelocity(uint16 k, const uint8 *epjp) {  // 0x86D5E1
   NextRandom();
   int v2 = k >> 1;
-  eproj_x_vel[v2] = *(uint16 *)((uint8 *)&random_number + 1);
+  eproj_x_vel[v2] = *(unaligned_uint16 *)((uint8*)&random_number  + 1);
   eproj_y_vel[v2] = 192;
   return epjp;
 }
@@ -3858,7 +3858,7 @@ const uint8 *EprojInstr_D62A(uint16 k, const uint8 *epjp) {  // 0x86D62A
 
 const uint8 *EprojInstr_SetXvelRandom(uint16 k, const uint8 *epjp) {  // 0x86D69A
   NextRandom();
-  eproj_x_vel[k >> 1] = *(uint16 *)((uint8 *)&random_number + 1);
+  eproj_x_vel[k >> 1] = *(unaligned_uint16 *)((uint8*)&random_number  + 1);
   return epjp;
 }
 

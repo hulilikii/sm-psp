@@ -5,11 +5,11 @@
 #include "funcs.h"
 
 #define fnkPlmHeaderDefPtrs 0x949139
-#define off_9492D9 ((uint16*)RomFixedPtr(0x9492d9))
-#define off_9492E9 ((uint16*)RomFixedPtr(0x9492e9))
-#define kPlmHeaderDefPtrs ((uint16*)RomFixedPtr(0x949139))
-#define off_94936B ((uint16*)RomFixedPtr(0x94936b))
-#define kBlockShotBombedReactionShootablePlm ((uint16 *)RomPtr_94(0x9ea6))
+#define off_9492D9 ((const unaligned_uint16*)RomFixedPtr(0x9492d9))
+#define off_9492E9 ((const unaligned_uint16*)RomFixedPtr(0x9492e9))
+#define kPlmHeaderDefPtrs ((const unaligned_uint16*)RomFixedPtr(0x949139))
+#define off_94936B ((const unaligned_uint16*)RomFixedPtr(0x94936b))
+#define kBlockShotBombedReactionShootablePlm ((const unaligned_uint16*)RomPtr_94(0x9ea6))
 
 int32 *cur_coll_amt32;
 
@@ -858,7 +858,7 @@ static uint8 BlockColl_Vert_BombBlock(CollInfo *ci) {  // 0x94934C
 uint8 BlockColl_Horiz_Door(CollInfo *ci) {  // 0x94938B
   door_transition_function = FUNC16(DoorTransitionFunction_HandleElevator);
   uint8 door_bts = BTS[cur_block_index];
-  uint16 v0 = *(uint16 *)RomPtr_8F(door_list_pointer + 2 * (door_bts & 0x7F));
+  uint16 v0 = *(unaligned_uint16 *)RomPtr_8F(door_list_pointer + 2 * (door_bts & 0x7F));
   if ((get_DoorDef(v0)->room_definition_ptr & 0x8000) == 0) {
     if (samus_pose < kGameState_9_HitDoorBlock)
       elevator_flags = 1;
@@ -873,7 +873,7 @@ uint8 BlockColl_Horiz_Door(CollInfo *ci) {  // 0x94938B
 uint8 BlockColl_Vert_Door(CollInfo *ci) {  // 0x9493CE
   door_transition_function = FUNC16(DoorTransitionFunction_HandleElevator);
   uint8 door_bts = BTS[cur_block_index];
-  uint16 v0 = *(uint16 *)RomPtr_8F(door_list_pointer + 2 * (door_bts & 0x7F));
+  uint16 v0 = *(unaligned_uint16 *)RomPtr_8F(door_list_pointer + 2 * (door_bts & 0x7F));
   if ((get_DoorDef(v0)->room_definition_ptr & 0x8000) == 0) {
     if (samus_pose < kPose_09_MoveR_NoAim)
       elevator_flags = 1;
@@ -2495,7 +2495,7 @@ void GrappleFunc_AF87(void) {  // 0x94AF87
 }
 
 uint16 GrappleInstr_Goto(uint16 j) {  // 0x94B0F4
-  return *(uint16 *)RomPtr_94(j);
+  return *(unaligned_uint16 *)RomPtr_94(j);
 }
 
 uint16 CallGrappleInstr(uint32 ea, uint16 j) {
@@ -2537,7 +2537,7 @@ void HandleGrappleBeamGfx(void) {  // 0x94AFBA
     }
     if (((r24_r22 | r20_r18) & 0xFF000000) != 0)
       break;
-    uint16 v12 = *(uint16 *)RomPtr_94(grapple_segment_anim_instr_ptrs[q] - 2);
+    uint16 v12 = *(unaligned_uint16 *)RomPtr_94(grapple_segment_anim_instr_ptrs[q] - 2);
     DrawGrappleOams(r20_r18 >> 16, r24_r22 >> 16, chr | v12);
     r20_r18 += r28_r26;
     r24_r22 += r32_r30;

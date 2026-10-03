@@ -4,15 +4,15 @@
 #include "funcs.h"
 
 
-#define kProjectileData_UnchargedBeams ((uint16*)RomFixedPtr(0x9383c1))
-#define kProjectileData_ChargedBeams ((uint16*)RomFixedPtr(0x9383d9))
-#define kProjectileData_NonBeams ((uint16*)RomFixedPtr(0x9383f1))
-#define kShinesparkEchoSpazer_ProjectileData ((uint16*)RomFixedPtr(0x938403))
-#define kRunInstrForSuperMissile ((uint16*)RomFixedPtr(0x93842b))
+#define kProjectileData_UnchargedBeams ((const unaligned_uint16*)RomFixedPtr(0x9383c1))
+#define kProjectileData_ChargedBeams ((const unaligned_uint16*)RomFixedPtr(0x9383d9))
+#define kProjectileData_NonBeams ((const unaligned_uint16*)RomFixedPtr(0x9383f1))
+#define kShinesparkEchoSpazer_ProjectileData ((const unaligned_uint16*)RomFixedPtr(0x938403))
+#define kRunInstrForSuperMissile ((const unaligned_uint16*)RomFixedPtr(0x93842b))
 #define g_stru_938691 (*(ProjectileDamagesAndInstrPtr*)RomFixedPtr(0x938691))
 #define g_stru_938679 (*(ProjectileDamagesAndInstrPtr*)RomFixedPtr(0x938679))
 #define kProjInstrList_Explosion (*(ProjectileDamagesAndInstrPtr*)RomFixedPtr(0x938681))
-#define g_off_938413 ((uint16*)RomFixedPtr(0x938413))
+#define g_off_938413 ((const unaligned_uint16*)RomFixedPtr(0x938413))
 
 void InitializeProjectile(uint16 k) {  // 0x938000
   int v1 = k >> 1;
@@ -155,7 +155,7 @@ uint16 Proj93Instr_Delete(uint16 k, uint16 j) {  // 0x93822F
 }
 
 uint16 Proj93Instr_Goto(uint16 k, uint16 j) {  // 0x938239
-  return *(uint16 *)RomPtr_93(j);
+  return *(unaligned_uint16 *)RomPtr_93(j);
 }
 
 void DrawPlayerExplosions2(void) {  // 0x938254

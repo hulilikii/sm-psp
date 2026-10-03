@@ -5,58 +5,58 @@
 #include "funcs.h"
 #include "enemy_types.h"
 
-#define g_off_A386DB ((uint16*)RomFixedPtr(0xa386db))
-#define g_off_A3894E ((uint16*)RomFixedPtr(0xa3894e))
-#define g_word_A38D1D ((uint16*)RomFixedPtr(0xa38d1d))
-#define g_word_A394E2 ((uint16*)RomFixedPtr(0xa394e2))
-#define g_off_A396DB ((uint16*)RomFixedPtr(0xa396db))
-#define g_off_A3992B ((uint16*)RomFixedPtr(0xa3992b))
-#define g_off_A3A111 ((uint16*)RomFixedPtr(0xa3a111))
-#define g_off_A3A121 ((uint16*)RomFixedPtr(0xa3a121))
-#define g_off_A3AAC2 ((uint16*)RomFixedPtr(0xa3aac2))
-#define g_off_A3AACA ((uint16*)RomFixedPtr(0xa3aaca))
-#define g_off_A3AAD2 ((uint16*)RomFixedPtr(0xa3aad2))
-#define g_off_A3AADA ((uint16*)RomFixedPtr(0xa3aada))
-#define g_off_A3AAE2 ((uint16*)RomFixedPtr(0xa3aae2))
-#define g_word_A3AAE6 ((uint16*)RomFixedPtr(0xa3aae6))
-#define g_word_A3AAEA ((uint16*)RomFixedPtr(0xa3aaea))
-#define g_word_A3AAEE ((uint16*)RomFixedPtr(0xa3aaee))
-#define g_word_A3AAF2 ((uint16*)RomFixedPtr(0xa3aaf2))
-#define g_word_A3AAF6 ((uint16*)RomFixedPtr(0xa3aaf6))
-#define g_word_A3AAFA ((uint16*)RomFixedPtr(0xa3aafa))
-#define g_word_A3B415 ((uint16*)RomFixedPtr(0xa3b415))
-#define g_off_A3B40D ((uint16*)RomFixedPtr(0xa3b40d))
-#define g_off_A3B667 ((uint16*)RomFixedPtr(0xa3b667))
-#define g_word_A3BA84 ((uint16*)RomFixedPtr(0xa3ba84))
-#define g_word_A3BA94 ((uint16*)RomFixedPtr(0xa3ba94))
-#define g_word_A3BC4A ((uint16*)RomFixedPtr(0xa3bc4a))
-#define g_word_A3BC6A ((uint16*)RomFixedPtr(0xa3bc6a))
-#define g_off_A3B722 ((uint16*)RomFixedPtr(0xa3b722))
-#define g_off_A3C69C ((uint16*)RomFixedPtr(0xa3c69c))
+#define g_off_A386DB ((const unaligned_uint16*)RomFixedPtr(0xa386db))
+#define g_off_A3894E ((const unaligned_uint16*)RomFixedPtr(0xa3894e))
+#define g_word_A38D1D ((const unaligned_uint16*)RomFixedPtr(0xa38d1d))
+#define g_word_A394E2 ((const unaligned_uint16*)RomFixedPtr(0xa394e2))
+#define g_off_A396DB ((const unaligned_uint16*)RomFixedPtr(0xa396db))
+#define g_off_A3992B ((const unaligned_uint16*)RomFixedPtr(0xa3992b))
+#define g_off_A3A111 ((const unaligned_uint16*)RomFixedPtr(0xa3a111))
+#define g_off_A3A121 ((const unaligned_uint16*)RomFixedPtr(0xa3a121))
+#define g_off_A3AAC2 ((const unaligned_uint16*)RomFixedPtr(0xa3aac2))
+#define g_off_A3AACA ((const unaligned_uint16*)RomFixedPtr(0xa3aaca))
+#define g_off_A3AAD2 ((const unaligned_uint16*)RomFixedPtr(0xa3aad2))
+#define g_off_A3AADA ((const unaligned_uint16*)RomFixedPtr(0xa3aada))
+#define g_off_A3AAE2 ((const unaligned_uint16*)RomFixedPtr(0xa3aae2))
+#define g_word_A3AAE6 ((const unaligned_uint16*)RomFixedPtr(0xa3aae6))
+#define g_word_A3AAEA ((const unaligned_uint16*)RomFixedPtr(0xa3aaea))
+#define g_word_A3AAEE ((const unaligned_uint16*)RomFixedPtr(0xa3aaee))
+#define g_word_A3AAF2 ((const unaligned_uint16*)RomFixedPtr(0xa3aaf2))
+#define g_word_A3AAF6 ((const unaligned_uint16*)RomFixedPtr(0xa3aaf6))
+#define g_word_A3AAFA ((const unaligned_uint16*)RomFixedPtr(0xa3aafa))
+#define g_word_A3B415 ((const unaligned_uint16*)RomFixedPtr(0xa3b415))
+#define g_off_A3B40D ((const unaligned_uint16*)RomFixedPtr(0xa3b40d))
+#define g_off_A3B667 ((const unaligned_uint16*)RomFixedPtr(0xa3b667))
+#define g_word_A3BA84 ((const unaligned_uint16*)RomFixedPtr(0xa3ba84))
+#define g_word_A3BA94 ((const unaligned_uint16*)RomFixedPtr(0xa3ba94))
+#define g_word_A3BC4A ((const unaligned_uint16*)RomFixedPtr(0xa3bc4a))
+#define g_word_A3BC6A ((const unaligned_uint16*)RomFixedPtr(0xa3bc6a))
+#define g_off_A3B722 ((const unaligned_uint16*)RomFixedPtr(0xa3b722))
+#define g_off_A3C69C ((const unaligned_uint16*)RomFixedPtr(0xa3c69c))
 #define g_stru_A3CD42 ((MaridiaSnailData2*)RomFixedPtr(0xa3cd42))
-#define g_word_A3CD82 ((uint16*)RomFixedPtr(0xa3cd82))
-#define g_word_A3CDC2 ((uint16*)RomFixedPtr(0xa3cdc2))
-#define g_word_A3CCA2 ((uint16*)RomFixedPtr(0xa3cca2))
-#define g_off_A3CDD2 ((uint16*)RomFixedPtr(0xa3cdd2))
-#define g_off_A3D1AB ((uint16*)RomFixedPtr(0xa3d1ab))
-#define g_off_A3D30D ((uint16*)RomFixedPtr(0xa3d30d))
-#define g_off_A3D50F ((uint16*)RomFixedPtr(0xa3d50f))
-#define g_word_A3D517 ((uint16*)RomFixedPtr(0xa3d517))
-#define g_off_A3D5A4 ((uint16*)RomFixedPtr(0xa3d5a4))
-#define g_word_A3DABC ((uint16*)RomFixedPtr(0xa3dabc))
-#define g_off_A3DC0B ((uint16*)RomFixedPtr(0xa3dc0b))
-#define g_word_A3DCAE ((uint16*)RomFixedPtr(0xa3dcae))
-#define g_off_A3DCA6 ((uint16*)RomFixedPtr(0xa3dca6))
-#define g_off_A3E03B ((uint16*)RomFixedPtr(0xa3e03b))
-#define g_word_A3E5F0 ((uint16*)RomFixedPtr(0xa3e5f0))
-#define g_off_A3E2CC ((uint16*)RomFixedPtr(0xa3e2cc))
-#define g_off_A3E630 ((uint16*)RomFixedPtr(0xa3e630))
-#define g_off_A3E63C ((uint16*)RomFixedPtr(0xa3e63c))
-#define g_off_A3E648 ((uint16*)RomFixedPtr(0xa3e648))
-#define g_off_A3E654 ((uint16*)RomFixedPtr(0xa3e654))
-#define g_word_A3E931 ((uint16*)RomFixedPtr(0xa3e931))
-#define g_word_A3EAD6 ((uint16*)RomFixedPtr(0xa3ead6))
-#define g_word_A3EA3F ((uint16*)RomFixedPtr(0xa3ea3f))
+#define g_word_A3CD82 ((const unaligned_uint16*)RomFixedPtr(0xa3cd82))
+#define g_word_A3CDC2 ((const unaligned_uint16*)RomFixedPtr(0xa3cdc2))
+#define g_word_A3CCA2 ((const unaligned_uint16*)RomFixedPtr(0xa3cca2))
+#define g_off_A3CDD2 ((const unaligned_uint16*)RomFixedPtr(0xa3cdd2))
+#define g_off_A3D1AB ((const unaligned_uint16*)RomFixedPtr(0xa3d1ab))
+#define g_off_A3D30D ((const unaligned_uint16*)RomFixedPtr(0xa3d30d))
+#define g_off_A3D50F ((const unaligned_uint16*)RomFixedPtr(0xa3d50f))
+#define g_word_A3D517 ((const unaligned_uint16*)RomFixedPtr(0xa3d517))
+#define g_off_A3D5A4 ((const unaligned_uint16*)RomFixedPtr(0xa3d5a4))
+#define g_word_A3DABC ((const unaligned_uint16*)RomFixedPtr(0xa3dabc))
+#define g_off_A3DC0B ((const unaligned_uint16*)RomFixedPtr(0xa3dc0b))
+#define g_word_A3DCAE ((const unaligned_uint16*)RomFixedPtr(0xa3dcae))
+#define g_off_A3DCA6 ((const unaligned_uint16*)RomFixedPtr(0xa3dca6))
+#define g_off_A3E03B ((const unaligned_uint16*)RomFixedPtr(0xa3e03b))
+#define g_word_A3E5F0 ((const unaligned_uint16*)RomFixedPtr(0xa3e5f0))
+#define g_off_A3E2CC ((const unaligned_uint16*)RomFixedPtr(0xa3e2cc))
+#define g_off_A3E630 ((const unaligned_uint16*)RomFixedPtr(0xa3e630))
+#define g_off_A3E63C ((const unaligned_uint16*)RomFixedPtr(0xa3e63c))
+#define g_off_A3E648 ((const unaligned_uint16*)RomFixedPtr(0xa3e648))
+#define g_off_A3E654 ((const unaligned_uint16*)RomFixedPtr(0xa3e654))
+#define g_word_A3E931 ((const unaligned_uint16*)RomFixedPtr(0xa3e931))
+#define g_word_A3EAD6 ((const unaligned_uint16*)RomFixedPtr(0xa3ead6))
+#define g_word_A3EA3F ((const unaligned_uint16*)RomFixedPtr(0xa3ea3f))
 
 static void CallSidehopperFunc(uint32 ea);
 
@@ -119,7 +119,7 @@ void Waver_Init(void) {  // 0xA386ED
 void Waver_Main(void) {  // 0xA3874C
   Enemy_Waver *E = Get_Waver(cur_enemy_index);
   if (Enemy_MoveRight_IgnoreSlopes(cur_enemy_index, __PAIR32__(E->waver_var_B, E->waver_var_A))) {
-    uint16 r18 = *(uint16 *)((uint8 *)&E->waver_var_A + 1);
+    uint16 r18 = *(unaligned_uint16 *)((uint8*)&E->waver_var_A  + 1);
     E->waver_var_B = SignExtend8((-r18 & 0xFF00) >> 8);
     E->waver_var_A = -(int8)r18 << 8;
     E->waver_var_F = (E->waver_var_F ^ 1) & 1;
@@ -333,7 +333,7 @@ void Fireflea_Main(void) {  // 0xA38DEE
   if ((E->ffa_parameter_1 & 2) != 0) {
     E->base.x_pos = E->ffa_var_E + CosineMult8bit(HIBYTE(E->ffa_var_D), E->ffa_var_C);
     E->base.y_pos = E->ffa_var_F + SineMult8bit(HIBYTE(E->ffa_var_D), E->ffa_var_C);
-    E->ffa_var_D += *(uint16 *)((uint8 *)&E->ffa_var_A + 1);
+    E->ffa_var_D += *(unaligned_uint16 *)((uint8*)&E->ffa_var_A  + 1);
   } else {
     int v2 = E->ffa_var_02 >> 1;
     AddToHiLo(&E->base.y_pos, &E->base.y_subpos, __PAIR32__(kCommonEnemySpeeds_Linear[v2], kCommonEnemySpeeds_Linear[v2 + 1]));
@@ -2990,10 +2990,10 @@ void Metroid_Touch(void) {  // 0xA3EDEB
       E->metroid_var_C = 0;
       int16 v2 = E->base.x_pos - samus_x_pos;
       E->metroid_var_B = (v2 < 0) ? -256 : 0;
-      *(uint16 *)((uint8 *)&E->metroid_var_A + 1) = v2 << 6;
+      *(unaligned_uint16 *)((uint8*)&E->metroid_var_A  + 1) = v2 << 6;
       int16 v4 = E->base.y_pos - varE32;
       E->metroid_var_D = (v4 < 0) ? -256 : 0;
-      *(uint16 *)((uint8 *)&E->metroid_var_C + 1) = v4 << 6;
+      *(unaligned_uint16 *)((uint8*)&E->metroid_var_C  + 1) = v4 << 6;
       E->metroid_var_F = 0;
       E->base.current_instruction = addr_kMetroid_Ilist_E9CF;
       E->base.instruction_timer = 1;
@@ -3072,10 +3072,10 @@ void Metroid_Shot(void) {  // 0xA3EF07
       E->metroid_var_C = 0;
       int16 v7 = E->base.x_pos - projectile_x_pos[0];
       E->metroid_var_B = (v7 < 0) ? -256 : 0;
-      *(uint16 *)((uint8 *)&E->metroid_var_A + 1) = 32 * v7;
+      *(unaligned_uint16 *)((uint8*)&E->metroid_var_A  + 1) = 32 * v7;
       int16 v9 = E->base.y_pos - projectile_y_pos[0];
       E->metroid_var_D = (v9 < 0) ? -256 : 0;
-      *(uint16 *)((uint8 *)&E->metroid_var_C + 1) = 32 * v9;
+      *(unaligned_uint16 *)((uint8*)&E->metroid_var_C  + 1) = 32 * v9;
       E->metroid_var_F = 0;
       E->base.current_instruction = addr_kMetroid_Ilist_E9CF;
       E->base.instruction_timer = 1;

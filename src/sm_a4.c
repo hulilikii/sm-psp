@@ -5,24 +5,24 @@
 #include "enemy_types.h"
 
 
-#define g_word_A4B89D ((uint16*)RomFixedPtr(0xa4b89d))
-#define g_word_A4B8BD ((uint16*)RomFixedPtr(0xa4b8bd))
-#define g_word_A4B8DD ((uint16*)RomFixedPtr(0xa4b8dd))
-#define g_word_A4B8FD ((uint16*)RomFixedPtr(0xa4b8fd))
-#define g_word_A4B91D ((uint16*)RomFixedPtr(0xa4b91d))
-#define g_off_A48B79 ((uint16*)RomFixedPtr(0xa48b79))
-#define g_word_A49156 ((uint16*)RomFixedPtr(0xa49156))
-#define g_word_A49C79 ((uint16*)RomFixedPtr(0xa49c79))
-#define g_word_A49E7B ((uint16*)RomFixedPtr(0xa49e7b))
-#define g_word_A49BC5 (*(uint16*)RomFixedPtr(0xa49bc5))
-#define g_word_A49BC7 (*(uint16*)RomFixedPtr(0xa49bc7))
-#define g_word_A49BC9 (*(uint16*)RomFixedPtr(0xa49bc9))
-#define g_word_A49BCB (*(uint16*)RomFixedPtr(0xa49bcb))
+#define g_word_A4B89D ((const unaligned_uint16*)RomFixedPtr(0xa4b89d))
+#define g_word_A4B8BD ((const unaligned_uint16*)RomFixedPtr(0xa4b8bd))
+#define g_word_A4B8DD ((const unaligned_uint16*)RomFixedPtr(0xa4b8dd))
+#define g_word_A4B8FD ((const unaligned_uint16*)RomFixedPtr(0xa4b8fd))
+#define g_word_A4B91D ((const unaligned_uint16*)RomFixedPtr(0xa4b91d))
+#define g_off_A48B79 ((const unaligned_uint16*)RomFixedPtr(0xa48b79))
+#define g_word_A49156 ((const unaligned_uint16*)RomFixedPtr(0xa49156))
+#define g_word_A49C79 ((const unaligned_uint16*)RomFixedPtr(0xa49c79))
+#define g_word_A49E7B ((const unaligned_uint16*)RomFixedPtr(0xa49e7b))
+#define g_word_A49BC5 (*(unaligned_uint16 *)RomFixedPtr(0xa49bc5))
+#define g_word_A49BC7 (*(unaligned_uint16 *)RomFixedPtr(0xa49bc7))
+#define g_word_A49BC9 (*(unaligned_uint16 *)RomFixedPtr(0xa49bc9))
+#define g_word_A49BCB (*(unaligned_uint16 *)RomFixedPtr(0xa49bcb))
 #define kCrocoVlineRandomPos ((uint8*)RomFixedPtr(0xa49697))
-#define g_word_A49BBD ((uint16*)RomFixedPtr(0xa49bbd))
-#define g_word_A498CA ((uint16*)RomFixedPtr(0xa498ca))
-#define g_word_A499CB ((uint16*)RomFixedPtr(0xa499cb))
-#define g_word_A499D9 ((uint16*)RomFixedPtr(0xa499d9))
+#define g_word_A49BBD ((const unaligned_uint16*)RomFixedPtr(0xa49bbd))
+#define g_word_A498CA ((const unaligned_uint16*)RomFixedPtr(0xa498ca))
+#define g_word_A499CB ((const unaligned_uint16*)RomFixedPtr(0xa499cb))
+#define g_word_A499D9 ((const unaligned_uint16*)RomFixedPtr(0xa499d9))
 
 
 
@@ -443,7 +443,7 @@ void Crocomire_Func_27(uint16 k) {  // 0xA48B5B
       return;
     }
   }
-  reg_BG2VOFS += *((uint16 *)RomPtr_A4(spritemap_pointer) + 14);
+  reg_BG2VOFS += *((const unaligned_uint16*)RomPtr_A4(spritemap_pointer) + 14);
   Crocomire_8BA4();
 }
 
@@ -631,7 +631,7 @@ void Crocomire_Func_37(void) {  // 0xA48D5E
       Get_Crocomire(0x100)->crocom_var_01 = 0;
       Get_Crocomire(0x140)->crocom_var_01 = 0;
       QueueSfx2_Max6(0x3B);
-      *(uint16 *)((uint8 *)&g_word_7E9015 + 1) = 0;
+      *(unaligned_uint16 *)((uint8*)&g_word_7E9015  + 1) = 0;
       SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x4e, 0x03, 0xb757 });
       EK->base.current_instruction = addr_kCrocomire_Ilist_BFB0;
       EK->base.instruction_timer = 1;
@@ -792,10 +792,10 @@ void Crocomire_Func_51(void) {  // 0xA49108
 }
 
 void Crocomire_Func_52(void) {  // 0xA49136
-  uint16 v0 = *(uint16 *)((uint8 *)&g_word_7E9015 + 1);
-  if (sign16(*(uint16 *)((uint8 *)&g_word_7E9015 + 1) - 22)) {
-    uint16 v1 = *(uint16 *)((uint8 *)&g_word_7E9015 + 1);
-    *(uint16 *)((uint8 *)&g_word_7E9015 + 1) += 2;
+  uint16 v0 = *(unaligned_uint16 *)((uint8*)&g_word_7E9015  + 1);
+  if (sign16(*(unaligned_uint16 *)((uint8*)&g_word_7E9015  + 1) - 22)) {
+    uint16 v1 = *(unaligned_uint16 *)((uint8*)&g_word_7E9015  + 1);
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9015  + 1) += 2;
     SpawnEprojWithGfx(g_word_A49156[v0 >> 1], v1, addr_stru_868F9D);
   }
   Crocomire_Func_54();
@@ -1554,9 +1554,9 @@ void Crocomire_Powerbomb(void) {  // 0xA4B992
         E->crocom_var_C = 24;
         uint16 spritemap_pointer = E->base.spritemap_pointer;
         uint16 v3;
-        int n = *(uint16 *)RomPtr_A4(spritemap_pointer);
+        int n = *(unaligned_uint16 *)RomPtr_A4(spritemap_pointer);
         while (1) {
-          v2 = *((uint16 *)RomPtr_A4(spritemap_pointer) + 3);
+          v2 = *((const unaligned_uint16*)RomPtr_A4(spritemap_pointer) + 3);
           v3 = addr_kCrocomire_Ilist_BDAE;
           if (v2 == addr_kCrocomire_BigSprmap_D600)
             break;

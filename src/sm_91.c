@@ -8,22 +8,22 @@
 #define unk_91CAF2 (*(SpawnHdmaObject_Args*)RomFixedPtr(0x91caf2))
 #define stru_91D2D6 ((XrayBlockData*)RomFixedPtr(0x91d2d6))
 #define stru_91D2D6 ((XrayBlockData*)RomFixedPtr(0x91d2d6))
-#define off_91D727 ((uint16*)RomFixedPtr(0x91d727))
-#define kSamusPalette_HyperBeam ((uint16*)RomFixedPtr(0x91d829))
-#define kSamusPalette_NonPseudoScrew ((uint16*)RomFixedPtr(0x91d7d5))
-#define kSamusPalette_PseudoScrew ((uint16*)RomFixedPtr(0x91d7ff))
-#define word_9BA3C0 ((uint16*)RomFixedPtr(0x9ba3c0))
-#define kSamus_SpeedBoostingPalettes ((uint16*)RomFixedPtr(0x91d998))
-#define kSamus_HyperBeamPalettes ((uint16*)RomFixedPtr(0x91d99e))
-#define kSamusPal_ScrewAttack ((uint16*)RomFixedPtr(0x91da4a))
-#define kSamusPal_SpeedBoost ((uint16*)RomFixedPtr(0x91daa9))
-#define kSamusPal_SpeedBoostShine ((uint16*)RomFixedPtr(0x91db10))
-#define kSamusPal_Shinespark ((uint16*)RomFixedPtr(0x91db75))
+#define off_91D727 ((const unaligned_uint16*)RomFixedPtr(0x91d727))
+#define kSamusPalette_HyperBeam ((const unaligned_uint16*)RomFixedPtr(0x91d829))
+#define kSamusPalette_NonPseudoScrew ((const unaligned_uint16*)RomFixedPtr(0x91d7d5))
+#define kSamusPalette_PseudoScrew ((const unaligned_uint16*)RomFixedPtr(0x91d7ff))
+#define word_9BA3C0 ((const unaligned_uint16*)RomFixedPtr(0x9ba3c0))
+#define kSamus_SpeedBoostingPalettes ((const unaligned_uint16*)RomFixedPtr(0x91d998))
+#define kSamus_HyperBeamPalettes ((const unaligned_uint16*)RomFixedPtr(0x91d99e))
+#define kSamusPal_ScrewAttack ((const unaligned_uint16*)RomFixedPtr(0x91da4a))
+#define kSamusPal_SpeedBoost ((const unaligned_uint16*)RomFixedPtr(0x91daa9))
+#define kSamusPal_SpeedBoostShine ((const unaligned_uint16*)RomFixedPtr(0x91db10))
+#define kSamusPal_Shinespark ((const unaligned_uint16*)RomFixedPtr(0x91db75))
 #define stru_91DC00 ((SamusCrystalFlashPalTable*)RomFixedPtr(0x91dc00))
-#define off_91DC28 ((uint16*)RomFixedPtr(0x91dc28))
-#define word_91E921 ((uint16*)RomFixedPtr(0x91e921))
-#define word_91E9F3 ((uint16*)RomFixedPtr(0x91e9f3))
-#define word_91EB74 ((uint16*)RomFixedPtr(0x91eb74))
+#define off_91DC28 ((const unaligned_uint16*)RomFixedPtr(0x91dc28))
+#define word_91E921 ((const unaligned_uint16*)RomFixedPtr(0x91e921))
+#define word_91E9F3 ((const unaligned_uint16*)RomFixedPtr(0x91e9f3))
+#define word_91EB74 ((const unaligned_uint16*)RomFixedPtr(0x91eb74))
 #define kSamusTurnPose_Standing ((uint8*)RomFixedPtr(0x91f9c2))
 #define kSamusTurnPose_Crouching ((uint8*)RomFixedPtr(0x91f9cc))
 #define kSamusTurnPose_Jumping ((uint8*)RomFixedPtr(0x91f9d6))
@@ -393,7 +393,7 @@ uint16 DemoInstr_Finish(uint16 k, uint16 j) {  // 0x918427
 }
 
 uint16 DemoInstr_SetPreInstr(uint16 k, uint16 j) {  // 0x918434
-  demo_input_pre_instr = *(uint16 *)RomPtr_91(j);
+  demo_input_pre_instr = *(unaligned_uint16 *)RomPtr_91(j);
   return j + 2;
 }
 
@@ -403,7 +403,7 @@ uint16 DemoInstr_ClearPreInstr(uint16 k, uint16 j) {  // 0x91843F
 }
 
 uint16 DemoInstr_Goto(uint16 k, uint16 j) {  // 0x918448
-  return *(uint16 *)RomPtr_91(j);
+  return *(unaligned_uint16 *)RomPtr_91(j);
 }
 
 uint16 DemoInstr_DecTimerAndGoto(uint16 k, uint16 j) {  // 0x91844F
@@ -414,7 +414,7 @@ uint16 DemoInstr_DecTimerAndGoto(uint16 k, uint16 j) {  // 0x91844F
 }
 
 uint16 DemoInstr_SetTimer(uint16 k, uint16 j) {  // 0x918459
-  demo_timer_counter = *(uint16 *)RomPtr_91(j);
+  demo_timer_counter = *(unaligned_uint16 *)RomPtr_91(j);
   return j + 2;
 }
 
@@ -866,7 +866,7 @@ void Xray_SetupStage2_ReadBg1_2ndScreen(void) {  // 0x91CB1C
   uint16 v0 = vram_read_queue_tail;
   *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = ((reg_BG1SC & 0xFC) << 8) + 1024;
   *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0 + 1) = 57;
+  *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2800;
   *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
   *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
@@ -878,7 +878,7 @@ void Xray_SetupStage3_ReadBg1_1stScreen(void) {  // 0x91CB57
   uint16 v0 = vram_read_queue_tail;
   *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = (reg_BG1SC & 0xFC) << 8;
   *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0 + 1) = 57;
+  *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2000;
   *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
   *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
@@ -941,7 +941,7 @@ void Xray_SetupStage4(void) {  // 0x91CB8E
   uint16 v7 = vram_read_queue_tail;
   *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v7) = (reg_BG2SC & 0xFC) << 8;
   *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v7) = 129;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v7 + 1) = 57;
+  *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v7  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v7) = 0x5000;
   *(uint16 *)(&vram_read_queue[0].src.bank + v7) = 126;
   *(uint16 *)((uint8 *)&vram_read_queue[0].size + v7) = 2048;
@@ -1192,7 +1192,7 @@ void Xray_SetupStage5(void) {  // 0x91D0D3
   uint16 v0 = vram_read_queue_tail;
   v1 = vram_read_queue_tail;
   *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + vram_read_queue_tail) = ((reg_BG2SC & 0xFC) << 8) + 1024;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v1 + 1) = 57;
+  *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v1  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = 0x5800;
   *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
   *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
@@ -1426,7 +1426,7 @@ uint8 HandleBeamChargePalettes(void) {  // 0x91D743
       R36 = kSamusPalette_PseudoScrew[samus_suit_palette_index >> 1];
     else
       R36 = kSamusPalette_NonPseudoScrew[samus_suit_palette_index >> 1];
-    CopyToSamusSuitPalette(*(uint16 *)RomPtr_91(R36 + samus_charge_palette_index));
+    CopyToSamusSuitPalette(*(unaligned_uint16 *)RomPtr_91(R36 + samus_charge_palette_index));
     uint16 v1 = samus_charge_palette_index + 2;
     if (!sign16(samus_charge_palette_index - 10))
       v1 = 0;
@@ -1549,7 +1549,7 @@ uint8 Samus_HandleScrewAttackSpeedBoostingPals(void) {  // 0x91D9B2
     if (!sign16(samus_anim_frame - 3)) {
 LABEL_18:;
       uint16 R36 = kSamusPal_ScrewAttack[samus_suit_palette_index >> 1];
-      uint16 v1 = *(uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
+      uint16 v1 = *(unaligned_uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
       CopyToSamusSuitPalette(v1);
       uint16 v2 = special_samus_palette_frame + 2;
       if (special_samus_palette_frame >= 10)
@@ -1571,7 +1571,7 @@ LABEL_10:
     // Bugfix: The original game can do an out of bounds read here.
     if (special_samus_palette_frame > 6)
       special_samus_palette_frame = 6;
-    uint16 v4 = *(uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
+    uint16 v4 = *(unaligned_uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
     CopyToSamusSuitPalette(v4);
     uint16 v5 = special_samus_palette_frame + 2;
     if (special_samus_palette_frame >= 6)
@@ -1596,7 +1596,7 @@ uint8 Samus_SpeedBoosterShinePals(void) {  // 0x91DAC7
     return 0;
   } else {
     uint16 R36 = kSamusPal_SpeedBoostShine[samus_suit_palette_index >> 1];
-    uint16 v1 = *(uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
+    uint16 v1 = *(unaligned_uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
     CopyToSamusSuitPalette(v1);
     uint16 v2 = special_samus_palette_frame + 2;
     if (!sign16(special_samus_palette_frame - 10))
@@ -1614,7 +1614,7 @@ uint8 Samus_HandleShinesparkingPals(void) {  // 0x91DB3A
     return 0;
   } else {
     uint16 R36 = kSamusPal_Shinespark[samus_suit_palette_index >> 1];
-    uint16 v1 = *(uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
+    uint16 v1 = *(unaligned_uint16 *)RomPtr_91(R36 + special_samus_palette_frame);
     CopyToSamusSuitPalette(v1);
     uint16 v2 = special_samus_palette_frame + 2;
     if (!sign16(special_samus_palette_frame - 6))
@@ -1938,7 +1938,7 @@ uint8 Xray_Initialize(void) {  // 0x91E16D
   DisableAnimtiles();
   DisablePaletteFx();
   mov24(&hdma_ptr_1, 0x980001);
-  *(uint16 *)((uint8 *)&demo_num_input_frames + 1) = 0;
+  *(unaligned_uint16 *)((uint8*)&demo_num_input_frames  + 1) = 0;
   demo_input_prev = -26424;
   mov24(&hdma_ptr_3, 0x999098);
   hdma_var_1 = 0;

@@ -6,43 +6,43 @@
 #include "variables.h"
 
 
-#define kEnemyInit_BouncingGoofball_Tab0 ((uint16*)RomFixedPtr(0xa286df))
-#define kEnemyInit_BouncingGoofball_Tab1 ((uint16*)RomFixedPtr(0xa286ef))
+#define kEnemyInit_BouncingGoofball_Tab0 ((const unaligned_uint16*)RomFixedPtr(0xa286df))
+#define kEnemyInit_BouncingGoofball_Tab1 ((const unaligned_uint16*)RomFixedPtr(0xa286ef))
 #define kBouncingGoofball_Tab0 ((uint8*)RomFixedPtr(0xa28701))
-#define g_word_A28D56 (*(uint16*)RomFixedPtr(0xa28d56))
-#define g_word_A28D58 (*(uint16*)RomFixedPtr(0xa28d58))
-#define g_word_A29A07 (*(uint16*)RomFixedPtr(0xa29a07))
-#define g_word_A29A09 (*(uint16*)RomFixedPtr(0xa29a09))
-#define g_word_A29A0B (*(uint16*)RomFixedPtr(0xa29a0b))
-#define g_word_A29A0D (*(uint16*)RomFixedPtr(0xa29a0d))
-#define g_word_A29F36 ((uint16*)RomFixedPtr(0xa29f36))
-#define g_off_A29F42 ((uint16*)RomFixedPtr(0xa29f42))
-#define g_word_A2A3DD ((uint16*)RomFixedPtr(0xa2a3dd))
-#define g_word_A2A3ED ((uint16*)RomFixedPtr(0xa2a3ed))
+#define g_word_A28D56 (*(unaligned_uint16 *)RomFixedPtr(0xa28d56))
+#define g_word_A28D58 (*(unaligned_uint16 *)RomFixedPtr(0xa28d58))
+#define g_word_A29A07 (*(unaligned_uint16 *)RomFixedPtr(0xa29a07))
+#define g_word_A29A09 (*(unaligned_uint16 *)RomFixedPtr(0xa29a09))
+#define g_word_A29A0B (*(unaligned_uint16 *)RomFixedPtr(0xa29a0b))
+#define g_word_A29A0D (*(unaligned_uint16 *)RomFixedPtr(0xa29a0d))
+#define g_word_A29F36 ((const unaligned_uint16*)RomFixedPtr(0xa29f36))
+#define g_off_A29F42 ((const unaligned_uint16*)RomFixedPtr(0xa29f42))
+#define g_word_A2A3DD ((const unaligned_uint16*)RomFixedPtr(0xa2a3dd))
+#define g_word_A2A3ED ((const unaligned_uint16*)RomFixedPtr(0xa2a3ed))
 #define g_byte_A2A7CF ((uint8*)RomFixedPtr(0xa2a7cf))
-#define g_word_A2A622 ((uint16*)RomFixedPtr(0xa2a622))
-#define g_word_A2AC07 ((uint16*)RomFixedPtr(0xa2ac07))
-#define g_word_A2AC11 ((uint16*)RomFixedPtr(0xa2ac11))
-#define g_word_A2B520 ((uint16*)RomFixedPtr(0xa2b520))
-#define g_word_A2B530 ((uint16*)RomFixedPtr(0xa2b530))
-#define g_word_A2B550 ((uint16*)RomFixedPtr(0xa2b550))
-#define g_word_A2B75B ((uint16*)RomFixedPtr(0xa2b75b))
-#define g_word_A2BBBB (*(uint16*)RomFixedPtr(0xa2bbbb))
-#define g_word_A2BBBF (*(uint16*)RomFixedPtr(0xa2bbbf))
-#define g_word_A2BE86 ((uint16*)RomFixedPtr(0xa2be86))
-#define g_word_A2C1C1 ((uint16*)RomFixedPtr(0xa2c1c1))
-#define g_word_A2C1C5 (*(uint16*)RomFixedPtr(0xa2c1c5))
-#define g_word_A2C6CA (*(uint16*)RomFixedPtr(0xa2c6ca))
-#define g_word_A2C6CE (*(uint16*)RomFixedPtr(0xa2c6ce))
-#define g_off_A2CB77 ((uint16*)RomFixedPtr(0xa2cb77))
-#define g_off_A2DF5E ((uint16*)RomFixedPtr(0xa2df5e))
-#define g_off_A2DF6A ((uint16*)RomFixedPtr(0xa2df6a))
-#define g_off_A2E5EF ((uint16*)RomFixedPtr(0xa2e5ef))
-#define g_word_A2EA56 ((uint16*)RomFixedPtr(0xa2ea56))
-#define g_off_A2EA4E ((uint16*)RomFixedPtr(0xa2ea4e))
-#define g_off_A2EC3A ((uint16*)RomFixedPtr(0xa2ec3a))
-#define g_off_A2EDFB ((uint16*)RomFixedPtr(0xa2edfb))
-#define g_off_A2F107 ((uint16*)RomFixedPtr(0xa2f107))
+#define g_word_A2A622 ((const unaligned_uint16*)RomFixedPtr(0xa2a622))
+#define g_word_A2AC07 ((const unaligned_uint16*)RomFixedPtr(0xa2ac07))
+#define g_word_A2AC11 ((const unaligned_uint16*)RomFixedPtr(0xa2ac11))
+#define g_word_A2B520 ((const unaligned_uint16*)RomFixedPtr(0xa2b520))
+#define g_word_A2B530 ((const unaligned_uint16*)RomFixedPtr(0xa2b530))
+#define g_word_A2B550 ((const unaligned_uint16*)RomFixedPtr(0xa2b550))
+#define g_word_A2B75B ((const unaligned_uint16*)RomFixedPtr(0xa2b75b))
+#define g_word_A2BBBB (*(unaligned_uint16 *)RomFixedPtr(0xa2bbbb))
+#define g_word_A2BBBF (*(unaligned_uint16 *)RomFixedPtr(0xa2bbbf))
+#define g_word_A2BE86 ((const unaligned_uint16*)RomFixedPtr(0xa2be86))
+#define g_word_A2C1C1 ((const unaligned_uint16*)RomFixedPtr(0xa2c1c1))
+#define g_word_A2C1C5 (*(unaligned_uint16 *)RomFixedPtr(0xa2c1c5))
+#define g_word_A2C6CA (*(unaligned_uint16 *)RomFixedPtr(0xa2c6ca))
+#define g_word_A2C6CE (*(unaligned_uint16 *)RomFixedPtr(0xa2c6ce))
+#define g_off_A2CB77 ((const unaligned_uint16*)RomFixedPtr(0xa2cb77))
+#define g_off_A2DF5E ((const unaligned_uint16*)RomFixedPtr(0xa2df5e))
+#define g_off_A2DF6A ((const unaligned_uint16*)RomFixedPtr(0xa2df6a))
+#define g_off_A2E5EF ((const unaligned_uint16*)RomFixedPtr(0xa2e5ef))
+#define g_word_A2EA56 ((const unaligned_uint16*)RomFixedPtr(0xa2ea56))
+#define g_off_A2EA4E ((const unaligned_uint16*)RomFixedPtr(0xa2ea4e))
+#define g_off_A2EC3A ((const unaligned_uint16*)RomFixedPtr(0xa2ec3a))
+#define g_off_A2EDFB ((const unaligned_uint16*)RomFixedPtr(0xa2edfb))
+#define g_off_A2F107 ((const unaligned_uint16*)RomFixedPtr(0xa2f107))
 
 
 
@@ -444,7 +444,7 @@ void MaridiaBeybladeTurtle_Func3(uint16 k) {  // 0xA28EE0
     if (!(Enemy_MoveRight_IgnoreSlopes(k, INT16_SHL16(1)))) {
       E->base.current_instruction = addr_kMaridiaBeybladeTurtle_Ilist_8C4A;
       E->base.instruction_timer = 1;
-      //*((uint16 *)RomPtr_A2(k) + 3) = g_word_A28D54; // WTF?
+      //*((const unaligned_uint16*)RomPtr_A2(k) + 3) = g_word_A28D54; // WTF?
       E->mbte_var_A = addr_locret_A28E09;
     }
   }
@@ -2220,7 +2220,7 @@ uint16 Rinka_Instr_B9A2(uint16 k, uint16 j) {  // 0xA2B9A2
   if (sign16(E->rinka_var_1E - 3))
     return j + 2;
   else
-    return *(uint16 *)RomPtr_A2(j);
+    return *(unaligned_uint16 *)RomPtr_A2(j);
 }
 
 const uint16 *Rinka_Instr_B9B3(uint16 k, const uint16 *jp) {  // 0xA2B9B3
@@ -3047,7 +3047,7 @@ void HirisingSlowfalling_Init(void) {  // 0xA2DF76
   E->hsg_var_01 = E->base.y_pos;
   int v2 = HIBYTE(E->hsg_parameter_1);
   E->hsg_var_E = g_off_A2DF5E[v2];
-  E->hsg_var_F = *(uint16 *)RomPtr_A2(g_off_A2DF6A[v2]);
+  E->hsg_var_F = *(unaligned_uint16 *)RomPtr_A2(g_off_A2DF6A[v2]);
   uint16 r18 = HirisingSlowfalling_Func_1(cur_enemy_index);
   HirisingSlowfalling_Func_2(cur_enemy_index, r18);
   E->hsg_var_03 = E->hsg_var_01 - r18;

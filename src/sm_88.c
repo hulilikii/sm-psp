@@ -9,13 +9,13 @@
 #define g_byte_88A286 ((uint8*)RomFixedPtr(0x88a286))
 #define kPowerBombExplosionColors ((uint8*)RomFixedPtr(0x888d85))
 #define g_byte_889079 ((uint8*)RomFixedPtr(0x889079))
-#define g_word_88A938 ((uint16*)RomFixedPtr(0x88a938))
+#define g_word_88A938 ((const unaligned_uint16*)RomFixedPtr(0x88a938))
 #define kHdmaScrollEntrys ((HdmaScrollEntry*)RomFixedPtr(0x88aec1))
-#define g_word_88B589 ((uint16*)RomFixedPtr(0x88b589))
-#define g_word_88B60A ((uint16*)RomFixedPtr(0x88b60a))
-#define g_word_88D992 ((uint16*)RomFixedPtr(0x88d992))
+#define g_word_88B589 ((const unaligned_uint16*)RomFixedPtr(0x88b589))
+#define g_word_88B60A ((const unaligned_uint16*)RomFixedPtr(0x88b60a))
+#define g_word_88D992 ((const unaligned_uint16*)RomFixedPtr(0x88d992))
 #define g_byte_88E3C9 ((uint8*)RomFixedPtr(0x88e3c9))
-#define g_word_88E833 ((uint16*)RomFixedPtr(0x88e833))
+#define g_word_88E833 ((const unaligned_uint16*)RomFixedPtr(0x88e833))
 #define g_byte_88EA8B ((uint8*)RomFixedPtr(0x88ea8b))
 
 void CallHdmaobjPreInstr(uint32 ea, uint16 k);
@@ -765,7 +765,7 @@ void HdmaobjPreInstr_XrayFunc3_DeactivateBeam(uint16 k) {  // 0x888934
   VramWriteEntry *v4;
 
   mov24(&hdma_ptr_1, 0x980001);
-  *(uint16 *)((uint8 *)&demo_num_input_frames + 1) = 0;
+  *(unaligned_uint16 *)((uint8*)&demo_num_input_frames  + 1) = 0;
   demo_input_prev = 0;
   demo_input_prev_new = 0;
   demo_backup_prev_controller_input = 0;
@@ -835,7 +835,7 @@ void HdmaobjPreInstr_XrayFunc5_DeactivateBeam(uint16 k) {  // 0x888A08
     demo_input = 0;
     demo_input_new = 0;
     mov24(&hdma_ptr_1, 0x980001);
-    *(uint16 *)((uint8 *)&demo_num_input_frames + 1) = 0;
+    *(unaligned_uint16 *)((uint8*)&demo_num_input_frames  + 1) = 0;
     demo_input_prev = 0;
     demo_input_prev_new = 0;
     demo_backup_prev_controller_input = 0;
@@ -1748,11 +1748,11 @@ void RoomMainAsm_ScrollingSky(const uint16 *src) {  // 0x88AFA3
 }
 
 void RoomCode_ScrollingSkyLand(void) {  // 0x88AF8D
-  RoomMainAsm_ScrollingSky((const uint16 *)RomPtr_88(addr_off_88AD9C));
+  RoomMainAsm_ScrollingSky((const unaligned_uint16*)RomPtr_88(addr_off_88AD9C));
 }
 
 void RoomMainAsm_ScrollingSkyOcean(void) {  // 0x88AF99
-  RoomMainAsm_ScrollingSky((const uint16 *)RomPtr_88(addr_off_88ADA6));
+  RoomMainAsm_ScrollingSky((const unaligned_uint16*)RomPtr_88(addr_off_88ADA6));
 }
 
 static const SpawnHdmaObject_Args unk_88B08C = { 0x42, 0x11, 0xb0ac };
@@ -1884,20 +1884,20 @@ void FxHandleTide(void) {  // 0x88B2C9
     uint16 v1 = 8 * kSinCosTable8bit_Sext[v0];
     if ((kSinCosTable8bit_Sext[v0] & 0x1000) != 0)
       --fx_y_offset;
-    *(uint16 *)((uint8 *)&fx_y_suboffset + 1) = v1;
+    *(unaligned_uint16 *)((uint8*)&fx_y_suboffset  + 1) = v1;
     if ((kSinCosTable8bit_Sext[v0] & 0x8000) == 0)
       v2 = tide_phase + 288;
     else
       v2 = tide_phase + 192;
     tide_phase = v2;
-  } else if ((*(uint16 *)((uint8 *)&fx_y_vel + 1) & 0x4000) != 0) {
+  } else if ((*(unaligned_uint16 *)((uint8*)&fx_y_vel  + 1) & 0x4000) != 0) {
     fx_y_suboffset = 0;
     fx_y_offset = 0;
     int v3 = HIBYTE(tide_phase);
     uint16 v4 = 32 * kSinCosTable8bit_Sext[v3];
     if ((kSinCosTable8bit_Sext[v3] & 0x400) != 0)
       --fx_y_offset;
-    *(uint16 *)((uint8 *)&fx_y_suboffset + 1) = v4;
+    *(unaligned_uint16 *)((uint8*)&fx_y_suboffset  + 1) = v4;
     if ((kSinCosTable8bit_Sext[v3] & 0x8000) == 0)
       v5 = tide_phase + 224;
     else
@@ -2729,7 +2729,7 @@ uint8 GravitySuitPickup_6(void) {  // 0x88E25F
   reg_COLDATA[1] = 64;
   reg_COLDATA[0] = 32;
   mov24(&hdma_ptr_1, 0x980001);
-  *(uint16 *)((uint8 *)&demo_num_input_frames + 1) = 0;
+  *(unaligned_uint16 *)((uint8*)&demo_num_input_frames  + 1) = 0;
   demo_input_prev = 0;
   demo_input_prev_new = 0;
   demo_backup_prev_controller_input = 0;
@@ -2848,12 +2848,12 @@ const uint8 *HdmaobjInstr_E4BD(uint16 k, const uint8 *hdp) {  // 0x88E4BD
     kraid_unk9000 = 192;
     g_word_7E9006 = 192;
     v4 = 12620032;
-    *(uint16 *)((uint8 *)&g_word_7E9002 + 1) = HIWORD(v4);
-    *(uint16 *)((uint8 *)&kraid_unk9000 + 1) = v4;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9002  + 1) = HIWORD(v4);
+    *(unaligned_uint16 *)((uint8*)&kraid_unk9000  + 1) = v4;
     g_word_7E9004 = -28288;
     v5 = 12620032;
-    *(uint16 *)((uint8 *)&g_word_7E9008 + 1) = HIWORD(v5);
-    *(uint16 *)((uint8 *)&g_word_7E9006 + 1) = v5;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9008  + 1) = HIWORD(v5);
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9006  + 1) = v5;
     g_word_7E900A = addr_loc_889180;
     g_word_7E900C = 0;
   } else {
@@ -2864,17 +2864,17 @@ const uint8 *HdmaobjInstr_E4BD(uint16 k, const uint8 *hdp) {  // 0x88E4BD
     g_word_7E9012 = 160;
     g_word_7E9015 = 160;
     v2 = 10522880;
-    *(uint16 *)((uint8 *)&g_word_7E9002 + 1) = HIWORD(v2);
-    *(uint16 *)((uint8 *)&kraid_unk9000 + 1) = v2;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9002  + 1) = HIWORD(v2);
+    *(unaligned_uint16 *)((uint8*)&kraid_unk9000  + 1) = v2;
     v3 = 10522880;
-    *(uint16 *)((uint8 *)&g_word_7E9008 + 1) = HIWORD(v3);
-    *(uint16 *)((uint8 *)&g_word_7E9006 + 1) = v3;
-    *(uint16 *)((uint8 *)&g_word_7E900C + 1) = -28416;
-    *(uint16 *)((uint8 *)&g_word_7E9012 + 1) = -28416;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9008  + 1) = HIWORD(v3);
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9006  + 1) = v3;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E900C  + 1) = -28416;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9012  + 1) = -28416;
     g_word_7E9004 = -28352;
     g_word_7E900A = -28352;
-    *(uint16 *)((uint8 *)&g_word_7E900F + 1) = -28352;
-    *(uint16 *)((uint8 *)&g_word_7E9015 + 1) = -28352;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E900F  + 1) = -28352;
+    *(unaligned_uint16 *)((uint8*)&g_word_7E9015  + 1) = -28352;
     g_word_7E9018 = 0;
   }
   int v6 = k >> 1;
@@ -3021,13 +3021,13 @@ const uint8 *HdmaobjInstr_InitMorphBallEyeBeamHdma(uint16 k, const uint8 *hdp) {
   fx_layer_blending_config_c = 16;
   kraid_unk9000 = 228;
   v2 = 14979328;
-  *(uint16 *)((uint8 *)&g_word_7E9002 + 1) = HIWORD(v2);
-  *(uint16 *)((uint8 *)&kraid_unk9000 + 1) = v2;
+  *(unaligned_uint16 *)((uint8*)&g_word_7E9002  + 1) = HIWORD(v2);
+  *(unaligned_uint16 *)((uint8*)&kraid_unk9000  + 1) = v2;
   g_word_7E9004 = -28216;
   g_word_7E9006 = 152;
   v3 = 37520;
-  *(uint16 *)((uint8 *)&g_word_7E9008 + 1) = HIWORD(v3);
-  *(uint16 *)((uint8 *)&g_word_7E9006 + 1) = v3;
+  *(unaligned_uint16 *)((uint8*)&g_word_7E9008  + 1) = HIWORD(v3);
+  *(unaligned_uint16 *)((uint8*)&g_word_7E9006  + 1) = v3;
   enemy_data[1].ai_var_C = 1;
   int v4 = k >> 1;
   hdma_object_C[v4] = 0;
@@ -3170,12 +3170,12 @@ void CinematicFunction_Intro_Func133(void) {  // 0x88EC3B
   button_config_shoot_x_saved = 192;
   button_config_itemcancel_y_saved = 192;
   v0 = 12621824;
-  *(uint16 *)((uint8 *)&button_config_jump_a_saved + 1) = HIWORD(v0);
-  *(uint16 *)((uint8 *)&button_config_shoot_x_saved + 1) = v0;
+  *(unaligned_uint16 *)((uint8*)&button_config_jump_a_saved  + 1) = HIWORD(v0);
+  *(unaligned_uint16 *)((uint8*)&button_config_shoot_x_saved  + 1) = v0;
   button_config_run_b_saved = -26496;
   v1 = 12621824;
-  *(uint16 *)((uint8 *)&button_config_itemswitch_saved + 1) = HIWORD(v1);
-  *(uint16 *)((uint8 *)&button_config_itemcancel_y_saved + 1) = v1;
+  *(unaligned_uint16 *)((uint8*)&button_config_itemswitch_saved  + 1) = HIWORD(v1);
+  *(unaligned_uint16 *)((uint8*)&button_config_itemcancel_y_saved  + 1) = v1;
   button_config_aim_down_L_saved = -26496;
   button_config_aim_up_R_saved = 0;
   static const SpawnHdmaObject_Args unk_88EC82 = { 0x42, 0x11, 0xec8a };

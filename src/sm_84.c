@@ -5,23 +5,23 @@
 #include "funcs.h"
 
 
-#define kGoldenTorizoPalette1 ((uint16*)RomFixedPtr(0x848032))
-#define kGoldenTorizoPalette2 ((uint16*)RomFixedPtr(0x848132))
-#define kXrayBlockDrawingInstrs ((uint16*)RomFixedPtr(0x84839d))
-#define kGrayDoorPreInstrs ((uint16*)RomFixedPtr(0x84be4b))
-#define kDowardGatePlmListPtrs ((uint16*)RomFixedPtr(0x84c70a))
-#define kDowardGateLeftBlockBts ((uint16*)RomFixedPtr(0x84c71a))
-#define kDowardGateRightBlockBts ((uint16*)RomFixedPtr(0x84c72a))
-#define kUpwardGatePlmListPtrs ((uint16*)RomFixedPtr(0x84c764))
-#define kUpwardGateLeftBlockBts ((uint16*)RomFixedPtr(0x84c774))
-#define kUpwardGateRightBlockBts ((uint16*)RomFixedPtr(0x84c784))
-#define off_84DB28 ((uint16*)RomFixedPtr(0x84db28))
-#define off_84E05F ((uint16*)RomFixedPtr(0x84e05f))
-#define off_84E077 ((uint16*)RomFixedPtr(0x84e077))
+#define kGoldenTorizoPalette1 ((const unaligned_uint16*)RomFixedPtr(0x848032))
+#define kGoldenTorizoPalette2 ((const unaligned_uint16*)RomFixedPtr(0x848132))
+#define kXrayBlockDrawingInstrs ((const unaligned_uint16*)RomFixedPtr(0x84839d))
+#define kGrayDoorPreInstrs ((const unaligned_uint16*)RomFixedPtr(0x84be4b))
+#define kDowardGatePlmListPtrs ((const unaligned_uint16*)RomFixedPtr(0x84c70a))
+#define kDowardGateLeftBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c71a))
+#define kDowardGateRightBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c72a))
+#define kUpwardGatePlmListPtrs ((const unaligned_uint16*)RomFixedPtr(0x84c764))
+#define kUpwardGateLeftBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c774))
+#define kUpwardGateRightBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c784))
+#define off_84DB28 ((const unaligned_uint16*)RomFixedPtr(0x84db28))
+#define off_84E05F ((const unaligned_uint16*)RomFixedPtr(0x84e05f))
+#define off_84E077 ((const unaligned_uint16*)RomFixedPtr(0x84e077))
 #define fnPlmPreInstr_Empty4 0x848AA6
-#define kPlmVramAddresses ((uint16*)RomFixedPtr(0x8487cd))
-#define kPlmTileDataOffs ((uint16*)RomFixedPtr(0x8487d5))
-#define kPlmStartingTileNumber ((uint16*)RomFixedPtr(0x8487dd))
+#define kPlmVramAddresses ((const unaligned_uint16*)RomFixedPtr(0x8487cd))
+#define kPlmTileDataOffs ((const unaligned_uint16*)RomFixedPtr(0x8487d5))
+#define kPlmStartingTileNumber ((const unaligned_uint16*)RomFixedPtr(0x8487dd))
 
 void CallPlmPreInstr(uint32 ea, uint16 k);
 const uint8 *CallPlmInstr(uint32 ea, const uint8 *j, uint16 k);
@@ -820,7 +820,7 @@ LABEL_2:
   r26 = layer1_y_pos >> 4;
   if (sign16((layer1_y_pos >> 4) + 15 - y))
     return;
-  v2 = *(uint16 *)RomPtr_84orRAM(v1);
+  v2 = *(unaligned_uint16 *)RomPtr_84orRAM(v1);
   if (v2 < 0) {
     r20 = v2 & 0x7FFF;
     if (layer1_x_pos >> 4 == x || (int16)((layer1_x_pos >> 4) - x) < 0) {
@@ -861,7 +861,7 @@ LABEL_2:
             uint16 v26;
             v26 = 0;
             while (1) {
-              x = *(uint16 *)RomPtr_84orRAM(r3);
+              x = *(unaligned_uint16 *)RomPtr_84orRAM(r3);
               uint16 v27, v29;
               v27 = x & 0x3FF;
               v28 = x & 0xC00;
@@ -904,7 +904,7 @@ LABEL_70:
                 uint16 addr = r3;
                 if ((r22 & 0x8000) == 0)
                   addr = r3 + 2 * r22;
-                v31 = *(uint16 *)RomPtr_84orRAM(addr);
+                v31 = *(unaligned_uint16 *)RomPtr_84orRAM(addr);
                 if (v31) {
                   x = plm_x_block + (int8)v31;
                   uint16 v32 = addr + 1;
@@ -999,7 +999,7 @@ LABEL_70:
           r3 = r18 + v1 + 2;
           uint16 v16 = 0;
           while (1) {
-            x = *(uint16 *)RomPtr_84orRAM(r3);
+            x = *(unaligned_uint16 *)RomPtr_84orRAM(r3);
             uint16 v17 = x & 0x3FF, v19;
             v18 = x & 0xC00;
             if ((x & 0xC00) != 0) {
@@ -1411,25 +1411,25 @@ void PlmSetup_QuicksandSurface_0(uint16 j) {  // 0x84B447
   samus_y_speed = 0;
   extra_samus_y_subdisplacement = 0;
   extra_samus_y_displacement = 0;
-  *(uint16 *)((uint8 *)&extra_samus_y_subdisplacement + 1) = g_word_84B48F[j >> 1];
+  *(unaligned_uint16 *)((uint8*)&extra_samus_y_subdisplacement  + 1) = g_word_84B48F[j >> 1];
 }
 
 void PlmSetup_QuicksandSurface_1(uint16 j) {  // 0x84B45A
   int v1 = j >> 1;
-  if (g_word_84B493[v1] < *(uint16 *)((uint8 *)&samus_y_subspeed + 1)) {
+  if (g_word_84B493[v1] < *(unaligned_uint16 *)((uint8*)&samus_y_subspeed  + 1)) {
     samus_y_subspeed = 0;
     samus_y_speed = 0;
-    *(uint16 *)((uint8 *)&samus_y_subspeed + 1) = g_word_84B493[v1];
+    *(unaligned_uint16 *)((uint8*)&samus_y_subspeed  + 1) = g_word_84B493[v1];
   }
   extra_samus_y_subdisplacement = 0;
   extra_samus_y_displacement = 0;
-  *(uint16 *)((uint8 *)&extra_samus_y_subdisplacement + 1) = g_word_84B48B[v1];
+  *(unaligned_uint16 *)((uint8*)&extra_samus_y_subdisplacement  + 1) = g_word_84B48B[v1];
 }
 
 void PlmSetup_QuicksandSurface_2(uint16 j) {  // 0x84B47B
   extra_samus_y_subdisplacement = 0;
   extra_samus_y_displacement = 0;
-  *(uint16 *)((uint8 *)&extra_samus_y_subdisplacement + 1) = g_word_84B48B[j >> 1];
+  *(unaligned_uint16 *)((uint8*)&extra_samus_y_subdisplacement  + 1) = g_word_84B48B[j >> 1];
   autojump_timer = 0;
 }
 

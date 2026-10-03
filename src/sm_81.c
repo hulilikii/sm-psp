@@ -7,26 +7,26 @@
 #include "enemy_types.h"
 
 
-#define kOffsetToSaveSlot ((uint16*)RomFixedPtr(0x81812b))
+#define kOffsetToSaveSlot ((const unaligned_uint16*)RomFixedPtr(0x81812b))
 #define kPackedBytesPerArea_Count ((uint8*)RomFixedPtr(0x818131))
-#define kPackedBytesPerArea_PackedOffs ((uint16*)RomFixedPtr(0x818138))
-#define kPackedBytesPerArea_UnpackedOffs ((uint16*)RomFixedPtr(0x8182d6))
-#define kMenuPalettes ((uint16*)RomFixedPtr(0x8ee400))
-#define kZebesAndStarsTilemap ((uint16*)RomFixedPtr(0x8edc00))
-#define kAreaMapForegroundSetDefs ((uint16*)RomFixedPtr(0x81a4e6))
-#define kAreaMapForegroundColors ((uint16*)RomFixedPtr(0x81a40e))
-#define kBg2RoomSelectMapTilemap ((uint16*)RomFixedPtr(0xb6e000))
-#define kFileSelectExpandingSquareTilemap ((uint16*)RomFixedPtr(0x81b14b))
+#define kPackedBytesPerArea_PackedOffs ((const unaligned_uint16*)RomFixedPtr(0x818138))
+#define kPackedBytesPerArea_UnpackedOffs ((const unaligned_uint16*)RomFixedPtr(0x8182d6))
+#define kMenuPalettes ((const unaligned_uint16*)RomFixedPtr(0x8ee400))
+#define kZebesAndStarsTilemap ((const unaligned_uint16*)RomFixedPtr(0x8edc00))
+#define kAreaMapForegroundSetDefs ((const unaligned_uint16*)RomFixedPtr(0x81a4e6))
+#define kAreaMapForegroundColors ((const unaligned_uint16*)RomFixedPtr(0x81a40e))
+#define kBg2RoomSelectMapTilemap ((const unaligned_uint16*)RomFixedPtr(0xb6e000))
+#define kFileSelectExpandingSquareTilemap ((const unaligned_uint16*)RomFixedPtr(0x81b14b))
 #define kMapIconDataPointers ((MapIconDataPointers*)RomFixedPtr(0x82c7cb))
-#define g_word_82C749 ((uint16*)RomFixedPtr(0x82c749))
+#define g_word_82C749 ((const unaligned_uint16*)RomFixedPtr(0x82c749))
 #define kRoomState_aa82_aa8f (*(RoomDefRoomstate*)RomFixedPtr(0x8faa8f))
 #define kLeftMapScrollArrowData (*(MapScrollArrowData*)RomFixedPtr(0x81af32))
 #define kRightMapScrollArrowData (*(MapScrollArrowData*)RomFixedPtr(0x81af3c))
 #define kUpMapScrollArrowData (*(MapScrollArrowData*)RomFixedPtr(0x81af46))
 #define kDownMapScrollArrowData (*(MapScrollArrowData*)RomFixedPtr(0x81af50))
-#define g_off_82C569 ((uint16*)RomFixedPtr(0x82c569))
-#define kSamusSpritemapTable ((uint16*)RomFixedPtr(0x92808d))
-#define g_off_93A1A1 ((uint16*)RomFixedPtr(0x93a1a1))
+#define g_off_82C569 ((const unaligned_uint16*)RomFixedPtr(0x82c569))
+#define kSamusSpritemapTable ((const unaligned_uint16*)RomFixedPtr(0x92808d))
+#define g_off_93A1A1 ((const unaligned_uint16*)RomFixedPtr(0x93a1a1))
 #define kExpandingSquareVels ((ExpandingSquareVels*)RomFixedPtr(0x81aa34))
 
 
@@ -2512,7 +2512,7 @@ void LoadMenuTilemap(uint16 k, uint16 j) {  // 0x81B3E2
 
   while (1) {
     while (1) {
-      v2 = *(uint16 *)RomPtr_81(j);
+      v2 = *(unaligned_uint16 *)RomPtr_81(j);
       if (v2 != -2)
         break;
       j += 2;

@@ -7,32 +7,32 @@
 #include "enemy_types.h"
 
 
-#define g_off_A890DA ((uint16*)RomFixedPtr(0xa890da))
-#define g_word_A8A0A7 (*(uint16*)RomFixedPtr(0xa8a0a7))
-#define g_word_A8A0A9 (*(uint16*)RomFixedPtr(0xa8a0a9))
-#define g_word_A8A0AB (*(uint16*)RomFixedPtr(0xa8a0ab))
-#define g_word_A8A0AD (*(uint16*)RomFixedPtr(0xa8a0ad))
-#define g_word_A8A0B3 (*(uint16*)RomFixedPtr(0xa8a0b3))
-#define g_word_A8A0B5 (*(uint16*)RomFixedPtr(0xa8a0b5))
-#define g_word_A8A0B7 (*(uint16*)RomFixedPtr(0xa8a0b7))
-#define g_word_A8A0B9 (*(uint16*)RomFixedPtr(0xa8a0b9))
-#define g_word_A8A0BB (*(uint16*)RomFixedPtr(0xa8a0bb))
-#define g_word_A8A0BD (*(uint16*)RomFixedPtr(0xa8a0bd))
-#define g_word_A8A0C3 (*(uint16*)RomFixedPtr(0xa8a0c3))
-#define g_word_A8A0C5 (*(uint16*)RomFixedPtr(0xa8a0c5))
-#define g_off_A8A097 ((uint16*)RomFixedPtr(0xa8a097))
-#define kNorfairLavaMan_Palette ((uint16*)RomFixedPtr(0xa8ac1c))
-#define g_word_A8AF79 ((uint16*)RomFixedPtr(0xa8af79))
-#define g_word_A8AF55 ((uint16*)RomFixedPtr(0xa8af55))
-#define g_off_A8AF67 ((uint16*)RomFixedPtr(0xa8af67))
-#define kBeetom_Ilist_B74E ((uint16*)RomFixedPtr(0xa8b74e))
-#define g_off_A8C599 ((uint16*)RomFixedPtr(0xa8c599))
-#define g_off_A8CC30 ((uint16*)RomFixedPtr(0xa8cc30))
-#define g_off_A8E380 ((uint16*)RomFixedPtr(0xa8e380))
-#define g_off_A8E682 ((uint16*)RomFixedPtr(0xa8e682))
-#define g_off_A8E688 ((uint16*)RomFixedPtr(0xa8e688))
-#define g_word_A8E7CC ((uint16*)RomFixedPtr(0xa8e7cc))
-#define g_off_A8F3B0 ((uint16*)RomFixedPtr(0xa8f3b0))
+#define g_off_A890DA ((const unaligned_uint16*)RomFixedPtr(0xa890da))
+#define g_word_A8A0A7 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0a7))
+#define g_word_A8A0A9 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0a9))
+#define g_word_A8A0AB (*(unaligned_uint16 *)RomFixedPtr(0xa8a0ab))
+#define g_word_A8A0AD (*(unaligned_uint16 *)RomFixedPtr(0xa8a0ad))
+#define g_word_A8A0B3 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0b3))
+#define g_word_A8A0B5 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0b5))
+#define g_word_A8A0B7 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0b7))
+#define g_word_A8A0B9 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0b9))
+#define g_word_A8A0BB (*(unaligned_uint16 *)RomFixedPtr(0xa8a0bb))
+#define g_word_A8A0BD (*(unaligned_uint16 *)RomFixedPtr(0xa8a0bd))
+#define g_word_A8A0C3 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0c3))
+#define g_word_A8A0C5 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0c5))
+#define g_off_A8A097 ((const unaligned_uint16*)RomFixedPtr(0xa8a097))
+#define kNorfairLavaMan_Palette ((const unaligned_uint16*)RomFixedPtr(0xa8ac1c))
+#define g_word_A8AF79 ((const unaligned_uint16*)RomFixedPtr(0xa8af79))
+#define g_word_A8AF55 ((const unaligned_uint16*)RomFixedPtr(0xa8af55))
+#define g_off_A8AF67 ((const unaligned_uint16*)RomFixedPtr(0xa8af67))
+#define kBeetom_Ilist_B74E ((const unaligned_uint16*)RomFixedPtr(0xa8b74e))
+#define g_off_A8C599 ((const unaligned_uint16*)RomFixedPtr(0xa8c599))
+#define g_off_A8CC30 ((const unaligned_uint16*)RomFixedPtr(0xa8cc30))
+#define g_off_A8E380 ((const unaligned_uint16*)RomFixedPtr(0xa8e380))
+#define g_off_A8E682 ((const unaligned_uint16*)RomFixedPtr(0xa8e682))
+#define g_off_A8E688 ((const unaligned_uint16*)RomFixedPtr(0xa8e688))
+#define g_word_A8E7CC ((const unaligned_uint16*)RomFixedPtr(0xa8e7cc))
+#define g_off_A8F3B0 ((const unaligned_uint16*)RomFixedPtr(0xa8f3b0))
 
 
 
@@ -595,7 +595,7 @@ void Fune_Func_4(void) {  // 0xA8979B
   Enemy_Fune *E = Get_Fune(cur_enemy_index);
   E->base.instruction_timer = 1;
   E->base.timer = 0;
-  E->base.current_instruction = *(uint16 *)RomPtr_A8(E->fune_var_A);
+  E->base.current_instruction = *(unaligned_uint16 *)RomPtr_A8(E->fune_var_A);
 }
 
 void WreckedShipGhost_Init(void) {  // 0xA89AEE

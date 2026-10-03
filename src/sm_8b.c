@@ -5,33 +5,33 @@
 #include "variables.h"
 
 
-#define kPalettes_Intro ((uint16*)RomFixedPtr(0x8ce3e9))
-#define kPalettes_Intro2 ((uint16*)RomFixedPtr(0x8ce5e9))
-#define kPalettes_Intro4 ((uint16*)RomFixedPtr(0x8ce7e9))
-#define kPalettes_Intro5 ((uint16*)RomFixedPtr(0x8ce9e9))
-#define kPalettes_Intro6 ((uint16*)RomFixedPtr(0x8cebe9))
-#define kPalettes_Intro3 ((uint16*)RomFixedPtr(0x8cede9))
-#define g_word_8CD81B ((uint16*)RomFixedPtr(0x8cd81b))
-#define g_word_8BA72B ((uint16*)RomFixedPtr(0x8ba72b))
-#define kLevelData_MotherBrainRoomFromCutscene ((uint16*)RomFixedPtr(0x8cbec3))
-#define kLevelData_RoomWithBabyMetroidHatching ((uint16*)RomFixedPtr(0x8cc083))
-#define g_word_8CDC9B ((uint16*)RomFixedPtr(0x8cdc9b))
-#define g_word_8CDEDB ((uint16*)RomFixedPtr(0x8cdedb))
-#define g_word_8CEFE9 ((uint16*)RomFixedPtr(0x8cefe9))
-#define g_off_8BE70D ((uint16*)RomFixedPtr(0x8be70d))
-#define g_word_8BE717 ((uint16*)RomFixedPtr(0x8be717))
-#define g_word_8BE721 ((uint16*)RomFixedPtr(0x8be721))
-#define g_word_8BE737 ((uint16*)RomFixedPtr(0x8be737))
-#define g_word_8BE741 ((uint16*)RomFixedPtr(0x8be741))
-#define g_word_8BE9CF ((uint16*)RomFixedPtr(0x8be9cf))
-#define kCinematicFunction_Intro_Func142_Tab0 ((uint16*)RomFixedPtr(0x8be45a))
-#define kCinematicFunction_Intro_Func144_Tab0 ((uint16*)RomFixedPtr(0x8be5e7))
-#define g_word_8CDF5B ((uint16*)RomFixedPtr(0x8cdf5b))
-#define g_word_8BE9A7 ((uint16*)RomFixedPtr(0x8be9a7))
-#define g_word_8BF6B8 ((uint16*)RomFixedPtr(0x8bf6b8))
-#define g_word_8BF6D8 ((uint16*)RomFixedPtr(0x8bf6d8))
-#define g_word_8CE1E9 ((uint16*)RomFixedPtr(0x8ce1e9))
-#define g_off_8CBC5D ((uint16*)RomFixedPtr(0x8cbc5d))
+#define kPalettes_Intro ((const unaligned_uint16*)RomFixedPtr(0x8ce3e9))
+#define kPalettes_Intro2 ((const unaligned_uint16*)RomFixedPtr(0x8ce5e9))
+#define kPalettes_Intro4 ((const unaligned_uint16*)RomFixedPtr(0x8ce7e9))
+#define kPalettes_Intro5 ((const unaligned_uint16*)RomFixedPtr(0x8ce9e9))
+#define kPalettes_Intro6 ((const unaligned_uint16*)RomFixedPtr(0x8cebe9))
+#define kPalettes_Intro3 ((const unaligned_uint16*)RomFixedPtr(0x8cede9))
+#define g_word_8CD81B ((const unaligned_uint16*)RomFixedPtr(0x8cd81b))
+#define g_word_8BA72B ((const unaligned_uint16*)RomFixedPtr(0x8ba72b))
+#define kLevelData_MotherBrainRoomFromCutscene ((const unaligned_uint16*)RomFixedPtr(0x8cbec3))
+#define kLevelData_RoomWithBabyMetroidHatching ((const unaligned_uint16*)RomFixedPtr(0x8cc083))
+#define g_word_8CDC9B ((const unaligned_uint16*)RomFixedPtr(0x8cdc9b))
+#define g_word_8CDEDB ((const unaligned_uint16*)RomFixedPtr(0x8cdedb))
+#define g_word_8CEFE9 ((const unaligned_uint16*)RomFixedPtr(0x8cefe9))
+#define g_off_8BE70D ((const unaligned_uint16*)RomFixedPtr(0x8be70d))
+#define g_word_8BE717 ((const unaligned_uint16*)RomFixedPtr(0x8be717))
+#define g_word_8BE721 ((const unaligned_uint16*)RomFixedPtr(0x8be721))
+#define g_word_8BE737 ((const unaligned_uint16*)RomFixedPtr(0x8be737))
+#define g_word_8BE741 ((const unaligned_uint16*)RomFixedPtr(0x8be741))
+#define g_word_8BE9CF ((const unaligned_uint16*)RomFixedPtr(0x8be9cf))
+#define kCinematicFunction_Intro_Func142_Tab0 ((const unaligned_uint16*)RomFixedPtr(0x8be45a))
+#define kCinematicFunction_Intro_Func144_Tab0 ((const unaligned_uint16*)RomFixedPtr(0x8be5e7))
+#define g_word_8CDF5B ((const unaligned_uint16*)RomFixedPtr(0x8cdf5b))
+#define g_word_8BE9A7 ((const unaligned_uint16*)RomFixedPtr(0x8be9a7))
+#define g_word_8BF6B8 ((const unaligned_uint16*)RomFixedPtr(0x8bf6b8))
+#define g_word_8BF6D8 ((const unaligned_uint16*)RomFixedPtr(0x8bf6d8))
+#define g_word_8CE1E9 ((const unaligned_uint16*)RomFixedPtr(0x8ce1e9))
+#define g_off_8CBC5D ((const unaligned_uint16*)RomFixedPtr(0x8cbc5d))
 
 void CallCinematicFunction(uint32 ea);
 void CallCinematicSprPreInstr(uint32 ea, uint16 j);
@@ -537,7 +537,7 @@ void CallProcessCinematicBgObject(uint32 ea, uint16 k, uint16 j, uint16 r18) {
 
 void ProcessCinematicBgObject(uint16 v0, uint16 r18) {  // 0x8B8839
   uint16 j = cinematicbg_arr1[v0 >> 1];
-  CallProcessCinematicBgObject(*(uint16 *)RomPtr_8C(j) | 0x8B0000, v0, j, r18);
+  CallProcessCinematicBgObject(*(unaligned_uint16 *)RomPtr_8C(j) | 0x8B0000, v0, j, r18);
 }
 
 void ProcessCinematicBgObject_DrawChar(uint16 k, uint16 j, uint16 r18) {  // 0x8B884D
@@ -570,7 +570,7 @@ void ProcessCinematicBgObject_DrawToTextTilemap(uint16 k, uint16 j, uint16 r18) 
   uint16 n = v3[3];
   while (1) {
     do {
-      *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + offs) = *((uint16 *)RomPtr_8C(j) + 2);
+      *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + offs) = *((const unaligned_uint16*)RomPtr_8C(j) + 2);
       j += 2;
       offs += 2;
       --m;
@@ -597,7 +597,7 @@ void ProcessCinematicBgObject_DrawToBgTilemap(uint16 k, uint16 j, uint16 r18) { 
   int n = v3[3];
   while (1) {
     do {
-      *(uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + offs) = *((uint16 *)RomPtr_8C(j) + 2);
+      *(uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + offs) = *((const unaligned_uint16*)RomPtr_8C(j) + 2);
       j += 2;
       offs += 2;
       --m;
@@ -1137,7 +1137,7 @@ void ProcessCinematicSpriteInstructionList(uint16 k) {  // 0x8B9409
     }
     int v7 = v1 >> 1;
     cinematicspr_instr_timer[v7] = v6;
-    cinematicspr_whattodraw[v7] = *((uint16 *)RomPtr_8B(v4) + 1);
+    cinematicspr_whattodraw[v7] = *((const unaligned_uint16*)RomPtr_8B(v4) + 1);
     cinematicspr_instr_ptr[v7] = v4 + 4;
   }
 }
@@ -1155,7 +1155,7 @@ uint16 CinematicSprInstr_Sleep(uint16 k, uint16 j) {  // 0x8B9442
 }
 
 uint16 CinematicSprInstr_SetPreInstr(uint16 k, uint16 j) {  // 0x8B944C
-  cinematicspr_preinstr_func[k >> 1] = *(uint16 *)RomPtr_8B(j);
+  cinematicspr_preinstr_func[k >> 1] = *(unaligned_uint16 *)RomPtr_8B(j);
   return j + 2;
 }
 
@@ -1170,7 +1170,7 @@ uint16 CinematicSprInstr_GotoRel(uint16 k, uint16 j) {  // 0x8B94A2
 }
 
 uint16 CinematicSprInstr_Goto(uint16 k, uint16 j) {  // 0x8B94BC
-  return *(uint16 *)RomPtr_8B(j);
+  return *(unaligned_uint16 *)RomPtr_8B(j);
 }
 
 uint16 CinematicSprInstr_DecTimerGoto(uint16 k, uint16 j) {  // 0x8B94C3
@@ -1190,7 +1190,7 @@ uint16 CinematicSprInstr_DecTimerGotoRel(uint16 k, uint16 j) {  // 0x8B94CD
 }
 
 uint16 CinematicSprInstr_SetTimer(uint16 k, uint16 j) {  // 0x8B94D6
-  cinematicspr_goto_timer[k >> 1] = *(uint16 *)RomPtr_8B(j);
+  cinematicspr_goto_timer[k >> 1] = *(unaligned_uint16 *)RomPtr_8B(j);
   return j + 2;
 }
 
@@ -1256,7 +1256,7 @@ uint16 Mode7Instr_Delete(uint16 k, uint16 j) {  // 0x8B956B
 }
 
 uint16 Mode7Instr_SetPreInstr(uint16 k, uint16 j) {  // 0x8B9572
-  mode7_obj_preinstr_func[k >> 1] = *(uint16 *)RomPtr_8B(j);
+  mode7_obj_preinstr_func[k >> 1] = *(unaligned_uint16 *)RomPtr_8B(j);
   return j + 2;
 }
 
@@ -1266,7 +1266,7 @@ uint16 Mode7Instr_ClearPreInstr(uint16 k, uint16 j) {  // 0x8B957D
 }
 
 uint16 Mode7Instr_Goto(uint16 k, uint16 j) {  // 0x8B9586
-  return *(uint16 *)RomPtr_8B(j);
+  return *(unaligned_uint16 *)RomPtr_8B(j);
 }
 
 uint16 Mode7Instr_DecTimerAndGoto(uint16 k, uint16 j) {  // 0x8B958D
@@ -1278,7 +1278,7 @@ uint16 Mode7Instr_DecTimerAndGoto(uint16 k, uint16 j) {  // 0x8B958D
 }
 
 uint16 Mode7Instr_SetTimer(uint16 k, uint16 j) {  // 0x8B9597
-  mode7_obj_goto_timer[k >> 1] = *(uint16 *)RomPtr_8B(j);
+  mode7_obj_goto_timer[k >> 1] = *(unaligned_uint16 *)RomPtr_8B(j);
   return j + 2;
 }
 
@@ -1384,7 +1384,7 @@ uint16 CinematicBgInstr_Delete(uint16 k, uint16 j) {  // 0x8B9698
 }
 
 uint16 CinematicBgInstr_Goto(uint16 k, uint16 j) {  // 0x8B971E
-  return *(uint16 *)RomPtr_8C(j);
+  return *(unaligned_uint16 *)RomPtr_8C(j);
 }
 
 void sub_8B9743(void) {  // 0x8B9743
@@ -1555,7 +1555,7 @@ void CreditsObject_ProcessOne(void) {  // 0x8B996A
 void CreditsObject_Func1(uint16 j) {  // 0x8B99C1
   uint16 RegWord = Mult8x8(cinematic_var26, 0x40);
   int n = 31;
-  const uint16 *src = (const uint16*)(g_ram + 0x10000 + *((uint16 *)RomPtr_8C(j) + 1));
+  const uint16 *src = (const uint16*)(g_ram + 0x10000 + *((const unaligned_uint16*)RomPtr_8C(j) + 1));
   do {
     *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + RegWord) = *src++;
     RegWord += 2;
@@ -1568,7 +1568,7 @@ uint16 IntroObject_Delete(uint16 k, uint16 j) {  // 0x8B99FE
 }
 
 uint16 IntroObject_Goto(uint16 k, uint16 j) {  // 0x8B9A06
-  return *(uint16 *)RomPtr_8C(j);
+  return *(unaligned_uint16 *)RomPtr_8C(j);
 }
 
 uint16 IntroObject_DecTimerGoto(uint16 k, uint16 j) {  // 0x8B9A0D
@@ -1579,7 +1579,7 @@ uint16 IntroObject_DecTimerGoto(uint16 k, uint16 j) {  // 0x8B9A0D
 }
 
 uint16 IntroObject_SetTimer(uint16 k, uint16 j) {  // 0x8B9A17
-  cinematic_var23 = *(uint16 *)RomPtr_8C(j);
+  cinematic_var23 = *(unaligned_uint16 *)RomPtr_8C(j);
   return j + 2;
 }
 
@@ -2015,7 +2015,7 @@ void CinematicFunc_Func9(void) {  // 0x8B9FAE
 void ConfigureTitleSequenceGradientHDMA(void) {  // 0x8BA00A
   uint16 v0 = g_off_8CBC5D[(cinematic_var6 & 0xF0) >> 4];
   for (int i = 0; ; i += 2) {
-    uint16 v2 = *(uint16 *)RomPtr_8C(v0);
+    uint16 v2 = *(unaligned_uint16 *)RomPtr_8C(v0);
     hdma_table_1[i >> 1] = v2;
     if (!v2)
       break;
@@ -5196,12 +5196,12 @@ void CinematicFunction_Intro_Func144(void) {  // 0x8BE58A
   uint16 v5 = kCinematicFunction_Intro_Func144_Tab0[v0 + 1];
   uint16 v1 = kCinematicFunction_Intro_Func144_Tab0[v0];
   for (int i = 30; i >= 0; i -= 2) {
-    palette_buffer[(i >> 1) + 16] = *(uint16 *)RomPtr_8C(v1);
+    palette_buffer[(i >> 1) + 16] = *(unaligned_uint16 *)RomPtr_8C(v1);
     v1 -= 2;
   }
   uint16 v3 = v5;
   for (j = 30; (j & 0x8000) == 0; j -= 2) {
-    palette_buffer[(j >> 1) + 240] = *(uint16 *)RomPtr_8C(v3);
+    palette_buffer[(j >> 1) + 240] = *(unaligned_uint16 *)RomPtr_8C(v3);
     v3 -= 2;
   }
   if (!sign16(++cinematic_var4 - 16)) {
