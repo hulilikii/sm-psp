@@ -5,24 +5,24 @@
 #include "enemy_types.h"
 
 
-#define g_word_A4B89D ((const unaligned_uint16*)RomFixedPtr(0xa4b89d))
-#define g_word_A4B8BD ((const unaligned_uint16*)RomFixedPtr(0xa4b8bd))
-#define g_word_A4B8DD ((const unaligned_uint16*)RomFixedPtr(0xa4b8dd))
-#define g_word_A4B8FD ((const unaligned_uint16*)RomFixedPtr(0xa4b8fd))
-#define g_word_A4B91D ((const unaligned_uint16*)RomFixedPtr(0xa4b91d))
-#define g_off_A48B79 ((const unaligned_uint16*)RomFixedPtr(0xa48b79))
-#define g_word_A49156 ((const unaligned_uint16*)RomFixedPtr(0xa49156))
-#define g_word_A49C79 ((const unaligned_uint16*)RomFixedPtr(0xa49c79))
-#define g_word_A49E7B ((const unaligned_uint16*)RomFixedPtr(0xa49e7b))
+#define g_word_A4B89D ((unaligned_uint16*)RomFixedPtr(0xa4b89d))
+#define g_word_A4B8BD ((unaligned_uint16*)RomFixedPtr(0xa4b8bd))
+#define g_word_A4B8DD ((unaligned_uint16*)RomFixedPtr(0xa4b8dd))
+#define g_word_A4B8FD ((unaligned_uint16*)RomFixedPtr(0xa4b8fd))
+#define g_word_A4B91D ((unaligned_uint16*)RomFixedPtr(0xa4b91d))
+#define g_off_A48B79 ((unaligned_uint16*)RomFixedPtr(0xa48b79))
+#define g_word_A49156 ((unaligned_uint16*)RomFixedPtr(0xa49156))
+#define g_word_A49C79 ((unaligned_uint16*)RomFixedPtr(0xa49c79))
+#define g_word_A49E7B ((unaligned_uint16*)RomFixedPtr(0xa49e7b))
 #define g_word_A49BC5 (*(unaligned_uint16 *)RomFixedPtr(0xa49bc5))
 #define g_word_A49BC7 (*(unaligned_uint16 *)RomFixedPtr(0xa49bc7))
 #define g_word_A49BC9 (*(unaligned_uint16 *)RomFixedPtr(0xa49bc9))
 #define g_word_A49BCB (*(unaligned_uint16 *)RomFixedPtr(0xa49bcb))
 #define kCrocoVlineRandomPos ((uint8*)RomFixedPtr(0xa49697))
-#define g_word_A49BBD ((const unaligned_uint16*)RomFixedPtr(0xa49bbd))
-#define g_word_A498CA ((const unaligned_uint16*)RomFixedPtr(0xa498ca))
-#define g_word_A499CB ((const unaligned_uint16*)RomFixedPtr(0xa499cb))
-#define g_word_A499D9 ((const unaligned_uint16*)RomFixedPtr(0xa499d9))
+#define g_word_A49BBD ((unaligned_uint16*)RomFixedPtr(0xa49bbd))
+#define g_word_A498CA ((unaligned_uint16*)RomFixedPtr(0xa498ca))
+#define g_word_A499CB ((unaligned_uint16*)RomFixedPtr(0xa499cb))
+#define g_word_A499D9 ((unaligned_uint16*)RomFixedPtr(0xa499d9))
 
 
 
@@ -443,7 +443,7 @@ void Crocomire_Func_27(uint16 k) {  // 0xA48B5B
       return;
     }
   }
-  reg_BG2VOFS += *((const unaligned_uint16*)RomPtr_A4(spritemap_pointer) + 14);
+  reg_BG2VOFS += *((unaligned_uint16*)RomPtr_A4(spritemap_pointer) + 14);
   Crocomire_8BA4();
 }
 
@@ -1556,7 +1556,7 @@ void Crocomire_Powerbomb(void) {  // 0xA4B992
         uint16 v3;
         int n = *(unaligned_uint16 *)RomPtr_A4(spritemap_pointer);
         while (1) {
-          v2 = *((const unaligned_uint16*)RomPtr_A4(spritemap_pointer) + 3);
+          v2 = *((unaligned_uint16*)RomPtr_A4(spritemap_pointer) + 3);
           v3 = addr_kCrocomire_Ilist_BDAE;
           if (v2 == addr_kCrocomire_BigSprmap_D600)
             break;

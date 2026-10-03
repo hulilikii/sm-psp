@@ -4,14 +4,14 @@
 #include "enemy_types.h"
 
 
-#define kMotherBrain_HealthBasedPalettes_Brain ((const unaligned_uint16*)RomFixedPtr(0xade6a2))
-#define kMotherBrain_HealthBasedPalettes_BackLeg ((const unaligned_uint16*)RomFixedPtr(0xade742))
-#define kMotherBrain_FadePalToBlack ((const unaligned_uint16*)RomFixedPtr(0xade9e8))
-#define kMotherBrain_TransitionToFromGrey_Incr ((const unaligned_uint16*)RomFixedPtr(0xaded8a))
-#define kMotherBrain_TransitionToFromGrey_Decr ((const unaligned_uint16*)RomFixedPtr(0xaded9c))
-#define kMotherBrain_FadeToGray_Drained ((const unaligned_uint16*)RomFixedPtr(0xadef87))
-#define kMotherBrain_FadeToGray_RealDeath ((const unaligned_uint16*)RomFixedPtr(0xadf107))
-#define kMotherBrain_Phase3_TurnLightsBackOn ((const unaligned_uint16*)RomFixedPtr(0xadf273))
+#define kMotherBrain_HealthBasedPalettes_Brain ((unaligned_uint16*)RomFixedPtr(0xade6a2))
+#define kMotherBrain_HealthBasedPalettes_BackLeg ((unaligned_uint16*)RomFixedPtr(0xade742))
+#define kMotherBrain_FadePalToBlack ((unaligned_uint16*)RomFixedPtr(0xade9e8))
+#define kMotherBrain_TransitionToFromGrey_Incr ((unaligned_uint16*)RomFixedPtr(0xaded8a))
+#define kMotherBrain_TransitionToFromGrey_Decr ((unaligned_uint16*)RomFixedPtr(0xaded9c))
+#define kMotherBrain_FadeToGray_Drained ((unaligned_uint16*)RomFixedPtr(0xadef87))
+#define kMotherBrain_FadeToGray_RealDeath ((unaligned_uint16*)RomFixedPtr(0xadf107))
+#define kMotherBrain_Phase3_TurnLightsBackOn ((unaligned_uint16*)RomFixedPtr(0xadf273))
 
 void nullsub_341(void) {}
 

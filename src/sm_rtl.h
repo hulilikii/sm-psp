@@ -38,10 +38,10 @@ bool Unreachable();
 
 #if defined(_DEBUG)
 // Gives better warning messages but non inlined on tcc
-static inline uint16 GET_WORD(const uint8 *p) { return *(const unaligned_uint16 *)(p); }
+static inline uint16 GET_WORD(const uint8 *p) { return *(unaligned_uint16 *)(p); }
 static inline const uint8 *RomFixedPtr(uint32_t addr) { return &g_rom[(((addr >> 16) << 15) | (addr & 0x7fff)) & 0x3fffff]; }
 #else
-#define GET_WORD(p) (*(const unaligned_uint16*)(p))
+#define GET_WORD(p) (*(unaligned_uint16*)(p))
 #define RomFixedPtr(addr) (&g_rom[(((addr >> 16) << 15) | (addr & 0x7fff)) & 0x3fffff])
 #endif
 
@@ -154,25 +154,25 @@ struct VramWriteEntry;
 PairU16 MakePairU16(uint16 k, uint16 j);
 
 #define kPoseParams ((SamusPoseParams*)RomFixedPtr(0x91b629))
-#define kAtmosphericGraphicAnimationTimers ((const unaligned_uint16*)RomFixedPtr(0x908b93))
-#define kAtmosphericTypeNumFrames ((const unaligned_uint16*)RomFixedPtr(0x908bef))
-#define g_off_908BFF ((const unaligned_uint16*)RomFixedPtr(0x908bff))
+#define kAtmosphericGraphicAnimationTimers ((unaligned_uint16*)RomFixedPtr(0x908b93))
+#define kAtmosphericTypeNumFrames ((unaligned_uint16*)RomFixedPtr(0x908bef))
+#define g_off_908BFF ((unaligned_uint16*)RomFixedPtr(0x908bff))
 #define g_stru_90A83A ((DisableMinimapAndMarkBossRoomAsExploredEnt*)RomFixedPtr(0x90a83a))
-#define kPlayerPoseToPtr ((const unaligned_uint16*)RomFixedPtr(0x90c7df))
-#define kDrawArmCannon_Tab2 ((const unaligned_uint16*)RomFixedPtr(0x90c7a5))
+#define kPlayerPoseToPtr ((unaligned_uint16*)RomFixedPtr(0x90c7df))
+#define kDrawArmCannon_Tab2 ((unaligned_uint16*)RomFixedPtr(0x90c7a5))
 extern const int16 kSinCosTable8bit_Sext[320];
-#define kPoseTransitionTable ((const unaligned_uint16*)RomFixedPtr(0x919ee2))
-#define kDemoSetDefPtrs ((const unaligned_uint16*)RomFixedPtr(0x918885))
-#define kSpeedBoostToCtr ((const unaligned_uint16*)RomFixedPtr(0x91b61f))
-#define kSpeedBoostToAnimFramePtr ((const unaligned_uint16*)RomFixedPtr(0x91B5DE))
-#define kSamusPoseToBaseSpritemapIndexTop ((const unaligned_uint16*)RomFixedPtr(0x929263))
-#define kSamusPoseToBaseSpritemapIndexBottom ((const unaligned_uint16*)RomFixedPtr(0x92945d))
-#define kSamusAnimationDelayData ((const unaligned_uint16*)RomFixedPtr(0x91b010))
-#define kCommonEnemySpeeds_Linear ((const unaligned_uint16*)RomFixedPtr(0xa28187))
-#define kCommonEnemySpeeds_Quadratic ((const unaligned_uint16*)RomFixedPtr(0xa2838f))
+#define kPoseTransitionTable ((unaligned_uint16*)RomFixedPtr(0x919ee2))
+#define kDemoSetDefPtrs ((unaligned_uint16*)RomFixedPtr(0x918885))
+#define kSpeedBoostToCtr ((unaligned_uint16*)RomFixedPtr(0x91b61f))
+#define kSpeedBoostToAnimFramePtr ((unaligned_uint16*)RomFixedPtr(0x91B5DE))
+#define kSamusPoseToBaseSpritemapIndexTop ((unaligned_uint16*)RomFixedPtr(0x929263))
+#define kSamusPoseToBaseSpritemapIndexBottom ((unaligned_uint16*)RomFixedPtr(0x92945d))
+#define kSamusAnimationDelayData ((unaligned_uint16*)RomFixedPtr(0x91b010))
+#define kCommonEnemySpeeds_Linear ((unaligned_uint16*)RomFixedPtr(0xa28187))
+#define kCommonEnemySpeeds_Quadratic ((unaligned_uint16*)RomFixedPtr(0xa2838f))
 #define kCommonEnemySpeeds_Quadratic32 ((uint32*)RomFixedPtr(0xa0cbc7))
-#define kSine16bit ((const unaligned_uint16*)RomFixedPtr(0xa0b1c3))
-#define kTanTable ((const unaligned_uint16*)RomFixedPtr(0x91c9d4))
+#define kSine16bit ((unaligned_uint16*)RomFixedPtr(0xa0b1c3))
+#define kTanTable ((unaligned_uint16*)RomFixedPtr(0x91c9d4))
 
 void CallEnemyAi(uint32 ea);
 void CallEnemyPreInstr(uint32 ea);

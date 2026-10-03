@@ -5,13 +5,13 @@
 #include "funcs.h"
 #include "enemy_types.h"
 
-#define kEnemyLayerToQueuePtr ((const unaligned_uint16*)RomFixedPtr(0xa0b133))
-#define kStandardSpriteTiles ((const unaligned_uint16*)RomFixedPtr(0x9ad200))
+#define kEnemyLayerToQueuePtr ((unaligned_uint16*)RomFixedPtr(0xa0b133))
+#define kStandardSpriteTiles ((unaligned_uint16*)RomFixedPtr(0x9ad200))
 #define kSine8bit ((uint8*)RomFixedPtr(0xa0b143))
-#define kEquationForQuarterCircle ((const unaligned_uint16*)RomFixedPtr(0xa0b7ee))
-#define g_off_A0C2DA ((const unaligned_uint16*)RomFixedPtr(0xa0c2da))
+#define kEquationForQuarterCircle ((unaligned_uint16*)RomFixedPtr(0xa0b7ee))
+#define g_off_A0C2DA ((unaligned_uint16*)RomFixedPtr(0xa0c2da))
 #define CHECK_locret_A0C434(Ek) (byte_A0C435[Ek] & 0x80 ? -1 : 0)
-#define g_word_A0C49F ((const unaligned_uint16*)RomFixedPtr(0xa0c49f))
+#define g_word_A0C49F ((unaligned_uint16*)RomFixedPtr(0xa0c49f))
 #define kAlignYPos_Tab0 ((uint8*)RomFixedPtr(0x948b2b))
 
 typedef struct EnemyBlockCollInfo {
@@ -2078,7 +2078,7 @@ void EprojSamusCollDetect(void) {  // 0xA09894
 void HandleEprojCollWithSamus(uint16 k) {  // 0xA09923
   samus_invincibility_timer = 96;
   samus_knockback_timer = 5;
-  uint16 v1 = *((const unaligned_uint16*)RomPtr_86(*(uint16 *)((uint8 *)eproj_id + k)) + 5);
+  uint16 v1 = *((unaligned_uint16*)RomPtr_86(*(uint16 *)((uint8 *)eproj_id + k)) + 5);
   if (v1) {
     int v2 = k >> 1;
     eproj_instr_list_ptr[v2] = v1;

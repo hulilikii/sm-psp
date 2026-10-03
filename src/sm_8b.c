@@ -5,33 +5,33 @@
 #include "variables.h"
 
 
-#define kPalettes_Intro ((const unaligned_uint16*)RomFixedPtr(0x8ce3e9))
-#define kPalettes_Intro2 ((const unaligned_uint16*)RomFixedPtr(0x8ce5e9))
-#define kPalettes_Intro4 ((const unaligned_uint16*)RomFixedPtr(0x8ce7e9))
-#define kPalettes_Intro5 ((const unaligned_uint16*)RomFixedPtr(0x8ce9e9))
-#define kPalettes_Intro6 ((const unaligned_uint16*)RomFixedPtr(0x8cebe9))
-#define kPalettes_Intro3 ((const unaligned_uint16*)RomFixedPtr(0x8cede9))
-#define g_word_8CD81B ((const unaligned_uint16*)RomFixedPtr(0x8cd81b))
-#define g_word_8BA72B ((const unaligned_uint16*)RomFixedPtr(0x8ba72b))
-#define kLevelData_MotherBrainRoomFromCutscene ((const unaligned_uint16*)RomFixedPtr(0x8cbec3))
-#define kLevelData_RoomWithBabyMetroidHatching ((const unaligned_uint16*)RomFixedPtr(0x8cc083))
-#define g_word_8CDC9B ((const unaligned_uint16*)RomFixedPtr(0x8cdc9b))
-#define g_word_8CDEDB ((const unaligned_uint16*)RomFixedPtr(0x8cdedb))
-#define g_word_8CEFE9 ((const unaligned_uint16*)RomFixedPtr(0x8cefe9))
-#define g_off_8BE70D ((const unaligned_uint16*)RomFixedPtr(0x8be70d))
-#define g_word_8BE717 ((const unaligned_uint16*)RomFixedPtr(0x8be717))
-#define g_word_8BE721 ((const unaligned_uint16*)RomFixedPtr(0x8be721))
-#define g_word_8BE737 ((const unaligned_uint16*)RomFixedPtr(0x8be737))
-#define g_word_8BE741 ((const unaligned_uint16*)RomFixedPtr(0x8be741))
-#define g_word_8BE9CF ((const unaligned_uint16*)RomFixedPtr(0x8be9cf))
-#define kCinematicFunction_Intro_Func142_Tab0 ((const unaligned_uint16*)RomFixedPtr(0x8be45a))
-#define kCinematicFunction_Intro_Func144_Tab0 ((const unaligned_uint16*)RomFixedPtr(0x8be5e7))
-#define g_word_8CDF5B ((const unaligned_uint16*)RomFixedPtr(0x8cdf5b))
-#define g_word_8BE9A7 ((const unaligned_uint16*)RomFixedPtr(0x8be9a7))
-#define g_word_8BF6B8 ((const unaligned_uint16*)RomFixedPtr(0x8bf6b8))
-#define g_word_8BF6D8 ((const unaligned_uint16*)RomFixedPtr(0x8bf6d8))
-#define g_word_8CE1E9 ((const unaligned_uint16*)RomFixedPtr(0x8ce1e9))
-#define g_off_8CBC5D ((const unaligned_uint16*)RomFixedPtr(0x8cbc5d))
+#define kPalettes_Intro ((unaligned_uint16*)RomFixedPtr(0x8ce3e9))
+#define kPalettes_Intro2 ((unaligned_uint16*)RomFixedPtr(0x8ce5e9))
+#define kPalettes_Intro4 ((unaligned_uint16*)RomFixedPtr(0x8ce7e9))
+#define kPalettes_Intro5 ((unaligned_uint16*)RomFixedPtr(0x8ce9e9))
+#define kPalettes_Intro6 ((unaligned_uint16*)RomFixedPtr(0x8cebe9))
+#define kPalettes_Intro3 ((unaligned_uint16*)RomFixedPtr(0x8cede9))
+#define g_word_8CD81B ((unaligned_uint16*)RomFixedPtr(0x8cd81b))
+#define g_word_8BA72B ((unaligned_uint16*)RomFixedPtr(0x8ba72b))
+#define kLevelData_MotherBrainRoomFromCutscene ((unaligned_uint16*)RomFixedPtr(0x8cbec3))
+#define kLevelData_RoomWithBabyMetroidHatching ((unaligned_uint16*)RomFixedPtr(0x8cc083))
+#define g_word_8CDC9B ((unaligned_uint16*)RomFixedPtr(0x8cdc9b))
+#define g_word_8CDEDB ((unaligned_uint16*)RomFixedPtr(0x8cdedb))
+#define g_word_8CEFE9 ((unaligned_uint16*)RomFixedPtr(0x8cefe9))
+#define g_off_8BE70D ((unaligned_uint16*)RomFixedPtr(0x8be70d))
+#define g_word_8BE717 ((unaligned_uint16*)RomFixedPtr(0x8be717))
+#define g_word_8BE721 ((unaligned_uint16*)RomFixedPtr(0x8be721))
+#define g_word_8BE737 ((unaligned_uint16*)RomFixedPtr(0x8be737))
+#define g_word_8BE741 ((unaligned_uint16*)RomFixedPtr(0x8be741))
+#define g_word_8BE9CF ((unaligned_uint16*)RomFixedPtr(0x8be9cf))
+#define kCinematicFunction_Intro_Func142_Tab0 ((unaligned_uint16*)RomFixedPtr(0x8be45a))
+#define kCinematicFunction_Intro_Func144_Tab0 ((unaligned_uint16*)RomFixedPtr(0x8be5e7))
+#define g_word_8CDF5B ((unaligned_uint16*)RomFixedPtr(0x8cdf5b))
+#define g_word_8BE9A7 ((unaligned_uint16*)RomFixedPtr(0x8be9a7))
+#define g_word_8BF6B8 ((unaligned_uint16*)RomFixedPtr(0x8bf6b8))
+#define g_word_8BF6D8 ((unaligned_uint16*)RomFixedPtr(0x8bf6d8))
+#define g_word_8CE1E9 ((unaligned_uint16*)RomFixedPtr(0x8ce1e9))
+#define g_off_8CBC5D ((unaligned_uint16*)RomFixedPtr(0x8cbc5d))
 
 void CallCinematicFunction(uint32 ea);
 void CallCinematicSprPreInstr(uint32 ea, uint16 j);
@@ -570,7 +570,7 @@ void ProcessCinematicBgObject_DrawToTextTilemap(uint16 k, uint16 j, uint16 r18) 
   uint16 n = v3[3];
   while (1) {
     do {
-      *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + offs) = *((const unaligned_uint16*)RomPtr_8C(j) + 2);
+      *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + offs) = *((unaligned_uint16*)RomPtr_8C(j) + 2);
       j += 2;
       offs += 2;
       --m;
@@ -597,7 +597,7 @@ void ProcessCinematicBgObject_DrawToBgTilemap(uint16 k, uint16 j, uint16 r18) { 
   int n = v3[3];
   while (1) {
     do {
-      *(uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + offs) = *((const unaligned_uint16*)RomPtr_8C(j) + 2);
+      *(uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + offs) = *((unaligned_uint16*)RomPtr_8C(j) + 2);
       j += 2;
       offs += 2;
       --m;
@@ -1137,7 +1137,7 @@ void ProcessCinematicSpriteInstructionList(uint16 k) {  // 0x8B9409
     }
     int v7 = v1 >> 1;
     cinematicspr_instr_timer[v7] = v6;
-    cinematicspr_whattodraw[v7] = *((const unaligned_uint16*)RomPtr_8B(v4) + 1);
+    cinematicspr_whattodraw[v7] = *((unaligned_uint16*)RomPtr_8B(v4) + 1);
     cinematicspr_instr_ptr[v7] = v4 + 4;
   }
 }
@@ -1555,7 +1555,7 @@ void CreditsObject_ProcessOne(void) {  // 0x8B996A
 void CreditsObject_Func1(uint16 j) {  // 0x8B99C1
   uint16 RegWord = Mult8x8(cinematic_var26, 0x40);
   int n = 31;
-  const uint16 *src = (const uint16*)(g_ram + 0x10000 + *((const unaligned_uint16*)RomPtr_8C(j) + 1));
+  const uint16 *src = (const uint16*)(g_ram + 0x10000 + *((unaligned_uint16*)RomPtr_8C(j) + 1));
   do {
     *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + RegWord) = *src++;
     RegWord += 2;

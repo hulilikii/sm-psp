@@ -4,9 +4,9 @@
 #include "variables.h"
 #include "funcs.h"
 
-#define kSamus_AnimationDefinitionPtrs ((const unaligned_uint16*)RomFixedPtr(0x92d94e))
-#define kSamus_TileDefs_TopHalf ((const unaligned_uint16*)RomFixedPtr(0x92d91e))
-#define kSamus_TileDefs_BottomHalf ((const unaligned_uint16*)RomFixedPtr(0x92d938))
+#define kSamus_AnimationDefinitionPtrs ((unaligned_uint16*)RomFixedPtr(0x92d94e))
+#define kSamus_TileDefs_TopHalf ((unaligned_uint16*)RomFixedPtr(0x92d91e))
+#define kSamus_TileDefs_BottomHalf ((unaligned_uint16*)RomFixedPtr(0x92d938))
 
 void SetSamusTilesDefsForCurAnim(void) {  // 0x928000
   uint16 v0 = 4 * samus_anim_frame + kSamus_AnimationDefinitionPtrs[samus_pose];

@@ -7,7 +7,7 @@
 #include "enemy_types.h"
 
 
-#define g_off_A890DA ((const unaligned_uint16*)RomFixedPtr(0xa890da))
+#define g_off_A890DA ((unaligned_uint16*)RomFixedPtr(0xa890da))
 #define g_word_A8A0A7 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0a7))
 #define g_word_A8A0A9 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0a9))
 #define g_word_A8A0AB (*(unaligned_uint16 *)RomFixedPtr(0xa8a0ab))
@@ -20,19 +20,19 @@
 #define g_word_A8A0BD (*(unaligned_uint16 *)RomFixedPtr(0xa8a0bd))
 #define g_word_A8A0C3 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0c3))
 #define g_word_A8A0C5 (*(unaligned_uint16 *)RomFixedPtr(0xa8a0c5))
-#define g_off_A8A097 ((const unaligned_uint16*)RomFixedPtr(0xa8a097))
-#define kNorfairLavaMan_Palette ((const unaligned_uint16*)RomFixedPtr(0xa8ac1c))
-#define g_word_A8AF79 ((const unaligned_uint16*)RomFixedPtr(0xa8af79))
-#define g_word_A8AF55 ((const unaligned_uint16*)RomFixedPtr(0xa8af55))
-#define g_off_A8AF67 ((const unaligned_uint16*)RomFixedPtr(0xa8af67))
-#define kBeetom_Ilist_B74E ((const unaligned_uint16*)RomFixedPtr(0xa8b74e))
-#define g_off_A8C599 ((const unaligned_uint16*)RomFixedPtr(0xa8c599))
-#define g_off_A8CC30 ((const unaligned_uint16*)RomFixedPtr(0xa8cc30))
-#define g_off_A8E380 ((const unaligned_uint16*)RomFixedPtr(0xa8e380))
-#define g_off_A8E682 ((const unaligned_uint16*)RomFixedPtr(0xa8e682))
-#define g_off_A8E688 ((const unaligned_uint16*)RomFixedPtr(0xa8e688))
-#define g_word_A8E7CC ((const unaligned_uint16*)RomFixedPtr(0xa8e7cc))
-#define g_off_A8F3B0 ((const unaligned_uint16*)RomFixedPtr(0xa8f3b0))
+#define g_off_A8A097 ((unaligned_uint16*)RomFixedPtr(0xa8a097))
+#define kNorfairLavaMan_Palette ((unaligned_uint16*)RomFixedPtr(0xa8ac1c))
+#define g_word_A8AF79 ((unaligned_uint16*)RomFixedPtr(0xa8af79))
+#define g_word_A8AF55 ((unaligned_uint16*)RomFixedPtr(0xa8af55))
+#define g_off_A8AF67 ((unaligned_uint16*)RomFixedPtr(0xa8af67))
+#define kBeetom_Ilist_B74E ((unaligned_uint16*)RomFixedPtr(0xa8b74e))
+#define g_off_A8C599 ((unaligned_uint16*)RomFixedPtr(0xa8c599))
+#define g_off_A8CC30 ((unaligned_uint16*)RomFixedPtr(0xa8cc30))
+#define g_off_A8E380 ((unaligned_uint16*)RomFixedPtr(0xa8e380))
+#define g_off_A8E682 ((unaligned_uint16*)RomFixedPtr(0xa8e682))
+#define g_off_A8E688 ((unaligned_uint16*)RomFixedPtr(0xa8e688))
+#define g_word_A8E7CC ((unaligned_uint16*)RomFixedPtr(0xa8e7cc))
+#define g_off_A8F3B0 ((unaligned_uint16*)RomFixedPtr(0xa8f3b0))
 
 
 

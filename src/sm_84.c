@@ -5,23 +5,23 @@
 #include "funcs.h"
 
 
-#define kGoldenTorizoPalette1 ((const unaligned_uint16*)RomFixedPtr(0x848032))
-#define kGoldenTorizoPalette2 ((const unaligned_uint16*)RomFixedPtr(0x848132))
-#define kXrayBlockDrawingInstrs ((const unaligned_uint16*)RomFixedPtr(0x84839d))
-#define kGrayDoorPreInstrs ((const unaligned_uint16*)RomFixedPtr(0x84be4b))
-#define kDowardGatePlmListPtrs ((const unaligned_uint16*)RomFixedPtr(0x84c70a))
-#define kDowardGateLeftBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c71a))
-#define kDowardGateRightBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c72a))
-#define kUpwardGatePlmListPtrs ((const unaligned_uint16*)RomFixedPtr(0x84c764))
-#define kUpwardGateLeftBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c774))
-#define kUpwardGateRightBlockBts ((const unaligned_uint16*)RomFixedPtr(0x84c784))
-#define off_84DB28 ((const unaligned_uint16*)RomFixedPtr(0x84db28))
-#define off_84E05F ((const unaligned_uint16*)RomFixedPtr(0x84e05f))
-#define off_84E077 ((const unaligned_uint16*)RomFixedPtr(0x84e077))
+#define kGoldenTorizoPalette1 ((unaligned_uint16*)RomFixedPtr(0x848032))
+#define kGoldenTorizoPalette2 ((unaligned_uint16*)RomFixedPtr(0x848132))
+#define kXrayBlockDrawingInstrs ((unaligned_uint16*)RomFixedPtr(0x84839d))
+#define kGrayDoorPreInstrs ((unaligned_uint16*)RomFixedPtr(0x84be4b))
+#define kDowardGatePlmListPtrs ((unaligned_uint16*)RomFixedPtr(0x84c70a))
+#define kDowardGateLeftBlockBts ((unaligned_uint16*)RomFixedPtr(0x84c71a))
+#define kDowardGateRightBlockBts ((unaligned_uint16*)RomFixedPtr(0x84c72a))
+#define kUpwardGatePlmListPtrs ((unaligned_uint16*)RomFixedPtr(0x84c764))
+#define kUpwardGateLeftBlockBts ((unaligned_uint16*)RomFixedPtr(0x84c774))
+#define kUpwardGateRightBlockBts ((unaligned_uint16*)RomFixedPtr(0x84c784))
+#define off_84DB28 ((unaligned_uint16*)RomFixedPtr(0x84db28))
+#define off_84E05F ((unaligned_uint16*)RomFixedPtr(0x84e05f))
+#define off_84E077 ((unaligned_uint16*)RomFixedPtr(0x84e077))
 #define fnPlmPreInstr_Empty4 0x848AA6
-#define kPlmVramAddresses ((const unaligned_uint16*)RomFixedPtr(0x8487cd))
-#define kPlmTileDataOffs ((const unaligned_uint16*)RomFixedPtr(0x8487d5))
-#define kPlmStartingTileNumber ((const unaligned_uint16*)RomFixedPtr(0x8487dd))
+#define kPlmVramAddresses ((unaligned_uint16*)RomFixedPtr(0x8487cd))
+#define kPlmTileDataOffs ((unaligned_uint16*)RomFixedPtr(0x8487d5))
+#define kPlmStartingTileNumber ((unaligned_uint16*)RomFixedPtr(0x8487dd))
 
 void CallPlmPreInstr(uint32 ea, uint16 k);
 const uint8 *CallPlmInstr(uint32 ea, const uint8 *j, uint16 k);

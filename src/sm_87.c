@@ -99,7 +99,7 @@ void ProcessAnimtilesObject(void) {  // 0x878085
     }
     int v6 = v0 >> 1;
     animtiles_instr_timers[v6] = v5;
-    animtiles_src_ptr[v6] = *((const unaligned_uint16*)RomPtr_87(v3) + 1);
+    animtiles_src_ptr[v6] = *((unaligned_uint16*)RomPtr_87(v3) + 1);
     animtiles_instr_list_ptrs[v6] = v3 + 4;
   }
 }

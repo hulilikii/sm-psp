@@ -3,45 +3,45 @@
 #include "variables.h"
 #include "funcs.h"
 
-#define g_off_9BA4B3 ((const unaligned_uint16*)RomFixedPtr(0x9ba4b3))
-#define g_off_9BA4CB ((const unaligned_uint16*)RomFixedPtr(0x9ba4cb))
-#define g_off_9BA4E3 ((const unaligned_uint16*)RomFixedPtr(0x9ba4e3))
-#define g_off_9BB5C8 ((const unaligned_uint16*)RomFixedPtr(0x9bb5c8))
+#define g_off_9BA4B3 ((unaligned_uint16*)RomFixedPtr(0x9ba4b3))
+#define g_off_9BA4CB ((unaligned_uint16*)RomFixedPtr(0x9ba4cb))
+#define g_off_9BA4E3 ((unaligned_uint16*)RomFixedPtr(0x9ba4e3))
+#define g_off_9BB5C8 ((unaligned_uint16*)RomFixedPtr(0x9bb5c8))
 #define g_byte_9BB823 ((uint8*)RomFixedPtr(0x9bb823))
-#define g_off_9BB6D2 ((const unaligned_uint16*)RomFixedPtr(0x9bb6d2))
-#define kDeathSequencePals_PowerSuit ((const unaligned_uint16*)RomFixedPtr(0x9bb7d3))
-#define kDeathSequencePals_VariaSuit ((const unaligned_uint16*)RomFixedPtr(0x9bb7e7))
-#define kDeathSequencePals_GravitySuit ((const unaligned_uint16*)RomFixedPtr(0x9bb7fb))
-#define kDeathSequencePals_Suitless ((const unaligned_uint16*)RomFixedPtr(0x9bb80f))
-#define g_off_9BC3C6 ((const unaligned_uint16*)RomFixedPtr(0x9bc3c6))
-#define g_off_9BC3EE ((const unaligned_uint16*)RomFixedPtr(0x9bc3ee))
-#define g_off_9BC416 ((const unaligned_uint16*)RomFixedPtr(0x9bc416))
+#define g_off_9BB6D2 ((unaligned_uint16*)RomFixedPtr(0x9bb6d2))
+#define kDeathSequencePals_PowerSuit ((unaligned_uint16*)RomFixedPtr(0x9bb7d3))
+#define kDeathSequencePals_VariaSuit ((unaligned_uint16*)RomFixedPtr(0x9bb7e7))
+#define kDeathSequencePals_GravitySuit ((unaligned_uint16*)RomFixedPtr(0x9bb7fb))
+#define kDeathSequencePals_Suitless ((unaligned_uint16*)RomFixedPtr(0x9bb80f))
+#define g_off_9BC3C6 ((unaligned_uint16*)RomFixedPtr(0x9bc3c6))
+#define g_off_9BC3EE ((unaligned_uint16*)RomFixedPtr(0x9bc3ee))
+#define g_off_9BC416 ((unaligned_uint16*)RomFixedPtr(0x9bc416))
 #define grapple_beam_special_angles ((GrappleBeamSpecialAngles*)RomFixedPtr(0x9bc43e))
 #define kGrappleBeam_SwingingData ((uint8*)RomFixedPtr(0x9bc1c2))
 #define kGrappleBeam_SwingingData2 ((uint8*)RomFixedPtr(0x9bc2c2))
 #define kGrappleBeam_SwingingData3 ((uint8*)RomFixedPtr(0x9bc302))
-#define kGrappleBeam_OriginX_NoRun ((const unaligned_uint16*)RomFixedPtr(0x9bc122))
-#define kGrappleBeam_OriginY_NoRun ((const unaligned_uint16*)RomFixedPtr(0x9bc136))
-#define kGrappleBeam_0x0d1a_offs_NoRun ((const unaligned_uint16*)RomFixedPtr(0x9bc14a))
-#define kGrappleBeam_0x0d1c_offs_NoRun ((const unaligned_uint16*)RomFixedPtr(0x9bc15e))
-#define kGrappleBeam_OriginX_Run ((const unaligned_uint16*)RomFixedPtr(0x9bc172))
-#define kGrappleBeam_OriginY_Run ((const unaligned_uint16*)RomFixedPtr(0x9bc186))
-#define kGrappleBeam_0x0d1a_offs_Run ((const unaligned_uint16*)RomFixedPtr(0x9bc19a))
-#define kGrappleBeam_0x0d1c_offs_Run ((const unaligned_uint16*)RomFixedPtr(0x9bc1ae))
+#define kGrappleBeam_OriginX_NoRun ((unaligned_uint16*)RomFixedPtr(0x9bc122))
+#define kGrappleBeam_OriginY_NoRun ((unaligned_uint16*)RomFixedPtr(0x9bc136))
+#define kGrappleBeam_0x0d1a_offs_NoRun ((unaligned_uint16*)RomFixedPtr(0x9bc14a))
+#define kGrappleBeam_0x0d1c_offs_NoRun ((unaligned_uint16*)RomFixedPtr(0x9bc15e))
+#define kGrappleBeam_OriginX_Run ((unaligned_uint16*)RomFixedPtr(0x9bc172))
+#define kGrappleBeam_OriginY_Run ((unaligned_uint16*)RomFixedPtr(0x9bc186))
+#define kGrappleBeam_0x0d1a_offs_Run ((unaligned_uint16*)RomFixedPtr(0x9bc19a))
+#define kGrappleBeam_0x0d1c_offs_Run ((unaligned_uint16*)RomFixedPtr(0x9bc1ae))
 #define g_off_9BC344 (*(unaligned_uint16 *)RomFixedPtr(0x9bc344))
 #define g_off_9BC342 (*(unaligned_uint16 *)RomFixedPtr(0x9bc342))
-#define g_off_9BC346 ((const unaligned_uint16*)RomFixedPtr(0x9bc346))
-#define kFlareAnimDelays ((const unaligned_uint16*)RomFixedPtr(0x90c481))
+#define g_off_9BC346 ((unaligned_uint16*)RomFixedPtr(0x9bc346))
+#define kFlareAnimDelays ((unaligned_uint16*)RomFixedPtr(0x90c481))
 #define kFlareAnimDelays_Main ((uint8*)RomFixedPtr(0x90c487))
 #define kFlareAnimDelays_SlowSparks ((uint8*)RomFixedPtr(0x90c4a7))
 #define kFlareAnimDelays_FastSparks ((uint8*)RomFixedPtr(0x90c4ae))
-#define g_word_93A22B ((const unaligned_uint16*)RomFixedPtr(0x93a22b))
-#define g_word_93A225 ((const unaligned_uint16*)RomFixedPtr(0x93a225))
+#define g_word_93A22B ((unaligned_uint16*)RomFixedPtr(0x93a22b))
+#define g_word_93A225 ((unaligned_uint16*)RomFixedPtr(0x93a225))
 #define g_byte_9BC9BA ((uint8*)RomFixedPtr(0x9bc9ba))
 #define g_byte_9BC9C4 ((uint8*)RomFixedPtr(0x9bc9c4))
-#define kGrappleBeam_Ext_Xvel ((const unaligned_uint16*)RomFixedPtr(0x9bc0db))
-#define kGrappleBeam_Ext_Yvel ((const unaligned_uint16*)RomFixedPtr(0x9bc0ef))
-#define kGrappleBeam_Init_EndAngle ((const unaligned_uint16*)RomFixedPtr(0x9bc104))
+#define kGrappleBeam_Ext_Xvel ((unaligned_uint16*)RomFixedPtr(0x9bc0db))
+#define kGrappleBeam_Ext_Yvel ((unaligned_uint16*)RomFixedPtr(0x9bc0ef))
+#define kGrappleBeam_Init_EndAngle ((unaligned_uint16*)RomFixedPtr(0x9bc104))
 
 void CallGrappleBeamFunc(uint32 ea);
 void GrappleBeamFunc_BE98(void);
@@ -265,7 +265,7 @@ static int ProcessEnemyGrappleBeamColl(uint16 a, uint16 r18) {  // 0x9BB907
   case 5:
     return 0;
   case 6:
-    r18 = *((const unaligned_uint16*)RomPtr_A0(r18) + 3);
+    r18 = *((unaligned_uint16*)RomPtr_A0(r18) + 3);
     if ((equipped_items & 0x20) != 0) {
       r18 >>= 2;
     } else if (equipped_items & 1) {

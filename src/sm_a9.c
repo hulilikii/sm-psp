@@ -7,33 +7,33 @@
 #include "sm_rtl.h"
 
 
-#define g_word_A98929 ((const unaligned_uint16*)RomFixedPtr(0xa98929))
-#define g_off_A98B7B ((const unaligned_uint16*)RomFixedPtr(0xa98b7b))
-#define g_word_A9B099 ((const unaligned_uint16*)RomFixedPtr(0xa9b099))
-#define g_word_A9B109 ((const unaligned_uint16*)RomFixedPtr(0xa9b109))
-#define g_word_A9B10F ((const unaligned_uint16*)RomFixedPtr(0xa9b10f))
-#define g_off_A9B6D4 ((const unaligned_uint16*)RomFixedPtr(0xa9b6d4))
-#define MotherBrain_RainbowBeamPalettes ((const unaligned_uint16*)RomFixedPtr(0xade434))
-#define g_off_A9C61E ((const unaligned_uint16*)RomFixedPtr(0xa9c61e))
-#define g_off_A9C664 ((const unaligned_uint16*)RomFixedPtr(0xa9c664))
-#define kShitroid_FadingToBlack ((const unaligned_uint16*)RomFixedPtr(0xade8e2))
-#define g_word_A9CDFC ((const unaligned_uint16*)RomFixedPtr(0xa9cdfc))
-#define kShitroid_HealthBasedPalettes_Shell ((const unaligned_uint16*)RomFixedPtr(0xade7e2))
-#define kShitroid_HealthBasedPalettes_Innards ((const unaligned_uint16*)RomFixedPtr(0xade882))
-#define g_off_A9D260 ((const unaligned_uint16*)RomFixedPtr(0xa9d260))
-#define g_word_A9D583 ((const unaligned_uint16*)RomFixedPtr(0xa9d583))
-#define g_word_A9D549 ((const unaligned_uint16*)RomFixedPtr(0xa9d549))
-#define g_word_A9D67C ((const unaligned_uint16*)RomFixedPtr(0xa9d67c))
-#define g_word_A9D69C ((const unaligned_uint16*)RomFixedPtr(0xa9d69c))
-#define kDeadTorizo_TileData ((const unaligned_uint16*)RomFixedPtr(0xb7a800))
-#define g_off_A9D86A ((const unaligned_uint16*)RomFixedPtr(0xa9d86a))
-#define g_off_A9D870 ((const unaligned_uint16*)RomFixedPtr(0xa9d870))
-#define g_off_A9D897 ((const unaligned_uint16*)RomFixedPtr(0xa9d897))
-#define g_off_A9D89B ((const unaligned_uint16*)RomFixedPtr(0xa9d89b))
-#define g_off_A9D8C0 ((const unaligned_uint16*)RomFixedPtr(0xa9d8c0))
-#define g_off_A9D8C6 ((const unaligned_uint16*)RomFixedPtr(0xa9d8c6))
-#define g_word_A9D951 ((const unaligned_uint16*)RomFixedPtr(0xa9d951))
-#define g_word_A9D959 ((const unaligned_uint16*)RomFixedPtr(0xa9d959))
+#define g_word_A98929 ((unaligned_uint16*)RomFixedPtr(0xa98929))
+#define g_off_A98B7B ((unaligned_uint16*)RomFixedPtr(0xa98b7b))
+#define g_word_A9B099 ((unaligned_uint16*)RomFixedPtr(0xa9b099))
+#define g_word_A9B109 ((unaligned_uint16*)RomFixedPtr(0xa9b109))
+#define g_word_A9B10F ((unaligned_uint16*)RomFixedPtr(0xa9b10f))
+#define g_off_A9B6D4 ((unaligned_uint16*)RomFixedPtr(0xa9b6d4))
+#define MotherBrain_RainbowBeamPalettes ((unaligned_uint16*)RomFixedPtr(0xade434))
+#define g_off_A9C61E ((unaligned_uint16*)RomFixedPtr(0xa9c61e))
+#define g_off_A9C664 ((unaligned_uint16*)RomFixedPtr(0xa9c664))
+#define kShitroid_FadingToBlack ((unaligned_uint16*)RomFixedPtr(0xade8e2))
+#define g_word_A9CDFC ((unaligned_uint16*)RomFixedPtr(0xa9cdfc))
+#define kShitroid_HealthBasedPalettes_Shell ((unaligned_uint16*)RomFixedPtr(0xade7e2))
+#define kShitroid_HealthBasedPalettes_Innards ((unaligned_uint16*)RomFixedPtr(0xade882))
+#define g_off_A9D260 ((unaligned_uint16*)RomFixedPtr(0xa9d260))
+#define g_word_A9D583 ((unaligned_uint16*)RomFixedPtr(0xa9d583))
+#define g_word_A9D549 ((unaligned_uint16*)RomFixedPtr(0xa9d549))
+#define g_word_A9D67C ((unaligned_uint16*)RomFixedPtr(0xa9d67c))
+#define g_word_A9D69C ((unaligned_uint16*)RomFixedPtr(0xa9d69c))
+#define kDeadTorizo_TileData ((unaligned_uint16*)RomFixedPtr(0xb7a800))
+#define g_off_A9D86A ((unaligned_uint16*)RomFixedPtr(0xa9d86a))
+#define g_off_A9D870 ((unaligned_uint16*)RomFixedPtr(0xa9d870))
+#define g_off_A9D897 ((unaligned_uint16*)RomFixedPtr(0xa9d897))
+#define g_off_A9D89B ((unaligned_uint16*)RomFixedPtr(0xa9d89b))
+#define g_off_A9D8C0 ((unaligned_uint16*)RomFixedPtr(0xa9d8c0))
+#define g_off_A9D8C6 ((unaligned_uint16*)RomFixedPtr(0xa9d8c6))
+#define g_word_A9D951 ((unaligned_uint16*)RomFixedPtr(0xa9d951))
+#define g_word_A9D959 ((unaligned_uint16*)RomFixedPtr(0xa9d959))
 #define TILEMAP_ADDR(x) &g_ram[0x2000 + x]
 #define kDeadMonsters_TileData RomPtr_B7(addr_kDeadMonsters_TileData)
 
@@ -3763,7 +3763,7 @@ void ShitroidInCutscene_MoveToSamus(uint16 k) {  // 0xA9C9C3
   Rect16U rect = { v3[0], v3[1], 4, 4 };
   CallShitroidMoveFunc(v3[3] | 0xA90000, k, v3[2], rect.x, rect.y);
   if (!Shitroid_Func_2(k, rect)) {
-    v4 = *((const unaligned_uint16*)RomPtr_A9(sice_var_0E) + 4);
+    v4 = *((unaligned_uint16*)RomPtr_A9(sice_var_0E) + 4);
     if (v4 < 0) {
       E->sice_var_A = v4;
     } else {
@@ -4791,7 +4791,7 @@ LABEL_12:
       if (v15 >= E0->dms_var_47)
         r18 = E0->dms_var_43;
 
-      CopyMoveCorpseRottingRotEntry((const unaligned_uint16*)RomPtr_A9(E0->dms_var_44), *v6, r18);
+      CopyMoveCorpseRottingRotEntry((unaligned_uint16*)RomPtr_A9(E0->dms_var_44), *v6, r18);
     }
     goto LABEL_12;
   }
@@ -4799,7 +4799,7 @@ LABEL_12:
   uint16 r18 = E->dms_var_43;
 
   uint16 *v11 = (uint16 *)(g_ram + dms_var_52);
-  CopyMoveCorpseRottingRotEntry((const unaligned_uint16*)RomPtr_A9(E->dms_var_44), *v11, r18);
+  CopyMoveCorpseRottingRotEntry((unaligned_uint16*)RomPtr_A9(E->dms_var_44), *v11, r18);
   uint16 v12 = *v11 + 2;
   if (v12 < E->dms_var_46) {
     *(uint16 *)v11 = v12;
@@ -4857,7 +4857,7 @@ void InitializeEnemyCorpseRotting(uint16 k, uint16 j) {  // 0xA9DC5F
   E->dms_var_5B = GET_WORD(v2 + 14);
   uint16 v4 = GET_WORD(v2 + 12);
   E->dms_var_56 = v4;
-  E->dms_var_5A = *((const unaligned_uint16*)RomPtr_A9(v4) + 1) - 12;
+  E->dms_var_5A = *((unaligned_uint16*)RomPtr_A9(v4) + 1) - 12;
   uint16 *v5 = (uint16 *)v2;
   uint16 v6 = v5[4];
   E->dms_var_57 = v6--;

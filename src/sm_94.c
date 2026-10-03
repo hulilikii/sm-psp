@@ -5,11 +5,11 @@
 #include "funcs.h"
 
 #define fnkPlmHeaderDefPtrs 0x949139
-#define off_9492D9 ((const unaligned_uint16*)RomFixedPtr(0x9492d9))
-#define off_9492E9 ((const unaligned_uint16*)RomFixedPtr(0x9492e9))
-#define kPlmHeaderDefPtrs ((const unaligned_uint16*)RomFixedPtr(0x949139))
-#define off_94936B ((const unaligned_uint16*)RomFixedPtr(0x94936b))
-#define kBlockShotBombedReactionShootablePlm ((const unaligned_uint16*)RomPtr_94(0x9ea6))
+#define off_9492D9 ((unaligned_uint16*)RomFixedPtr(0x9492d9))
+#define off_9492E9 ((unaligned_uint16*)RomFixedPtr(0x9492e9))
+#define kPlmHeaderDefPtrs ((unaligned_uint16*)RomFixedPtr(0x949139))
+#define off_94936B ((unaligned_uint16*)RomFixedPtr(0x94936b))
+#define kBlockShotBombedReactionShootablePlm ((unaligned_uint16*)RomPtr_94(0x9ea6))
 
 int32 *cur_coll_amt32;
 

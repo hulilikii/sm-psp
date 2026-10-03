@@ -5,7 +5,7 @@
 #include "enemy_types.h"
 
 
-#define kCreateSprite_Ilists ((const unaligned_uint16*)RomFixedPtr(0xb4bda8))
+#define kCreateSprite_Ilists ((unaligned_uint16*)RomFixedPtr(0xb4bda8))
 
 
 

@@ -6,13 +6,13 @@
 #include "funcs.h"
 
 #define kSamusFramesForUnderwaterSfx ((uint8*)RomFixedPtr(0x90a514))
-#define kPauseMenuMapData ((const unaligned_uint16*)RomFixedPtr(0x829717))
+#define kPauseMenuMapData ((unaligned_uint16*)RomFixedPtr(0x829717))
 #define kPauseMenuMapTilemaps ((LongPtr*)RomFixedPtr(0x82964a))
-#define kBeamTilePtrs ((const unaligned_uint16*)RomFixedPtr(0x90c3b1))
-#define kBeamPalettePtrs ((const unaligned_uint16*)RomFixedPtr(0x90c3c9))
-#define off_90B5BB ((const unaligned_uint16*)RomFixedPtr(0x90b5bb))
-#define off_90B609 ((const unaligned_uint16*)RomFixedPtr(0x90b609))
-#define kFlareAnimDelays ((const unaligned_uint16*)RomFixedPtr(0x90c481))
+#define kBeamTilePtrs ((unaligned_uint16*)RomFixedPtr(0x90c3b1))
+#define kBeamPalettePtrs ((unaligned_uint16*)RomFixedPtr(0x90c3c9))
+#define off_90B5BB ((unaligned_uint16*)RomFixedPtr(0x90b5bb))
+#define off_90B609 ((unaligned_uint16*)RomFixedPtr(0x90b609))
+#define kFlareAnimDelays ((unaligned_uint16*)RomFixedPtr(0x90c481))
 
 static Pair_Bool_Amt Samus_CalcBaseSpeed_NoDecel_X(uint16 k);
 
@@ -331,7 +331,7 @@ static Func_AnimDelay *const kAnimDelayFuncs[16] = {  // 0x9082DC
 };
 
 
-#define kDefaultAnimFramePtr ((const unaligned_uint16*)RomFixedPtr(0x91B5D1))
+#define kDefaultAnimFramePtr ((unaligned_uint16*)RomFixedPtr(0x91B5D1))
 
 static uint8 Samus_HandleSpeedBoosterAnimDelay(const uint8 *jp) {  // 0x90852C
   if (!samus_has_momentum_flag || (button_config_run_b & joypad1_lastkeys) == 0 || samus_movement_type != 1)
@@ -3251,7 +3251,7 @@ LABEL_14:;
         v19 = v0 >> 1;
         projectiletrail_right_instr_timer[v19] = v18;
         if (v18) {
-          projectiletrail_right_tile_and_attribs[v19] = *((const unaligned_uint16*)RomPtr_90(j) + 1);
+          projectiletrail_right_tile_and_attribs[v19] = *((unaligned_uint16*)RomPtr_90(j) + 1);
           projectiletrail_right_instr_list_ptr[v19] = j + 4;
 LABEL_21:;
           uint16 v20 = oam_next_ptr;
@@ -3275,7 +3275,7 @@ LABEL_21:;
       if ((v0 & 0x8000) != 0)
         return;
     }
-    projectiletrail_left_tile_and_attribs[v7] = *((const unaligned_uint16*)RomPtr_90(i) + 1);
+    projectiletrail_left_tile_and_attribs[v7] = *((unaligned_uint16*)RomPtr_90(i) + 1);
     projectiletrail_left_instr_list_ptr[v7] = i + 4;
 LABEL_10:;
     uint16 v8 = oam_next_ptr;

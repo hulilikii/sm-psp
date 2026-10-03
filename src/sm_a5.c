@@ -6,22 +6,22 @@
 #include "enemy_types.h"
 
 
-#define kDraygon_MorePalettes ((const unaligned_uint16*)RomFixedPtr(0xa5a217))
-#define kDraygon_MorePalettes2 ((const unaligned_uint16*)RomFixedPtr(0xa5a277))
-#define g_word_A5A297 ((const unaligned_uint16*)RomFixedPtr(0xa5a297))
-#define g_word_A587DC ((const unaligned_uint16*)RomFixedPtr(0xa587dc))
-#define g_word_A596AF ((const unaligned_uint16*)RomFixedPtr(0xa596af))
-#define g_word_A596EF ((const unaligned_uint16*)RomFixedPtr(0xa596ef))
-#define g_word_A5A19F ((const unaligned_uint16*)RomFixedPtr(0xa5a19f))
-#define g_word_A5A1AF ((const unaligned_uint16*)RomFixedPtr(0xa5a1af))
-#define g_word_A5A1C7 ((const unaligned_uint16*)RomFixedPtr(0xa5a1c7))
-#define g_word_A5A1DF ((const unaligned_uint16*)RomFixedPtr(0xa5a1df))
+#define kDraygon_MorePalettes ((unaligned_uint16*)RomFixedPtr(0xa5a217))
+#define kDraygon_MorePalettes2 ((unaligned_uint16*)RomFixedPtr(0xa5a277))
+#define g_word_A5A297 ((unaligned_uint16*)RomFixedPtr(0xa5a297))
+#define g_word_A587DC ((unaligned_uint16*)RomFixedPtr(0xa587dc))
+#define g_word_A596AF ((unaligned_uint16*)RomFixedPtr(0xa596af))
+#define g_word_A596EF ((unaligned_uint16*)RomFixedPtr(0xa596ef))
+#define g_word_A5A19F ((unaligned_uint16*)RomFixedPtr(0xa5a19f))
+#define g_word_A5A1AF ((unaligned_uint16*)RomFixedPtr(0xa5a1af))
+#define g_word_A5A1C7 ((unaligned_uint16*)RomFixedPtr(0xa5a1c7))
+#define g_word_A5A1DF ((unaligned_uint16*)RomFixedPtr(0xa5a1df))
 #define g_byte_A5CE07 ((uint8*)RomFixedPtr(0xa5ce07))
-#define g_word_A5E379 ((const unaligned_uint16*)RomFixedPtr(0xa5e379))
-#define g_word_A5E3F9 ((const unaligned_uint16*)RomFixedPtr(0xa5e3f9))
-#define g_word_A5E4F9 ((const unaligned_uint16*)RomFixedPtr(0xa5e4f9))
-#define g_word_A5E5D9 ((const unaligned_uint16*)RomFixedPtr(0xa5e5d9))
-#define kSporeSpawn_Palette ((const unaligned_uint16*)RomFixedPtr(0xa5e359))
+#define g_word_A5E379 ((unaligned_uint16*)RomFixedPtr(0xa5e379))
+#define g_word_A5E3F9 ((unaligned_uint16*)RomFixedPtr(0xa5e3f9))
+#define g_word_A5E4F9 ((unaligned_uint16*)RomFixedPtr(0xa5e4f9))
+#define g_word_A5E5D9 ((unaligned_uint16*)RomFixedPtr(0xa5e5d9))
+#define kSporeSpawn_Palette ((unaligned_uint16*)RomFixedPtr(0xa5e359))
 
 
 

@@ -9,13 +9,13 @@
 #define g_byte_88A286 ((uint8*)RomFixedPtr(0x88a286))
 #define kPowerBombExplosionColors ((uint8*)RomFixedPtr(0x888d85))
 #define g_byte_889079 ((uint8*)RomFixedPtr(0x889079))
-#define g_word_88A938 ((const unaligned_uint16*)RomFixedPtr(0x88a938))
+#define g_word_88A938 ((unaligned_uint16*)RomFixedPtr(0x88a938))
 #define kHdmaScrollEntrys ((HdmaScrollEntry*)RomFixedPtr(0x88aec1))
-#define g_word_88B589 ((const unaligned_uint16*)RomFixedPtr(0x88b589))
-#define g_word_88B60A ((const unaligned_uint16*)RomFixedPtr(0x88b60a))
-#define g_word_88D992 ((const unaligned_uint16*)RomFixedPtr(0x88d992))
+#define g_word_88B589 ((unaligned_uint16*)RomFixedPtr(0x88b589))
+#define g_word_88B60A ((unaligned_uint16*)RomFixedPtr(0x88b60a))
+#define g_word_88D992 ((unaligned_uint16*)RomFixedPtr(0x88d992))
 #define g_byte_88E3C9 ((uint8*)RomFixedPtr(0x88e3c9))
-#define g_word_88E833 ((const unaligned_uint16*)RomFixedPtr(0x88e833))
+#define g_word_88E833 ((unaligned_uint16*)RomFixedPtr(0x88e833))
 #define g_byte_88EA8B ((uint8*)RomFixedPtr(0x88ea8b))
 
 void CallHdmaobjPreInstr(uint32 ea, uint16 k);
@@ -1748,11 +1748,11 @@ void RoomMainAsm_ScrollingSky(const uint16 *src) {  // 0x88AFA3
 }
 
 void RoomCode_ScrollingSkyLand(void) {  // 0x88AF8D
-  RoomMainAsm_ScrollingSky((const unaligned_uint16*)RomPtr_88(addr_off_88AD9C));
+  RoomMainAsm_ScrollingSky((unaligned_uint16*)RomPtr_88(addr_off_88AD9C));
 }
 
 void RoomMainAsm_ScrollingSkyOcean(void) {  // 0x88AF99
-  RoomMainAsm_ScrollingSky((const unaligned_uint16*)RomPtr_88(addr_off_88ADA6));
+  RoomMainAsm_ScrollingSky((unaligned_uint16*)RomPtr_88(addr_off_88ADA6));
 }
 
 static const SpawnHdmaObject_Args unk_88B08C = { 0x42, 0x11, 0xb0ac };
