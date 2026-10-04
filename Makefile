@@ -7,6 +7,11 @@ SRCS += src/platform/psp/psp_renderer.c
 SRCS += src/platform/psp/psp_input.c
 
 OBJS := $(SRCS:%.c=%.o)
+OBJS += build/embedded_rom.o
+
+build/embedded_rom.o: sm.smc
+	@mkdir -p build
+	psp-ld -r -b binary -o $@ $<
 
 CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
@@ -32,4 +37,3 @@ all: $(TARGET).prx EBOOT.PBP
 package: EBOOT.PBP
 	@mkdir -p PSP/GAME/SMPSP
 	cp EBOOT.PBP PSP/GAME/SMPSP/
-	cp sm.smc PSP/GAME/SMPSP/
