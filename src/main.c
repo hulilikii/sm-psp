@@ -40,7 +40,9 @@ int g_got_mismatch_count;
 static uint8_t g_pixels[256 * 4 * 240] __attribute__((aligned(16)));
 static uint8_t g_my_pixels[256 * 4 * 240] __attribute__((aligned(16)));
 static struct RendererFuncs g_renderer_funcs;
+#if PSP_AUDIO_ENABLED
 static SceUID g_audio_sema = -1;
+#endif
 static bool g_running = true;
 static bool g_turbo;
 static uint8 g_replay_turbo = true;
@@ -58,6 +60,10 @@ void NORETURN Die(const char *error) {
 void Warning(const char *error) {
   fprintf(stderr, "Warning: %s\n", error);
 }
+
+#if PSP_AUDIO_ENABLED
+
+static SceUID g_audio_sema = -1;
 
 void RtlApuLock(void) {
   if (g_audio_sema >= 0)
@@ -94,6 +100,16 @@ static void Audio_Shutdown(void) {
     g_audio_sema = -1;
   }
 }
+
+#else
+
+void RtlApuLock(void) {
+}
+
+void RtlApuUnlock(void) {
+}
+
+#endif
 
 void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   (void)render_flags;
@@ -164,7 +180,9 @@ int main(int argc, char **argv) {
 
   g_spc_player = SpcPlayer_Create();
   SpcPlayer_Initialize(g_spc_player);
+  #if PSP_AUDIO_ENABLED
   Audio_Init();
+  #endif
 
   RtlReadSram();
   if (g_config.autosave)
@@ -191,7 +209,9 @@ int main(int argc, char **argv) {
   if (g_config.autosave)
     HandleCommand(kKeys_Save, true);
 
+  #if PSP_AUDIO_ENABLED
   Audio_Shutdown();
+  #endif
   g_renderer_funcs.Destroy();
   sceKernelExitGame();
   return 0;

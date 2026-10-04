@@ -427,7 +427,9 @@ bool RtlRunFrame(int inputs) {
 
   snes_frame_counter++;
 
+  #if PSP_AUDIO_ENABLED
   RtlPushApuState();
+  #endif
   return is_replay;
 }
 

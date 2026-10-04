@@ -1,6 +1,8 @@
 #pragma once
 #include "types.h"
 
+#define PSP_AUDIO_ENABLED 0
+
 enum {
   kKeys_Null,
   kKeys_Controls,
