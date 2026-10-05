@@ -1811,7 +1811,7 @@ void Ridley_Func_3(void) {  // 0xA6B2F3
 void Ridley_Func_3b(void) {  // 0xA6B321
   uint16 r18 = Ridley_Func_4();
   int v0 = 2 * (NextRandom() & 7);
-  uint16 v1 = *(uint16 *)&RomPtr_A6(r18)[v0];
+  uint16 v1 = *(unaligned_uint16 *)&RomPtr_A6(r18)[v0];
   Enemy_Ridley *E = Get_Ridley(0);
   E->ridley_var_A = v1;
   CallRidleyFunc(E->ridley_var_A | 0xA60000);
@@ -2199,9 +2199,9 @@ void Ridley_Func_29(void) {  // 0xA6B90F
   int v3 = v2 >> 1;
   tilemap_stuff[7] = g_word_A6B94D[v3];
   tilemap_stuff[6] = g_word_A6B959[v3];
-  E->ridley_var_C = *(uint16 *)&RomPtr_A6(r20)[v2];
+  E->ridley_var_C = *(unaligned_uint16 *)&RomPtr_A6(r20)[v2];
   const uint8 *v4 = RomPtr_A6(r18);
-  uint16 t = *(uint16 *)&v4[v2];
+  uint16 t = *(unaligned_uint16 *)&v4[v2];
   E->ridley_var_B = sign16(E->ridley_var_B) ? -t : t;
 }
 
@@ -2685,7 +2685,7 @@ void Ridley_Func_59(void) {  // 0xA6C136
   const uint8 *v1 = RomPtr_A6(addr_byte_A6C15D);
   v2 = gVramWriteEntry(vram_write_queue_tail);
   v2->size = GET_WORD(v1);
-  *(VoidP *)((uint8 *)&v2->src.addr + 1) = GET_WORD(v1 + 3);
+  *(unaligned_uint16 *)((uint8 *)&v2->src.addr + 1) = GET_WORD(v1 + 3);
   v2->src.addr = GET_WORD(v1 + 2);
   v2->vram_dst = GET_WORD(v1 + 5);
   vram_write_queue_tail = v0 + 7;
@@ -2740,7 +2740,7 @@ uint8 ProcessEscapeTimerTileTransfers(void) {  // 0xA6C26E
   if (GET_WORD(v3)) {
     v4 = gVramWriteEntry(vram_write_queue_tail);
     v4->size = GET_WORD(v3);
-    *(VoidP *)((uint8 *)&v4->src.addr + 1) = GET_WORD(v3 + 3);
+    *(unaligned_uint16 *)((uint8 *)&v4->src.addr + 1) = GET_WORD(v3 + 3);
     v4->src.addr = GET_WORD(v3 + 2);
     v4->vram_dst = GET_WORD(v3 + 5);
     vram_write_queue_tail = v2 + 7;
@@ -2794,7 +2794,7 @@ uint8 HandleTypewriterText_Ext(uint16 a) {  // 0xA6C2A7
       uint16 v11 = vram_write_queue_tail;
       v12 = gVramWriteEntry(vram_write_queue_tail);
       v12->size = 2;
-      *(VoidP *)((uint8 *)&v12->src.addr + 1) = 32256;
+      *(unaligned_uint16 *)((uint8 *)&v12->src.addr + 1) = 32256;
       E->mbn_var_3A = r18 + v4 - 65;
       v12->src.addr = ADDR16_OF_RAM(*extra_enemy_ram8000) + 52;
       uint16 mbn_var_3C = E->mbn_var_3C;
@@ -2826,7 +2826,7 @@ void Ridley_Func_62(void) {  // 0xA6C383
       break;
     v3 = gVramWriteEntry(i);
     v3->size = GET_WORD(v2);
-    *(VoidP *)((uint8 *)&v3->src.addr + 1) = GET_WORD(v2 + 3);
+    *(unaligned_uint16 *)((uint8 *)&v3->src.addr + 1) = GET_WORD(v2 + 3);
     v3->src.addr = GET_WORD(v2 + 2);
     v3->vram_dst = GET_WORD(v2 + 5);
     v0 += 7;
@@ -3987,12 +3987,12 @@ void Ridley_Func_114(void) {  // 0xA6D955
   Enemy_Ridley *E = Get_Ridley(0);
   uint16 ridley_var_10 = E->ridley_var_10, v2;
   if (!ridley_var_10) {
-    if (*(int16 *)((uint8 *)&E->base.enemy_ptr + 1) < 0)
+    if (*(unaligned_int16 *)((uint8 *)&E->base.enemy_ptr + 1) < 0)
       return;
     v2 = addr_kRidley_Ilist_E6F0;
     goto LABEL_7;
   }
-  if (ridley_var_10 != 1 && *(int16 *)((uint8 *)&E->base.enemy_ptr + 1) < 0) {
+  if (ridley_var_10 != 1 && *(unaligned_int16 *)((uint8 *)&E->base.enemy_ptr + 1) < 0) {
     v2 = addr_kRidley_Ilist_E706;
 LABEL_7:
     E->base.current_instruction = v2;
@@ -4062,8 +4062,8 @@ void Ridley_Func_118(void) {  // 0xA6DA0C
     E->ridley_var_06 = i;
     uint16 v6 = vram_write_queue_tail;
     v7 = gVramWriteEntry(vram_write_queue_tail);
-    *(VoidP *)((uint8 *)&v7->src.addr + 1) = -20480;
-    *(VoidP *)((uint8 *)&v7[1].src.addr + 1) = -20480;
+    *(unaligned_uint16 *)((uint8 *)&v7->src.addr + 1) = -20480;
+    *(unaligned_uint16 *)((uint8 *)&v7[1].src.addr + 1) = -20480;
     v7->src.addr = v4[1];
     v7[1].src.addr = v4[2];
     v7->vram_dst = 29216;
@@ -4084,8 +4084,8 @@ void Ridley_Func_119(uint8 carry) {  // 0xA6DA8B
     v1 = addr_off_A6DAD4;
   uint16 v2 = vram_write_queue_tail;
   v3 = gVramWriteEntry(vram_write_queue_tail);
-  *(VoidP *)((uint8 *)&v3->src.addr + 1) = -20480;
-  *(VoidP *)((uint8 *)&v3[1].src.addr + 1) = -20480;
+  *(unaligned_uint16 *)((uint8 *)&v3->src.addr + 1) = -20480;
+  *(unaligned_uint16 *)((uint8 *)&v3[1].src.addr + 1) = -20480;
   const uint8 *v4 = RomPtr_A6(v1);
   v3->src.addr = GET_WORD(v4);
   v3[1].src.addr = GET_WORD(v4 + 2);
@@ -4180,8 +4180,8 @@ void sub_A6DC13(uint16 j, uint16 r18, uint16 r20, uint16 r22) {  // 0xA6DC13
       OamEnt *v11 = gOamEnt(idx);
       v11->xcoord = x;
       v11->ycoord = v9;
-      *(uint16 *)&v11->charnum = r22 | GET_WORD(p + 3);
-      oam_ext[idx >> 5] |= (((x & 0x100) >> 8) | (*(int16 *)p < 0) * 2) << (2 * ((idx >> 2) & 7));
+      *(unaligned_uint16 *)&v11->charnum = r22 | GET_WORD(p + 3);
+      oam_ext[idx >> 5] |= (((x & 0x100) >> 8) | (*(unaligned_int16 *)p < 0) * 2) << (2 * ((idx >> 2) & 7));
       idx = (idx + 4) & 0x1FF;
     }
     p += 5;
@@ -4586,7 +4586,7 @@ const uint16 *CeresDoor_Instr_6(uint16 k, const uint16 *jp) {  // 0xA6F63E
 }
 
 const uint16 *CeresDoor_Instr_4(uint16 k, const uint16 *jp) {  // 0xA6F66A
-  if (*(uint16 *)&boss_bits_for_area[area_index] & 1)
+  if (*(unaligned_uint16 *)&boss_bits_for_area[area_index] & 1)
     return jp + 1;
   else
     return INSTR_RETURN_ADDR(*jp);
@@ -4676,7 +4676,7 @@ void CeresDoor_Func_1(uint16 k) {  // 0xA6F739
     uint16 v1 = vram_write_queue_tail;
     v2 = gVramWriteEntry(vram_write_queue_tail);
     v2->size = 1024;
-    *(VoidP *)((uint8 *)&v2->src.addr + 1) = -20480;
+    *(unaligned_uint16 *)((uint8 *)&v2->src.addr + 1) = -20480;
     v2->src.addr = -15360;
     v2->vram_dst = 28672;
     vram_write_queue_tail = v1 + 7;

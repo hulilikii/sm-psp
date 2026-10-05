@@ -177,7 +177,7 @@ const uint16 *EnemyInstr_CopyToVram(uint16 k, const uint16 *jp) {  // 0xA0814B
   v4 = gVramWriteEntry(vram_write_queue_tail);
   v4->size = GET_WORD(v3);
   v4->src.addr = GET_WORD(v3 + 2);
-  *(VoidP *)((uint8 *)&v4->src.addr + 1) = GET_WORD(v3 + 3);
+  *(unaligned_uint16 *)((uint8 *)&v4->src.addr + 1) = GET_WORD(v3 + 3);
   v4->vram_dst = GET_WORD(v3 + 5);
   vram_write_queue_tail = v2 + 7;
   return INSTR_INCR_BYTES(jp, 7);
@@ -302,7 +302,7 @@ void DrawSamusEnemiesAndProjectiles(void) {  // 0xA0884D
         varE38 = v1;
         uint8 *v2 = RomPtr_RAM(varE3A + v1);
         uint16 v3 = GET_WORD(v2);
-        *(uint16 *)v2 = 0;
+        *(unaligned_uint16 *)v2 = 0;
         cur_enemy_index = v3;
         WriteEnemyOams();
         v1 = varE38 + 2;
@@ -338,12 +338,12 @@ void RecordEnemySpawnData(uint16 j) {  // 0xA088D0
     R28 = v4[6];
   }
   v5 = gEnemySpawnData(j);
-  *(uint16 *)v5->name = r18;
-  *(uint16 *)&v5->name[2] = r20;
-  *(uint16 *)&v5->name[4] = r22;
-  *(uint16 *)&v5->name[6] = r24;
-  *(uint16 *)&v5->name[8] = R26;
-  *(uint16 *)&v5->name[10] = R28;
+  *(unaligned_uint16 *)v5->name = r18;
+  *(unaligned_uint16 *)&v5->name[2] = r20;
+  *(unaligned_uint16 *)&v5->name[4] = r22;
+  *(unaligned_uint16 *)&v5->name[6] = r24;
+  *(unaligned_uint16 *)&v5->name[8] = R26;
+  *(unaligned_uint16 *)&v5->name[10] = R28;
 }
 
 void LoadEnemies(void) {  // 0xA08A1E
@@ -390,7 +390,7 @@ void InitializeEnemies(void) {  // 0xA08A9E
     E->y_height = ED->y_radius;
     E->health = ED->health;
     E->layer = ED->layer;
-    *(uint16 *)&E->bank = *(uint16 *)&ED->bank;
+    *(unaligned_uint16 *)&E->bank = *(unaligned_uint16 *)&ED->bank;
     if (ED->boss_fight_value)
       boss_id = ED->boss_fight_value;
     E->enemy_ptr = EP->enemy_ptr;
@@ -488,7 +488,7 @@ void TransferEnemyTilesToVramAndInit(void) {  // 0xA08CD7
       uint16 v3 = enemy_tile_vram_src;
       v2->src.addr = enemy_tile_vram_src;
       enemy_tile_vram_src = v3 + 2048;
-      *(uint16 *)&v2->src.bank = 126;
+      *(unaligned_uint16 *)&v2->src.bank = 126;
       uint16 v4 = enemy_tile_vram_dst;
       v2->vram_dst = enemy_tile_vram_dst;
       enemy_tile_vram_dst = v4 + 1024;
@@ -1874,7 +1874,7 @@ add_enemy:
     E->y_height = ED->y_radius;
     E->health = ED->health;
     E->layer = ED->layer;
-    *(uint16 *)&E->bank = *(uint16 *)&ED->bank;
+    *(unaligned_uint16 *)&E->bank = *(unaligned_uint16 *)&ED->bank;
     E->enemy_ptr = EP->enemy_ptr;
     E->x_pos = EP->x_pos;
     E->y_pos = EP->y_pos;
@@ -1943,7 +1943,7 @@ void WriteEnemyOams(void) {  // 0xA0944A
     uint16 v5 = E->spritemap_pointer + 2;
     do {
       ExtendedSpriteMap *ext = get_ExtendedSpriteMap(E->bank, v5);
-      if (*(uint16 *)RomPtrWithBank(E->bank, ext->spritemap) == 0xFFFE) {
+      if (*(unaligned_uint16 *)RomPtrWithBank(E->bank, ext->spritemap) == 0xFFFE) {
         x = x2 + ext->xpos;
         y = y2 + ext->ypos;
         if ((E->extra_properties & 0x8000) != 0)
@@ -1979,7 +1979,7 @@ void NormalEnemyFrozenAI(void) {  // 0xA0957E
 void ProcessExtendedTilemap(uint8 db, uint16 r22) {  // 0xA096CA
   const uint8 *p = RomPtrWithBank(db, r22 + 2);
   while (1) {
-    uint16 v2 = *(uint16 *)p;
+    uint16 v2 = *(unaligned_uint16 *)p;
     if (v2 == 0xFFFF)
       break;
     int n = *((uint16 *)p + 1);
@@ -2078,7 +2078,7 @@ void EprojSamusCollDetect(void) {  // 0xA09894
 void HandleEprojCollWithSamus(uint16 k) {  // 0xA09923
   samus_invincibility_timer = 96;
   samus_knockback_timer = 5;
-  uint16 v1 = *((unaligned_uint16*)RomPtr_86(*(uint16 *)((uint8 *)eproj_id + k)) + 5);
+  uint16 v1 = *((unaligned_uint16*)RomPtr_86(*(unaligned_uint16 *)((uint8 *)eproj_id + k)) + 5);
   if (v1) {
     int v2 = k >> 1;
     eproj_instr_list_ptr[v2] = v1;
@@ -2086,7 +2086,7 @@ void HandleEprojCollWithSamus(uint16 k) {  // 0xA09923
   }
   int v3 = k >> 1;
   if ((eproj_properties[v3] & 0x4000) == 0)
-    *(uint16 *)((uint8 *)eproj_id + k) = 0;
+    *(unaligned_uint16 *)((uint8 *)eproj_id + k) = 0;
   Samus_DealDamage(SuitDamageDivision(eproj_properties[v3] & 0xFFF));
   knockback_x_dir = (int16)(samus_x_pos - eproj_x_pos[v3]) >= 0;
 }
@@ -2591,7 +2591,7 @@ void NormalEnemyTouchAiSkipDeathAnim(void) {  // 0xA0A4A1
     r22 = 200;
   }
   uint16 vp = ED->vulnerability_ptr ? ED->vulnerability_ptr : addr_stru_B4EC1C;
-  last_enemy_power = *(uint16 *)&get_Vulnerability(r20 + vp)->power;
+  last_enemy_power = *(unaligned_uint16 *)&get_Vulnerability(r20 + vp)->power;
   uint16 varE32 = last_enemy_power & 0x7F;
   if ((last_enemy_power & 0x7F) != 0) {
     uint16 dmg = (r22 >> 1) * varE32;

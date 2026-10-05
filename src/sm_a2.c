@@ -482,8 +482,8 @@ void MaridiaBeybladeTurtle_Func7(uint16 k) {  // 0xA28F8D
       uint16 v3 = 0;
       if ((int16)(E->base.x_pos - samus_x_pos) < 0)
         v3 = 4;
-      E->mte_var_01 = *(uint16 *)((uint8 *)&g_word_A28D56 + v3);
-      E->mte_var_02 = *(uint16 *)((uint8 *)&g_word_A28D58 + v3);
+      E->mte_var_01 = *(unaligned_uint16 *)((uint8 *)&g_word_A28D56 + v3);
+      E->mte_var_02 = *(unaligned_uint16 *)((uint8 *)&g_word_A28D58 + v3);
       E->mte_var_E = 0;
       E->mte_var_03 = 0;
       E->mte_var_A = FUNC16(MaridiaBeybladeTurtle_Func8);
@@ -873,7 +873,7 @@ void ThinHoppingBlobs_Func3(void) {  // 0xA29AAA
   }
   uint16 v3 = 8 * thbs_var_00;
   E->thbs_var_F = v3;
-  E->thbs_var_E = *(uint16 *)((uint8 *)&g_word_A29A0D + v3);
+  E->thbs_var_E = *(unaligned_uint16 *)((uint8 *)&g_word_A29A0D + v3);
 }
 
 uint16 ThinHoppingBlobs_Func4(void) {  // 0xA29B06
@@ -888,10 +888,10 @@ void ThinHoppingBlobs_Func5(void) {  // 0xA29B1A
   uint16 r22 = 0;
   uint16 r24 = 0;
   do {
-    r22 += *(uint16 *)((uint8 *)&g_word_A29A09 + thbs_var_F);
-    r24 += *(uint16 *)((uint8 *)kCommonEnemySpeeds_Quadratic + (8 * ((r22 & 0xFF00) >> 8)) + 1);
+    r22 += *(unaligned_uint16 *)((uint8 *)&g_word_A29A09 + thbs_var_F);
+    r24 += *(unaligned_uint16 *)((uint8 *)kCommonEnemySpeeds_Quadratic + (8 * ((r22 & 0xFF00) >> 8)) + 1);
     thbs_var_F = E->thbs_var_F;
-    v2 = swap16(*(uint16 *)((uint8 *)&g_word_A29A07 + thbs_var_F));
+    v2 = swap16(*(unaligned_uint16 *)((uint8 *)&g_word_A29A07 + thbs_var_F));
   } while (!sign16(v2 - r24));
   E->thbs_var_B = r22;
   E->thbs_var_03 = 0;
@@ -949,16 +949,16 @@ void ThinHoppingBlobs_Func8(void) {  // 0xA29B88
     uint16 thbs_var_F = E->thbs_var_F;
     if (E->thbs_var_03) {
       ThinHoppingBlobs_Func10();
-      E->thbs_var_B += *(uint16 *)((uint8 *)&g_word_A29A0B + thbs_var_F);
+      E->thbs_var_B += *(unaligned_uint16 *)((uint8 *)&g_word_A29A0B + thbs_var_F);
     } else {
       ThinHoppingBlobs_Func9();
-      E->thbs_var_B -= *(uint16 *)((uint8 *)&g_word_A29A0B + thbs_var_F);
+      E->thbs_var_B -= *(unaligned_uint16 *)((uint8 *)&g_word_A29A0B + thbs_var_F);
     }
     if (sign16(E->thbs_var_B)) {
       E->thbs_var_03 = 1;
       E->thbs_var_B = 0;
     }
-    uint16 R20 = (*(uint16 *)((uint8 *)&g_word_A29A09 + E->thbs_var_F) & 0xFF00) >> 8;
+    uint16 R20 = (*(unaligned_uint16 *)((uint8 *)&g_word_A29A09 + E->thbs_var_F) & 0xFF00) >> 8;
     if (E->thbs_var_02)
       R20 = -R20;
     if (Enemy_MoveRight_IgnoreSlopes(cur_enemy_index, INT16_SHL16(R20))) {
@@ -1068,7 +1068,7 @@ void ThinHoppingBlobs_Func14(void) {  // 0xA29D6B
 void ThinHoppingBlobs_Func15(void) {  // 0xA29D98
   Enemy_ThinHoppingBlobs *E = Get_ThinHoppingBlobs(cur_enemy_index);
   uint16 thbs_var_F = E->thbs_var_F;
-  uint16 R20 = (*(uint16 *)((uint8 *)&g_word_A29A0B + thbs_var_F) & 0xFF00) >> 8;
+  uint16 R20 = (*(unaligned_uint16 *)((uint8 *)&g_word_A29A0B + thbs_var_F) & 0xFF00) >> 8;
   uint16 R18 = *((uint8 *)&g_word_A29A0B + thbs_var_F) << 8;
   if (Enemy_MoveDown(cur_enemy_index, __PAIR32__(R20, R18))) {
     uint16 R28 = ThinHoppingBlobs_Func4();
@@ -1493,7 +1493,7 @@ void GunshipTop_7(uint16 k) {  // 0xA2A987
     frame_handler_alfa = FUNC16(Samus_FrameHandlerAlfa_Func11);
     frame_handler_beta = FUNC16(Samus_FrameHandlerBeta_Func17);
     loading_game_state = kLoadingGameState_5_Main;
-    *(uint16 *)used_save_stations_and_elevators |= 1;
+    *(unaligned_uint16 *)used_save_stations_and_elevators |= 1;
     load_station_index = 0;
     SaveToSram(selected_save_slot);
   }
@@ -1565,8 +1565,8 @@ void GunshipTop_12(uint16 k) {  // 0xA2AAA2
     E->gtp_var_E = 0;
     substate = 0;
     suit_pickup_light_beam_pos = 0;
-    *(uint16 *)&suit_pickup_color_math_R = 0;
-    *(uint16 *)&suit_pickup_color_math_B = 0;
+    *(unaligned_uint16 *)&suit_pickup_color_math_R = 0;
+    *(unaligned_uint16 *)&suit_pickup_color_math_B = 0;
     CallSomeSamusCode(0xA);
   } else {
     Samus_RestoreHealth(2);
@@ -1590,7 +1590,7 @@ void GunshipTop_13(uint16 k) {  // 0xA2AB1F
     return;
 
   if (rv != 2) {
-    *(uint16 *)used_save_stations_and_elevators |= 1;
+    *(unaligned_uint16 *)used_save_stations_and_elevators |= 1;
     load_station_index = 0;
     SaveToSram(selected_save_slot);
   }

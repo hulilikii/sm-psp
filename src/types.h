@@ -25,7 +25,9 @@ typedef uint64_t uint64;
 typedef int64_t int64;
 typedef unsigned int uint;
 typedef uint16 unaligned_uint16 __attribute__((aligned(1), may_alias));
+typedef int16  unaligned_int16  __attribute__((aligned(1), may_alias));
 typedef uint32 unaligned_uint32 __attribute__((aligned(1), may_alias));
+typedef int32  unaligned_int32  __attribute__((aligned(1), may_alias));
 
 typedef uint16 VoidP;
 

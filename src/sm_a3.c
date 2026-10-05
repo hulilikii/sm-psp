@@ -1253,7 +1253,7 @@ uint16 Sidehopper_Func_2(uint16 r22, uint16 r24) {  // 0xA3AB9D
   uint16 r18 = 0, r20 = 0;
   do {
     r18 += r24;
-    r20 += *(uint16 *)((uint8 *)kCommonEnemySpeeds_Quadratic + (8 * r18) + 1);
+    r20 += *(unaligned_uint16 *)((uint8 *)kCommonEnemySpeeds_Quadratic + (8 * r18) + 1);
   } while (sign16(r20 - r22));
   return r18;
 }
@@ -1968,7 +1968,7 @@ const uint16 *MaridiaSnail_Instr_2(uint16 k, const uint16 *jp) {  // 0xA3CC3F
 const uint16 *MaridiaSnail_Instr_4(uint16 k, const uint16 *jp) {  // 0xA3CC48
   Enemy_MaridiaSnail *E = Get_MaridiaSnail(k);
   E->msl_var_07 = jp[0];
-  E->msl_var_C = *(uint16 *)((uint8 *)&g_stru_A3CD42[0].field_6 + 8 * E->msl_var_07);
+  E->msl_var_C = *(unaligned_uint16 *)((uint8 *)&g_stru_A3CD42[0].field_6 + 8 * E->msl_var_07);
   return jp + 1;
 }
 
@@ -2332,10 +2332,10 @@ uint8 MaridiaSnail_Func_19(uint16 k) {  // 0xA3D356
     return 0;
   uint16 v2 = g_word_A3CDC2[E->msl_var_07];
   E->msl_var_07 = v2;
-  E->base.current_instruction = *(VoidP *)((uint8 *)&g_stru_A3CD42[0].field_0 + (8 * v2));
-  E->base.properties = *(uint16 *)((uint8 *)&g_stru_A3CD42[0].field_2 + (8 * v2)) | E->base.properties & ~3;
-  E->msl_var_D = *(VoidP *)((uint8 *)&g_stru_A3CD42[0].field_4 + (8 * v2));
-  E->msl_var_C = *(uint16 *)((uint8 *)&g_stru_A3CD42[0].field_6 + (8 * v2));
+  E->base.current_instruction = *(unaligned_uint16 *)((uint8 *)&g_stru_A3CD42[0].field_0 + (8 * v2));
+  E->base.properties = *(unaligned_uint16 *)((uint8 *)&g_stru_A3CD42[0].field_2 + (8 * v2)) | E->base.properties & ~3;
+  E->msl_var_D = *(unaligned_uint16 *)((uint8 *)&g_stru_A3CD42[0].field_4 + (8 * v2));
+  E->msl_var_C = *(unaligned_uint16 *)((uint8 *)&g_stru_A3CD42[0].field_6 + (8 * v2));
   MaridiaSnail_Func_2(k, 8 * v2);
   MaridiaSnail_Func_3(k);
   E->msl_var_05 = 1;
@@ -2451,7 +2451,7 @@ void Reflec_Init(void) {  // 0xA3DBD3
   E->base.properties |= kEnemyProps_BlockPlasmaBeam;
   E->base.current_instruction = g_off_A3DC0B[E->reflec_parameter_1];
   enemy_gfx_drawn_hook.addr = FUNC16(Reflec_Func_1);
-  *(uint16 *)&enemy_gfx_drawn_hook.bank = 163;
+  *(unaligned_uint16 *)&enemy_gfx_drawn_hook.bank = 163;
   variables_for_enemy_graphics_drawn_hook[0] = ((16 * E->base.palette_index) & 0xFF00) >> 8;
   variables_for_enemy_graphics_drawn_hook[2] = 16;
 }

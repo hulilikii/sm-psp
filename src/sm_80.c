@@ -228,7 +228,7 @@ void LoadMirrorOfExploredMapTiles(void) {  // 0x80858C
   uint16 v1 = swap16(area_index);
   uint16 v2 = 0;
   do {
-    *(uint16 *)&map_tiles_explored[v2] = explored_map_tiles_saved[v1 >> 1];
+    *(unaligned_uint16 *)&map_tiles_explored[v2] = explored_map_tiles_saved[v1 >> 1];
     v1 += 2;
     v2 += 2;
   } while ((int16)(v2 - 256) < 0);
@@ -239,12 +239,12 @@ void SaveExploredMapTilesToSaved(void) {  // 0x8085C6
   uint16 v1 = swap16(area_index);
   uint16 v2 = 0;
   do {
-    explored_map_tiles_saved[v1 >> 1] = *(uint16 *)&map_tiles_explored[v2];
+    explored_map_tiles_saved[v1 >> 1] = *(unaligned_uint16 *)&map_tiles_explored[v2];
     v1 += 2;
     v2 += 2;
   } while ((int16)(v2 - 256) < 0);
   if (has_area_map)
-    *(uint16 *)&map_station_byte_array[area_index] |= 0xFF;
+    *(unaligned_uint16 *)&map_station_byte_array[area_index] |= 0xFF;
 }
 
 void InitializeCpuIoRegs(void) {  // 0x80875D
@@ -436,7 +436,7 @@ void QueueMode7Transfers(uint8 db, uint16 k) {  // 0x808B4F
 void NMI_ProcessMode7Queue(void) {  // 0x808BBA
   if (mode7_vram_write_queue_tail) {
     NMI_ProcessMode7QueueInner(&g_ram[0x2D0]);
-    *(uint16 *)&mode7_write_queue[0].field_0 = 0;
+    *(unaligned_uint16 *)&mode7_write_queue[0].field_0 = 0;
     mode7_vram_write_queue_tail = 0;
   }
 }
@@ -465,9 +465,9 @@ void NMI_ProcessMode7QueueInner(const uint8 *p) {  // 0x808BD3
     if (!(v2 & 0x40))
       break;
     WriteReg(DMAP1, v2 & 0x1F);
-    WriteRegWord(A1T1L, *(uint16 *)(p + 1));
+    WriteRegWord(A1T1L, GET_WORD(p + 1));
     WriteReg(A1B1, p[3]);
-    WriteRegWord(DAS1L, *((uint16 *)p + 2));
+    WriteRegWord(DAS1L, GET_WORD((const uint8 *)p + 4));
     WriteReg(BBAD1, 0x22);
     WriteReg(CGADD, p[6]);
     WriteReg(MDMAEN, 2);
@@ -622,7 +622,7 @@ void NMI_ProcessVramReadQueue(void) {  // 0x808EA2
       ReadRegWord(RDVRAML);
       WriteRegWord(DMAP1, vram_read_queue[v0].dma_parameters);
       WriteRegWord(A1T1L, vram_read_queue[v0].src.addr);
-      WriteRegWord(A1T1H, *(VoidP *)((uint8 *)&vram_read_queue[v0].src.addr + 1));
+      WriteRegWord(A1T1H, *(unaligned_uint16 *)((uint8 *)&vram_read_queue[v0].src.addr + 1));
       WriteRegWord(DAS1L, vram_read_queue[v0].size);
       WriteRegWord(DAS10, 0);
       WriteRegWord(A2A1H, 0);
@@ -830,8 +830,8 @@ void SetupDmaTransfer(const void *p) {  // 0x8091A9
   const StartDmaCopy *s = (const StartDmaCopy *)p;
 
   int v2 = s->chan * 16;
-  WriteRegWord((SnesRegs)(v2 + DMAP0), *(uint16 *)&s->dmap);
-  WriteRegWord((SnesRegs)(v2 + A1T0L), *(uint16 *)&s->a1.addr);
+  WriteRegWord((SnesRegs)(v2 + DMAP0), *(unaligned_uint16 *)&s->dmap);
+  WriteRegWord((SnesRegs)(v2 + A1T0L), *(unaligned_uint16 *)&s->a1.addr);
   WriteReg((SnesRegs)(v2 + A1B0), s->a1.bank);
   WriteRegWord((SnesRegs)(v2 + DAS0L), s->das);
 }
@@ -1016,7 +1016,7 @@ void ReadJoypadInputs(void) {  // 0x809459
             joypad1_newkeys = 0;
           }
           if ((joypad_dbg_2 & 0x80) != 0)
-            *(uint16 *)&reg_NMITIMEN ^= 0x30;
+            *(unaligned_uint16 *)&reg_NMITIMEN ^= 0x30;
           if ((joypad_dbg_2 & 0x8000) != 0) {
             bool v2 = (~joypad_dbg_flags & 0x8000) != 0;
             joypad_dbg_flags ^= 0x8000;
@@ -1101,7 +1101,7 @@ void IrqHandler_0_Nothing(void) {  // 0x80966E
 }
 
 void IrqHandler_2_DisableIRQ(void) {  // 0x809680
-  *(uint16 *)&reg_NMITIMEN &= ~0x30;
+  *(unaligned_uint16 *)&reg_NMITIMEN &= ~0x30;
   IrqHandler_SetResult(0, 0, 0);
 }
 
@@ -1218,18 +1218,18 @@ void IrqHandler_26_HorizDoor_EndDraw(void) {  // 0x80980A
 void EnableIrqInterrupts(void) {  // 0x80982A
   WriteRegWord(VTIMEL, 0);
   WriteRegWord(HTIMEL, 152);
-  *(uint16 *)&reg_NMITIMEN |= 0x30;
+  *(unaligned_uint16 *)&reg_NMITIMEN |= 0x30;
 }
 
 void EnableIrqInterruptsNow(void) {  // 0x809841
   WriteRegWord(VTIMEL, 0);
   WriteRegWord(HTIMEL, 152);
-  *(uint16 *)&reg_NMITIMEN |= 0x30;
+  *(unaligned_uint16 *)&reg_NMITIMEN |= 0x30;
   WriteReg(NMITIMEN, reg_NMITIMEN);
 }
 
 void DisableIrqInterrupts(void) {  // 0x80985F
-  *(uint16 *)&reg_NMITIMEN &= ~0x30;
+  *(unaligned_uint16 *)&reg_NMITIMEN &= ~0x30;
 }
 
 static Func_V *const kIrqHandlers[14] = {  // 0x80986A
@@ -1522,15 +1522,15 @@ uint8 ProcessTimer_MovingIntoPlace(void) {  // 0x809E58
 }
 
 void SetTimerMinutes(uint16 a) {  // 0x809E8C
-  *(uint16 *)&timer_centiseconds = 0;
-  *(uint16 *)&timer_seconds = a;
+  *(unaligned_uint16 *)&timer_centiseconds = 0;
+  *(unaligned_uint16 *)&timer_seconds = a;
 }
 
 void ClearTimerRam(void) {  // 0x809E93
   timer_x_pos = 0x8000;
   timer_y_pos = 0x8000;
-  *(uint16 *)&timer_centiseconds = 0;
-  *(uint16 *)&timer_seconds = 0;
+  *(unaligned_uint16 *)&timer_centiseconds = 0;
+  *(unaligned_uint16 *)&timer_seconds = 0;
   timer_status = 0;
 }
 
@@ -1571,9 +1571,9 @@ uint8 ProcessTimer_Decrement(void) {  // 0x809EA9
 
 void DrawTimer(void) {  // 0x809F6C
   DrawTimerSpritemap(0, addr_word_80A060);
-  DrawTwoTimerDigits(*(uint16 *)&timer_minutes, 0xFFE4);
-  DrawTwoTimerDigits(*(uint16 *)&timer_seconds, 0xFFFC);
-  DrawTwoTimerDigits(*(uint16 *)&timer_centiseconds, 0x14);
+  DrawTwoTimerDigits(*(unaligned_uint16 *)&timer_minutes, 0xFFE4);
+  DrawTwoTimerDigits(*(unaligned_uint16 *)&timer_seconds, 0xFFFC);
+  DrawTwoTimerDigits(*(unaligned_uint16 *)&timer_centiseconds, 0x14);
 }
 
 
@@ -1686,12 +1686,12 @@ void DisplayViewablePartOfRoom(void) {  // 0x80A176
 
 void QueueClearingOfFxTilemap(void) {  // 0x80A211
   for (int i = 3838; i >= 0; i -= 2)
-    *(uint16 *)((uint8 *)ram4000.xray_tilemaps + (uint16)i) = 6222;
+    *(unaligned_uint16 *)((uint8 *)ram4000.xray_tilemaps + (uint16)i) = 6222;
   uint16 v1 = vram_write_queue_tail;
   VramWriteEntry *v2 = gVramWriteEntry(vram_write_queue_tail);
   v2->size = 3840;
   v2->src.addr = ADDR16_OF_RAM(ram4000);
-  *(uint16 *)&v2->src.bank = 126;
+  *(unaligned_uint16 *)&v2->src.bank = 126;
   v2->vram_dst = addr_unk_605880;
   vram_write_queue_tail = v1 + 7;
 }
@@ -2099,8 +2099,8 @@ void UpdateLevelOrBackgroundDataColumn(uint16 k) {  // 0x80A9DE
     v2 += 0x9600;
   const uint16 *r54 = (const uint16 * )(g_ram + 0x10000 + v2);
   uint16 v3 = (4 * vram_blocks_to_update_y_block) & 0x3C;
-  *(uint16 *)((uint8 *)&bg1_update_col_wrapped_size + k) = v3;
-  *(uint16 *)((uint8 *)&bg1_update_col_unwrapped_size + k) = (v3 ^ 0x3F) + 1;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_col_wrapped_size + k) = v3;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_col_unwrapped_size + k) = (v3 ^ 0x3F) + 1;
   prod = Mult8x8(vram_blocks_to_update_y_block & 0xF, 0x40);
   uint16 var935 = vram_blocks_to_update_x_block & 0x1F;
   uint16 v4 = 2 * var935;
@@ -2111,17 +2111,17 @@ void UpdateLevelOrBackgroundDataColumn(uint16 k) {  // 0x80A9DE
   if (k)
     v5 -= size_of_bg2;
   uint16 var937 = v5;
-  *(uint16 *)((uint8 *)&bg1_update_col_unwrapped_dst + k) = var933 + v5;
-  *(uint16 *)((uint8 *)&bg1_update_col_wrapped_dst + k) = var935 + var935 + var937;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_col_unwrapped_dst + k) = var933 + v5;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_col_wrapped_dst + k) = var935 + var935 + var937;
   uint16 v6 = ADDR16_OF_RAM(*bg1_column_update_tilemap_left_halves);
   uint16 v7 = 0;
   if (k) {
     v6 = ADDR16_OF_RAM(*bg2_column_update_tilemap_left_halves);
     v7 = 264;
   }
-  uint16 v8 = *(uint16 *)((uint8 *)&bg1_update_col_unwrapped_size + k) + v6;
-  *(uint16 *)((uint8 *)&bg1_update_col_wrapped_left_src + k) = v8;
-  *(uint16 *)((uint8 *)&bg1_update_col_wrapped_right_src + k) = v8 + 64;
+  uint16 v8 = *(unaligned_uint16 *)((uint8 *)&bg1_update_col_unwrapped_size + k) + v6;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_col_wrapped_left_src + k) = v8;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_col_wrapped_right_src + k) = v8 + 64;
   var937 = v7;
   uint16 t2 = k;
   uint16 v9 = 0;
@@ -2166,7 +2166,7 @@ void UpdateLevelOrBackgroundDataColumn(uint16 k) {  // 0x80A9DE
     v9 = room_width_in_blocks * 2 + v17;
     --var939;
   } while (var939);
-  ++ *(uint16 *)((uint8 *)&bg1_update_col_enable + t2);
+  ++ *(unaligned_uint16 *)((uint8 *)&bg1_update_col_enable + t2);
 }
 
 void UpdateBackgroundDataRow(void) {  // 0x80AB70
@@ -2187,8 +2187,8 @@ void UpdateLevelOrBackgroundDataRow(uint16 v0) {  // 0x80AB78
     v2 -= 27136;
   const uint16 *r54 = (const uint16 *)(g_ram + 0x10000 + v2);
   uint16 var933 = vram_blocks_to_update_x_block & 0xF;
-  *(uint16 *)((uint8 *)&bg1_update_row_unwrapped_size + v0) = 4 * (16 - var933);
-  *(uint16 *)((uint8 *)&bg1_update_row_wrapped_size + v0) = 4 * (var933 + 1);
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_row_unwrapped_size + v0) = 4 * (16 - var933);
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_row_wrapped_size + v0) = 4 * (var933 + 1);
   prod = Mult8x8(vram_blocks_to_update_y_block & 0xF, 0x40);
   uint16 var935 = vram_blocks_to_update_x_block & 0x1F;
   uint16 v3 = 2 * var935;
@@ -2201,20 +2201,20 @@ void UpdateLevelOrBackgroundDataRow(uint16 v0) {  // 0x80AB78
   }
   if (v0)
     v4 -= size_of_bg2;
-  *(uint16 *)((uint8 *)&bg1_update_row_unwrapped_dst + v0) = var933 + v4;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_row_unwrapped_dst + v0) = var933 + v4;
   uint16 v5 = var937;
   if (v0)
     v5 = var937 - size_of_bg2;
-  *(uint16 *)((uint8 *)&bg1_update_row_wrapped_dst + v0) = prod + v5;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_row_wrapped_dst + v0) = prod + v5;
   uint16 v6 = ADDR16_OF_RAM(*bg1_column_update_tilemap_top_halves);
   uint16 v7 = 0;
   if (v0) {
     v6 = ADDR16_OF_RAM(*bg2_column_update_tilemap_top_halves);
     v7 = 264;
   }
-  uint16 v8 = *(uint16 *)((uint8 *)&bg1_update_row_unwrapped_size + v0) + v6;
-  *(uint16 *)((uint8 *)&bg1_update_row_wrapped_top_src + v0) = v8;
-  *(uint16 *)((uint8 *)&bg1_update_row_wrapped_bottom_src + v0) = v8 + 68;
+  uint16 v8 = *(unaligned_uint16 *)((uint8 *)&bg1_update_row_unwrapped_size + v0) + v6;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_row_wrapped_top_src + v0) = v8;
+  *(unaligned_uint16 *)((uint8 *)&bg1_update_row_wrapped_bottom_src + v0) = v8 + 68;
   var937 = v7;
   uint16 t2 = v0;
   uint16 v9 = 0;
@@ -2259,7 +2259,7 @@ void UpdateLevelOrBackgroundDataRow(uint16 v0) {  // 0x80AB78
     v9 = v17 + 2;
     --var939;
   } while (var939);
-  ++ *(uint16 *)((uint8 *)&bg1_update_row_enable + t2);
+  ++ *(unaligned_uint16 *)((uint8 *)&bg1_update_row_enable + t2);
 }
 
 void FixDoorsMovingUp(void) {  // 0x80AD1D
