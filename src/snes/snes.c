@@ -414,6 +414,7 @@ void LogWrite(Snes *snes, uint32_t adr, uint8_t val) {
          snes->cpu->a, snes->cpu->x, snes->cpu->y, snes->cpu->c);
 }
 
+inline __attribute__((always_inline, hot))
 void snes_write(Snes* snes, uint32_t adr, uint8_t val) {
   uint8_t bank = adr >> 16;
   adr &= 0xffff;
