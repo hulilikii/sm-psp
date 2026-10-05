@@ -442,9 +442,9 @@ uint8 SamusBottomDrawn_0_Standing(void) {  // 0x90868D
   if (samus_pose == kPose_00_FaceF_Powersuit) {
     uint16 v0 = oam_next_ptr;
     v1 = gOamEnt(oam_next_ptr);
-    *(uint16 *)&v1->xcoord = samus_x_pos - 7 - layer1_x_pos;
-    *(uint16 *)&v1->ycoord = samus_y_pos - 17 - layer1_y_pos;
-    *(uint16 *)&v1->charnum = 14369;
+    *(unaligned_uint16 *)&v1->xcoord = samus_x_pos - 7 - layer1_x_pos;
+    *(unaligned_uint16 *)&v1->ycoord = samus_y_pos - 17 - layer1_y_pos;
+    *(unaligned_uint16 *)&v1->charnum = 14369;
     oam_next_ptr = v0 + 4;
   }
   return 1;
@@ -705,7 +705,7 @@ void AtmosphericTypeFunc_1_FootstepSplash(uint16 k, uint16 j) {  // 0x908AC5
       if (v6 >= 0) {
         if (sign16(atmospheric_gfx_y_pos[v2] - layer1_y_pos - 260)) {
           v5->ycoord = v6;
-          *(uint16 *)&v5->charnum = *(unaligned_uint16 *)RomPtr_90(r18 + g_off_908BFF[k >> 1]);
+          *(unaligned_uint16 *)&v5->charnum = *(unaligned_uint16 *)RomPtr_90(r18 + g_off_908BFF[k >> 1]);
           oam_next_ptr = v3 + 4;
         }
       }
@@ -820,7 +820,7 @@ PairU16 Samus_CalcSpritemapPos_Standing(uint16 j) {  // 0x908CC3
       return MakePairU16(samus_x_pos - layer1_x_pos, samus_y_pos - 1 - layer1_y_pos);
     }
   } else if (!sign16(v1 - kPose_A4_FaceR_LandJump) && sign16(v1 - kPose_A8_FaceR_Grappling)) {
-    uint16 r18 = *(uint16 *)&g_byte_908D28[(uint16)(samus_anim_frame + 4 * (v1 - 164))];
+    uint16 r18 = *(unaligned_uint16 *)&g_byte_908D28[(uint16)(samus_anim_frame + 4 * (v1 - 164))];
     samus_spritemap_y_pos = samus_y_pos - r18 - layer1_y_pos;
     samus_spritemap_x_pos = samus_x_pos - layer1_x_pos;
     return MakePairU16(samus_x_pos - layer1_x_pos, samus_y_pos - r18 - layer1_y_pos);
@@ -2213,7 +2213,7 @@ void DisableMinimapAndMarkBossRoomAsExplored(void) {  // 0x90A7E2
       return;
   }
   for (int i = g_stru_90A83A[v2].ptrs; ; i += 4) {
-    const uint16 *v4 = (const uint16 *)RomPtr_90(i);
+    const unaligned_uint16 *v4 = (const unaligned_uint16 *)RomPtr_90(i);
     if ((*v4 & 0x8000) != 0)
       break;
     MarkMapTileAsExplored(v4[0], v4[1]);
@@ -2255,9 +2255,9 @@ void UpdateMinimap(void) {  // 0x90A91B
   uint16 R50 = v3;
   int r52 = 2 * v4;
   int v6 = r52 >> 1;
-  uint16 r24 = kShr0xFc00[v6] & swap16(*(uint16 *)&map_tiles_explored[v3]);
-  uint16 r26 = kShr0xFc00[v6] & swap16(*(uint16 *)&map_tiles_explored[v3 + 4]);
-  uint16 r28 = kShr0xFc00[v6] & swap16(*(uint16 *)&map_tiles_explored[v3 + 8]);
+  uint16 r24 = kShr0xFc00[v6] & swap16(*(unaligned_uint16 *)&map_tiles_explored[v3]);
+  uint16 r26 = kShr0xFc00[v6] & swap16(*(unaligned_uint16 *)&map_tiles_explored[v3 + 4]);
+  uint16 r28 = kShr0xFc00[v6] & swap16(*(unaligned_uint16 *)&map_tiles_explored[v3 + 8]);
   const uint8 *r9 = RomPtr_82(kPauseMenuMapData[area_index]);
   const uint8 *r15 = r9;
   r9 += v3;
@@ -2333,7 +2333,7 @@ void UpdateMinimapInside(uint16 r18, uint16 r22, uint16 r34, uint16 r30, uint16 
   else
     v1 = t - 34;
   uint16 v2 = 2 * v1;
-  const uint16 *r0 = (const uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[area_index]));
+  const unaligned_uint16 *r0 = (const unaligned_uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[area_index]));
   const uint16 *r3 = r0 + 32;
   const uint16 *r6 = r0 + 64;
   int n = 5;
@@ -3221,7 +3221,7 @@ void HandleProjectileTrails(void) {  // 0x90B6A9
         if (v3)
           goto LABEL_10;
         for (i = projectiletrail_left_instr_list_ptr[v1]; ; i += 2) {
-          const uint16 *v5 = (const uint16 *)RomPtr_90(i);
+          const unaligned_uint16 *v5 = (const unaligned_uint16 *)RomPtr_90(i);
           v6 = *v5;
           if ((*v5 & 0x8000) == 0)
             break;
@@ -3241,7 +3241,7 @@ LABEL_14:;
         if (v15)
           goto LABEL_21;
         for (j = projectiletrail_right_instr_list_ptr[v13]; ; j += 2) {
-          const uint16 *v17 = (const uint16 *)RomPtr_90(j);
+          const unaligned_uint16 *v17 = (const unaligned_uint16 *)RomPtr_90(j);
           v18 = *v17;
           if ((*v17 & 0x8000) == 0)
             break;
@@ -3260,11 +3260,11 @@ LABEL_21:;
             v22 = projectiletrail_right_x_pos[v21] - layer1_x_pos;
             if ((v22 & 0xFF00) == 0) {
               v23 = gOamEnt(oam_next_ptr);
-              *(uint16 *)&v23->xcoord = v22;
+              *(unaligned_uint16 *)&v23->xcoord = v22;
               v24 = projectiletrail_right_y_pos[v21] - layer1_y_pos;
               if ((v24 & 0xFF00) == 0) {
-                *(uint16 *)&v23->ycoord = v24;
-                *(uint16 *)&v23->charnum = projectiletrail_right_tile_and_attribs[v21];
+                *(unaligned_uint16 *)&v23->ycoord = v24;
+                *(unaligned_uint16 *)&v23->charnum = projectiletrail_right_tile_and_attribs[v21];
                 oam_next_ptr = v20 + 4;
               }
             }
@@ -3284,11 +3284,11 @@ LABEL_10:;
       v10 = projectiletrail_left_x_pos[v9] - layer1_x_pos;
       if ((v10 & 0xFF00) == 0) {
         v11 = gOamEnt(oam_next_ptr);
-        *(uint16 *)&v11->xcoord = v10;
+        *(unaligned_uint16 *)&v11->xcoord = v10;
         v12 = projectiletrail_left_y_pos[v9] - layer1_y_pos;
         if ((v12 & 0xFF00) == 0) {
-          *(uint16 *)&v11->ycoord = v12;
-          *(uint16 *)&v11->charnum = projectiletrail_left_tile_and_attribs[v9];
+          *(unaligned_uint16 *)&v11->ycoord = v12;
+          *(unaligned_uint16 *)&v11->charnum = projectiletrail_left_tile_and_attribs[v9];
           oam_next_ptr = v8 + 4;
         }
       }
@@ -3303,11 +3303,11 @@ LABEL_10:;
         v28 = projectiletrail_left_x_pos[v27] - layer1_x_pos;
         if ((v28 & 0xFF00) == 0) {
           v29 = gOamEnt(oam_next_ptr);
-          *(uint16 *)&v29->xcoord = v28;
+          *(unaligned_uint16 *)&v29->xcoord = v28;
           v30 = projectiletrail_left_y_pos[v27] - layer1_y_pos;
           if ((v30 & 0xFF00) == 0) {
-            *(uint16 *)&v29->ycoord = v30;
-            *(uint16 *)&v29->charnum = projectiletrail_left_tile_and_attribs[v27];
+            *(unaligned_uint16 *)&v29->ycoord = v30;
+            *(unaligned_uint16 *)&v29->charnum = projectiletrail_left_tile_and_attribs[v27];
             oam_next_ptr = v26 + 4;
           }
         }
@@ -3320,11 +3320,11 @@ LABEL_10:;
         v33 = projectiletrail_right_x_pos[v32] - layer1_x_pos;
         if ((v33 & 0xFF00) == 0) {
           v34 = gOamEnt(oam_next_ptr);
-          *(uint16 *)&v34->xcoord = v33;
+          *(unaligned_uint16 *)&v34->xcoord = v33;
           v35 = projectiletrail_right_y_pos[v32] - layer1_y_pos;
           if ((v35 & 0xFF00) == 0) {
-            *(uint16 *)&v34->ycoord = v35;
-            *(uint16 *)&v34->charnum = projectiletrail_right_tile_and_attribs[v32];
+            *(unaligned_uint16 *)&v34->ycoord = v35;
+            *(unaligned_uint16 *)&v34->charnum = projectiletrail_right_tile_and_attribs[v32];
             oam_next_ptr = v31 + 4;
           }
         }
@@ -3576,15 +3576,15 @@ void HandleChargingBeamGfxAudio(void) {  // 0x90BAFC
   if (hyper_beam_flag) {
     if (flare_counter) {
       for (int i = 4; i >= 0; i -= 2) {
-        bool v7 = *(uint16 *)((uint8 *)&flare_animation_timer + i) == 1;
+        bool v7 = *(unaligned_uint16 *)((uint8 *)&flare_animation_timer + i) == 1;
         bool v8 = (-- * (uint16 *)((uint8 *)&flare_animation_timer + i) & 0x8000) != 0;
         if (v7 || v8) {
-          v7 = (*(uint16 *)((uint8 *)&flare_animation_frame + i))-- == 1;
+          v7 = (*(unaligned_uint16 *)((uint8 *)&flare_animation_frame + i))-- == 1;
           if (v7) {
             if (i == 4)
               flare_counter = 0;
           } else {
-            *(uint16 *)((uint8 *)&flare_animation_timer + i) = 3;
+            *(unaligned_uint16 *)((uint8 *)&flare_animation_timer + i) = 3;
           }
         }
         DrawFlareAnimationComponent(i);
@@ -3604,23 +3604,23 @@ void HandleChargingBeamGfxAudio(void) {  // 0x90BAFC
         QueueSfx1_Max9(8);
       uint16 v0 = 0;
       do {
-        v1 = *(uint16 *)((uint8 *)&flare_animation_timer + v0) - 1;
-        *(uint16 *)((uint8 *)&flare_animation_timer + v0) = v1;
+        v1 = *(unaligned_uint16 *)((uint8 *)&flare_animation_timer + v0) - 1;
+        *(unaligned_uint16 *)((uint8 *)&flare_animation_timer + v0) = v1;
         if (v1 < 0) {
-          uint16 v2 = *(uint16 *)((uint8 *)&flare_animation_frame + v0) + 1;
-          *(uint16 *)((uint8 *)&flare_animation_frame + v0) = v2;
+          uint16 v2 = *(unaligned_uint16 *)((uint8 *)&flare_animation_frame + v0) + 1;
+          *(unaligned_uint16 *)((uint8 *)&flare_animation_frame + v0) = v2;
           uint16 v3 = v2;
           const uint8 *r0 = RomPtr_90(kFlareAnimDelays[v0 >> 1]);
           v4 = r0[v2];
           if (v4 == 255) {
-            *(uint16 *)((uint8 *)&flare_animation_frame + v0) = 0;
+            *(unaligned_uint16 *)((uint8 *)&flare_animation_frame + v0) = 0;
             v3 = 0;
           } else if (v4 == 254) {
-            uint16 v5 = *(uint16 *)((uint8 *)&flare_animation_frame + v0) - r0[v3 + 1];
-            *(uint16 *)((uint8 *)&flare_animation_frame + v0) = v5;
+            uint16 v5 = *(unaligned_uint16 *)((uint8 *)&flare_animation_frame + v0) - r0[v3 + 1];
+            *(unaligned_uint16 *)((uint8 *)&flare_animation_frame + v0) = v5;
             v3 = v5;
           }
-          *(uint16 *)((uint8 *)&flare_animation_timer + v0) = r0[v3];
+          *(unaligned_uint16 *)((uint8 *)&flare_animation_timer + v0) = r0[v3];
         }
         v9 = v0;
         DrawFlareAnimationComponent(v0);
@@ -4158,7 +4158,7 @@ uint8 UpdateArmCannonIsOpenFlag(void) {  // 0x90C5EB
     arm_cannon_frame = 0;
   else
     arm_cannon_frame = 4;
-  *(uint16 *)&flag_arm_cannon_open_or_opening = r18 | 0x100;
+  *(unaligned_uint16 *)&flag_arm_cannon_open_or_opening = r18 | 0x100;
   return 1;
 }
 
@@ -4176,7 +4176,7 @@ void AdvanceArmCannonFrame(void) {  // 0x90C627
     }
     arm_cannon_frame = 0;
   }
-  *(uint16 *)&flag_arm_cannon_open_or_opening = flag_arm_cannon_open_or_opening;
+  *(unaligned_uint16 *)&flag_arm_cannon_open_or_opening = flag_arm_cannon_open_or_opening;
 }
 
 void Samus_ArmCannon_Draw(void) {  // 0x90C663
@@ -4212,7 +4212,7 @@ void Samus_ArmCannon_Draw(void) {  // 0x90C663
         if (v10 >= 0) {
           if (sign16(v10 - 256)) {
             v9->ycoord = v10;
-            *(uint16 *)&v9->charnum = r24;
+            *(unaligned_uint16 *)&v9->charnum = r24;
             oam_next_ptr = v7 + 4;
           }
         }
@@ -4742,7 +4742,7 @@ void ProjPreInstr_SpeedEcho(uint16 k) {  // 0x90D4D2
   projectile_bomb_x_speed[v1] += 8;
   Point16U pt = Projectile_SinLookup(projectile_variables[v1], LOBYTE(projectile_bomb_x_speed[v1]));
   uint16 v2 = pt.x + samus_x_pos;
-  *(uint16 *)((uint8 *)&speed_echoes_index + k) = pt.x + samus_x_pos;
+  *(unaligned_uint16 *)((uint8 *)&speed_echoes_index + k) = pt.x + samus_x_pos;
   projectile_x_pos[v1] = v2;
   v3 = v2 - layer1_x_pos;
   if (v3 < 0
@@ -4754,7 +4754,7 @@ void ProjPreInstr_SpeedEcho(uint16 k) {  // 0x90D4D2
           v5 < 0)
       || !sign16(v5 - 256)) {
     speed_echo_ypos[v1 + 3] = 0;
-    *(uint16 *)((uint8 *)&speed_echoes_index + k) = 0;
+    *(unaligned_uint16 *)((uint8 *)&speed_echoes_index + k) = 0;
     speed_echo_xpos[v1 + 3] = 0;
     ClearProjectile(k);
   }
@@ -4804,9 +4804,9 @@ uint8 Hdmaobj_CrystalFlash(void) {  // 0x90D5A2
   if (samus_movement_type != 27)
     return 1;
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   samus_movement_handler = FUNC16(SamusMoveHandler_CrystalFlashStart);
   if (samus_input_handler != FUNC16(Samus_InputHandler_E91D))
     samus_input_handler = FUNC16(nullsub_152);
@@ -4814,11 +4814,11 @@ uint8 Hdmaobj_CrystalFlash(void) {  // 0x90D5A2
   which_item_to_pickup = 0;
   substate = 10;
   suit_pickup_light_beam_pos = 0;
-  *(uint16 *)&suit_pickup_color_math_R = 0;
+  *(unaligned_uint16 *)&suit_pickup_color_math_R = 0;
   timer_for_shine_timer = 7;
   special_samus_palette_frame = 0;
   samus_shine_timer = 1;
-  *(uint16 *)&suit_pickup_color_math_B = 1;
+  *(unaligned_uint16 *)&suit_pickup_color_math_B = 1;
   samus_invincibility_timer = 0;
   samus_knockback_timer = 0;
   knockback_dir = 0;
@@ -4830,7 +4830,7 @@ void SamusMoveHandler_CrystalFlashStart(void) {  // 0x90D678
   if ((--timer_for_shinesparks_startstop & 0x8000) != 0) {
     samus_anim_frame_timer = 3;
     samus_anim_frame = 6;
-    *(uint16 *)&suit_pickup_color_math_R = samus_y_pos;
+    *(unaligned_uint16 *)&suit_pickup_color_math_R = samus_y_pos;
     samus_movement_handler = FUNC16(SamusMoveHandler_CrystalFlashMain);
     samus_invincibility_timer = 0;
     samus_knockback_timer = 0;
@@ -4894,7 +4894,7 @@ void SamusMoveHandler_CrystalFlashMain_2(void) {  // 0x90D729
 }
 
 void kSamusMoveHandler_CrystalFlashFinish(void) {  // 0x90D75B
-  if (samus_y_pos != *(uint16 *)&suit_pickup_color_math_R)
+  if (samus_y_pos != *(unaligned_uint16 *)&suit_pickup_color_math_R)
     ++samus_y_pos;
   if (!samus_movement_type) {
     power_bomb_flag = 0;
@@ -5684,9 +5684,9 @@ void Samus_PushOutOfRidleysWay(void) {  // 0x90E12E
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   samus_y_pos -= 21 - samus_y_radius;
   if (sign16(samus_x_pos - layer1_x_pos - 128))
     samus_var62 = 1;
@@ -5771,11 +5771,11 @@ void Samus_SetGrabbedByDraygonPose(uint16 a) {  // 0x90E23B
   samus_movement_handler = FUNC16(nullsub_152);
   substate = 0;
   suit_pickup_light_beam_pos = 0;
-  *(uint16 *)&suit_pickup_color_math_R = 0;
+  *(unaligned_uint16 *)&suit_pickup_color_math_R = 0;
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   samus_new_pose = -1;
   samus_new_pose_interrupted = -1;
   samus_new_pose_transitional = -1;
@@ -5798,9 +5798,9 @@ void Samus_ReleaseFromDraygon(void) {  // 0x90E2DE
   samus_movement_handler = FUNC16(Samus_MovementHandler_Normal);
   frame_handler_gamma = FUNC16(nullsub_152);
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   samus_x_base_speed = 0;
   samus_x_base_subspeed = 0;
   samus_new_pose = -1;
@@ -6294,7 +6294,7 @@ void Samus_Func10(void) {  // 0x90EB02
   samus_anim_frame_skip = 0;
   new_projectile_direction_changed_pose = 0;
   UNUSED_word_7E0DFA <<= 8;
-  WORD(g_ram[0xa10]) = *(uint16 *)&samus_pose_x_dir;
+  WORD(g_ram[0xa10]) = *(unaligned_uint16 *)&samus_pose_x_dir;
 }
 
 void DrawSamusAndProjectiles(void) {  // 0x90EB35
@@ -6678,9 +6678,9 @@ uint16 CallSomeSamusCode(uint16 a) {
 
 void Samus_UpdatePreviousPose(void) {  // 0x90F0EE
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
 }
 
 uint8 ClearCarry(void) {  // 0x90F107
@@ -6770,8 +6770,8 @@ uint8 SamusCode_08_SetupForCeresStart(void) {  // 0x90F1E9
   samus_draw_handler = FUNC16(SamusDrawHandler_Default);
   samus_prev_pose = samus_pose;
   samus_last_different_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   samus_y_pos = 0;
   SpawnEprojWithGfx(0, 0, addr_kEproj_CeresElevatorPad);
   SpawnEprojWithGfx(0, 0, addr_kEproj_CeresElevatorPlatform);

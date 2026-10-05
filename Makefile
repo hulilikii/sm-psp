@@ -37,3 +37,12 @@ all: $(TARGET).prx EBOOT.PBP
 package: EBOOT.PBP
 	@mkdir -p PSP/GAME/SMPSP
 	cp EBOOT.PBP PSP/GAME/SMPSP/
+	
+# Clean the build
+clean: clean_obj clean_data
+clean_obj:
+	@$(RM) $(OBJS) $(TARGET).elf $(TARGET).prx EBOOT.PBP PARAM.SFO
+clean_data:
+	@rm -rf PSP/ build/
+
+

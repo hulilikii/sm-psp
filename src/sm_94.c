@@ -767,7 +767,7 @@ static uint8 BlockColl_Vert_SpikeBlock(CollInfo *ci) {  // 0x94905D
 static uint8 BlockColl_Horiz_SpecialAir(CollInfo *ci) {  // 0x94906F
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) != 0) {
-    const uint16 *v2 = (const uint16 *)RomPtr_94(off_9492D9[area_index]);
+    const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_94(off_9492D9[area_index]);
     return SpawnPLM(v2[v0 & 0x7f]) & 1;
   } else {
     SpawnPLM(kPlmHeaderDefPtrs[v0]);
@@ -778,7 +778,7 @@ static uint8 BlockColl_Horiz_SpecialAir(CollInfo *ci) {  // 0x94906F
 static uint8 BlockColl_Vert_SpecialAir(CollInfo *ci) {  // 0x94909D
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) != 0) {
-    const uint16 *v2 = (const uint16 *)RomPtr_94(off_9492D9[area_index]);
+    const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_94(off_9492D9[area_index]);
     return SpawnPLM(v2[v0 & 0x7f]) & 1;
   } else {
     SpawnPLM(kPlmHeaderDefPtrs[v0]);
@@ -789,7 +789,7 @@ static uint8 BlockColl_Vert_SpecialAir(CollInfo *ci) {  // 0x94909D
 static uint8 BlockColl_Horiz_SpecialBlock(CollInfo *ci) {  // 0x9490CB
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) != 0) {
-    const uint16 *v2 = (const uint16 *)RomPtr_94(off_9492E9[area_index]);
+    const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_94(off_9492E9[area_index]);
     uint8 v4 = SpawnPLM(v2[v0 & 0x7f]) & 1;
     if (v4)
       return BlockColl_Horiz_SolidShootGrappleBlock(ci);
@@ -805,7 +805,7 @@ static uint8 BlockColl_Horiz_SpecialBlock(CollInfo *ci) {  // 0x9490CB
 static uint8 BlockColl_Vert_SpecialBlock(CollInfo *ci) {  // 0x949102
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) != 0) {
-    const uint16 *v3 = (const uint16 *)RomPtr_94(off_9492E9[area_index]);
+    const unaligned_uint16 *v3 = (const unaligned_uint16 *)RomPtr_94(off_9492E9[area_index]);
     uint8 v4 = SpawnPLM(v3[v0 & 0x7F]) & 1;
     if (v4)
       return BlockColl_Vert_SolidShootGrappleBlock(ci);
@@ -1112,7 +1112,7 @@ static void BlockInsideReact_SpikeAir_BTS2(void) {  // 0x949866
     samus_invincibility_timer = 60;
     samus_knockback_timer = 10;
     samus_periodic_damage += 16;
-    knockback_x_dir = ((*(uint16 *)&samus_pose_x_dir ^ 0xC) & 8) != 0;
+    knockback_x_dir = ((*(unaligned_uint16 *)&samus_pose_x_dir ^ 0xC) & 8) != 0;
   }
   samus_x_speed_table_pointer = addr_kSamusSpeedTable_Normal_X + 12;
 }
@@ -1281,7 +1281,7 @@ static uint8 BlockInsideReact_SpecialAir(CollInfo *ci) {
   uint8 v0 = BTS[cur_block_index];
   if (v0 & 0x80) {
     const uint8 *v3 = RomPtr_94(g_off_949B06[area_index]);
-    SpawnPLM(*(uint16 *)&v3[2 * (v0 & 0x7F)]);
+    SpawnPLM(*(unaligned_uint16 *)&v3[2 * (v0 & 0x7F)]);
   } else {
     off_949966[v0]();
   }
@@ -1308,7 +1308,7 @@ void BlockInsideDetection(void) {  // 0x949B60
     BlockInsideReact_Special_,
   };
 
-  *(uint16 *)&samus_x_decel_mult = 0;
+  *(unaligned_uint16 *)&samus_x_decel_mult = 0;
   extra_samus_x_subdisplacement = 0;
   extra_samus_x_displacement = 0;
   extra_samus_y_subdisplacement = 0;
@@ -1488,11 +1488,11 @@ static uint8 sub_949D5D(CollInfo *ci) {  // 0x949D5D
 static uint8 BlockBombedReact_Special(CollInfo *ci) {  // 0x949D71
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) != 0) {
-    uint16 *kBlockBombedReact_Region_Plm = (uint16 *)RomPtr_94(0x9e44);
-    const uint16 *v2 = (uint16*)RomPtr_94(kBlockBombedReact_Region_Plm[area_index]);
+    unaligned_uint16 *kBlockBombedReact_Region_Plm = (unaligned_uint16 *)RomPtr_94(0x9e44);
+    const unaligned_uint16 *v2 = (unaligned_uint16 *)RomPtr_94(kBlockBombedReact_Region_Plm[area_index]);
     SpawnPLM(v2[v0 & 0x7F]);
   } else {
-    uint16 *kBlockBombedReact_Special_Plm = (uint16 *)RomPtr_94(0x9dA4);
+    unaligned_uint16 *kBlockBombedReact_Special_Plm = (unaligned_uint16 *)RomPtr_94(0x9dA4);
     SpawnPLM(kBlockBombedReact_Special_Plm[v0]);
   }
   return 1;
@@ -1512,8 +1512,8 @@ static uint8 BlockReact_ShootableAir(CollInfo *ci) {  // 0x949E55
 static uint8 BlockReact_Shootable(CollInfo *ci) {  // 0x949E73
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) != 0) {
-    uint16 *kBlockShotBombGrappleReaction_ShootableBlock_RegionPlm = (uint16 *)RomPtr_94(0x9FC6);
-    uint16 *v2 = (uint16*)RomPtr_94(kBlockShotBombGrappleReaction_ShootableBlock_RegionPlm[area_index]);
+    unaligned_uint16 *kBlockShotBombGrappleReaction_ShootableBlock_RegionPlm = (unaligned_uint16 *)RomPtr_94(0x9FC6);
+    unaligned_uint16 *v2 = (unaligned_uint16 *)RomPtr_94(kBlockShotBombGrappleReaction_ShootableBlock_RegionPlm[area_index]);
     SpawnPLM(v2[v0 & 0x7f]);
   } else {
     uint16 t = kBlockShotBombedReactionShootablePlm[v0];
@@ -1525,7 +1525,7 @@ static uint8 BlockReact_Shootable(CollInfo *ci) {  // 0x949E73
 }
 
 static uint8 BlockReact_BombableAir(CollInfo *ci) {  // 0x949FD6
-  uint16 *kBlockShotBombGrappleReact_BombableBlockPlm = (uint16 *)RomPtr_94(0xA012);
+  unaligned_uint16 *kBlockShotBombGrappleReact_BombableBlockPlm = (unaligned_uint16 *)RomPtr_94(0xA012);
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) == 0)
     SpawnPLM(kBlockShotBombGrappleReact_BombableBlockPlm[v0]);
@@ -1533,7 +1533,7 @@ static uint8 BlockReact_BombableAir(CollInfo *ci) {  // 0x949FD6
 }
 
 static uint8 BlockReact_BombableBlock(CollInfo *ci) {  // 0x949FF4
-  uint16 *kBlockShotBombGrappleReact_BombableBlockPlm = (uint16 *)RomPtr_94(0xA012);
+  unaligned_uint16 *kBlockShotBombGrappleReact_BombableBlockPlm = (unaligned_uint16 *)RomPtr_94(0xA012);
   uint8 v0 = BTS[cur_block_index];
   if ((v0 & 0x80) == 0)
     SpawnPLM(kBlockShotBombGrappleReact_BombableBlockPlm[v0]);
@@ -2226,7 +2226,7 @@ static const uint16 g_word_94AAF7[16] = {
 static uint8 BlockReact_AA64_SpikeAir(CollInfo *ci) {
   if (samus_invincibility_timer)
     return 0;
-  int16 v0 = *(uint16 *)&BTS[cur_block_index];
+  int16 v0 = *(unaligned_uint16 *)&BTS[cur_block_index];
   if (v0 >= 0) {
     uint32 v = INT16_SHL16(g_word_94AAF7[v0]);
     if (v) {
@@ -2245,7 +2245,7 @@ static const uint16 g_word_94AB70[16] = {
 static uint8 BlockReact_AA64_SpikeBlock(CollInfo *ci) {
   if (samus_invincibility_timer)
     return 1;
-  int16 v0 = *(uint16 *)&BTS[cur_block_index];
+  int16 v0 = *(unaligned_uint16 *)&BTS[cur_block_index];
   if (v0 >= 0) {
     uint32 v = INT16_SHL16(g_word_94AB70[v0]);
     if (v) {
@@ -2488,9 +2488,9 @@ void GrappleFunc_AF87(void) {  // 0x94AF87
     grapple_segment_anim_instr_timers[v1 + 14] = addr_word_94B18F;
     grapple_segment_anim_instr_timers[v1 + 13] = addr_word_94B18B;
     grapple_segment_anim_instr_timers[v1] = 1;
-    *(uint16 *)((uint8 *)&grapple_point_anim_ptr + i) = 1;
-    *(uint16 *)((uint8 *)&grapple_point_anim_timer + i) = 1;
-    *(uint16 *)((uint8 *)&grapple_beam_unkD3C + i) = 1;
+    *(unaligned_uint16 *)((uint8 *)&grapple_point_anim_ptr + i) = 1;
+    *(unaligned_uint16 *)((uint8 *)&grapple_point_anim_timer + i) = 1;
+    *(unaligned_uint16 *)((uint8 *)&grapple_beam_unkD3C + i) = 1;
   }
 }
 
@@ -2555,7 +2555,7 @@ static void DrawGrappleOams(uint16 x_r20, uint16 y_r24, uint16 chr_r38) {  // 0x
   OamEnt *v2 = gOamEnt(oam_next_ptr);
   v2->xcoord = x_r20;
   v2->ycoord = y_r24;
-  *(uint16 *)&v2->charnum = chr_r38;
+  *(unaligned_uint16 *)&v2->charnum = chr_r38;
   oam_next_ptr = v1 + 4;
 }
 
@@ -2565,7 +2565,7 @@ static void DrawGrappleOams3(void) {  // 0x94B14B
   uint16 x = grapple_beam_end_x_pos - layer1_x_pos - 4;
   v2->xcoord = x;
   v2->ycoord = grapple_beam_end_y_pos - layer1_y_pos - 4;
-  *(uint16 *)&v2->charnum = 14880;
+  *(unaligned_uint16 *)&v2->charnum = 14880;
   oam_ext[idx >> 5] |= (((x & 0x100) >> 8)) << (2 * ((idx >> 2) & 7));
   oam_next_ptr = idx + 4;
 }

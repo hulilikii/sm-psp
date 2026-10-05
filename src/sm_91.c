@@ -454,9 +454,9 @@ void UNUSED_DemoInstr_Func4(void) {  // 0x9186FE
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   DisableDemoInput();
   samus_input_handler = FUNC16(nullsub_152);
 }
@@ -467,9 +467,9 @@ uint16 DemoInstr_Func3(uint16 k, uint16 j) {  // 0x918739
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   DisableDemoInput();
   samus_input_handler = FUNC16(nullsub_152);
   return j;
@@ -864,24 +864,24 @@ void Xray_SetupStage1_FreezeTimeBackup(uint16 k) {  // 0x91CAF9
 
 void Xray_SetupStage2_ReadBg1_2ndScreen(void) {  // 0x91CB1C
   uint16 v0 = vram_read_queue_tail;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = ((reg_BG1SC & 0xFC) << 8) + 1024;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = ((reg_BG1SC & 0xFC) << 8) + 1024;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2800;
-  *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
+  *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
   vram_read_queue_tail = v0 + 9;
 }
 
 void Xray_SetupStage3_ReadBg1_1stScreen(void) {  // 0x91CB57
 
   uint16 v0 = vram_read_queue_tail;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = (reg_BG1SC & 0xFC) << 8;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = (reg_BG1SC & 0xFC) << 8;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2000;
-  *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
+  *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
   vram_read_queue_tail = v0 + 9;
 }
 
@@ -907,10 +907,10 @@ void Xray_SetupStage4(void) {  // 0x91CB8E
       uint16 v10 = ram4000.xray_tilemaps[v0 + 4097];
       uint16 v9 = ram4000.xray_tilemaps[v0 + 4128];
       uint16 v1 = ram4000.xray_tilemaps[v0 + 4129];
-      *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + r22) = v1;
-      *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + r22) = v9;
-      *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + r22) = v10;
-      *(uint16 *)((uint8 *)ram4000.xray_tilemaps + r22) = v11;
+      *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + r22) = v1;
+      *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + r22) = v9;
+      *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + r22) = v10;
+      *(unaligned_uint16 *)((uint8 *)ram4000.xray_tilemaps + r22) = v11;
       r22 += 4;
       r30 += 2;
     } while (--n);
@@ -939,12 +939,12 @@ void Xray_SetupStage4(void) {  // 0x91CB8E
   } while (--m);
   LoadXrayBlocks();
   uint16 v7 = vram_read_queue_tail;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v7) = (reg_BG2SC & 0xFC) << 8;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v7) = 129;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v7) = (reg_BG2SC & 0xFC) << 8;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v7) = 129;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v7  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v7) = 0x5000;
-  *(uint16 *)(&vram_read_queue[0].src.bank + v7) = 126;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].size + v7) = 2048;
+  *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v7) = 126;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v7) = 2048;
   vram_read_queue_tail = v7 + 9;
 }
 
@@ -963,10 +963,10 @@ void Xray_SetupStage4_Func1(uint16 dst_r22, uint16 r26, uint16 r28, uint16 r30) 
   uint16 v4 = ram4000.xray_tilemaps[v1 + 4128];
   uint16 v3 = ram4000.xray_tilemaps[v1 + 4129];
   uint16 v2 = dst_r22 + 1984;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + v2) = v3;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + v2) = v4;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + v2) = v5;
-  *(uint16 *)((uint8 *)ram4000.xray_tilemaps + v2) = v6;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + v2) = v3;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + v2) = v4;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + v2) = v5;
+  *(unaligned_uint16 *)((uint8 *)ram4000.xray_tilemaps + v2) = v6;
 }
 
 static const uint8 *Xray_GetXrayedBlock(uint16 k) {  // 0x91CDD6
@@ -1047,7 +1047,7 @@ static void Xray_CombinedMove(uint16 dst_r22, uint16 r36, bool which_dir) {
   }
 
   if (stru_91D2D6[1].value == r48) {
-    uint16 *t = (uint16 *)RomPtr_91(stru_91D2D6[1].addr);
+    unaligned_uint16 *t = (unaligned_uint16 *)RomPtr_91(stru_91D2D6[1].addr);
     for (; t[0] != 0xffff; t += 2) {
       if (t[0] == 0xff00 || t[0] == (step & 0xff)) {
         Xray_Func12(dst_r22, RomPtr_91(t[1] + 2));
@@ -1088,10 +1088,10 @@ static void Xray_Func11(uint16 r18, uint16 dst_r22, const uint8 *jp) {  // 0x91C
     uint16 top_right = tile_table.tables[v5].top_right;
     uint16 bottom_left = tile_table.tables[v5].bottom_left;
     uint16 bottom_right = tile_table.tables[v5].bottom_right;
-    *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[99] + dst_r22) = bottom_right;
-    *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[98] + dst_r22) = bottom_left;
-    *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[67] + dst_r22) = top_right;
-    *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[66] + dst_r22) = top_left;
+    *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[99] + dst_r22) = bottom_right;
+    *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[98] + dst_r22) = bottom_left;
+    *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[67] + dst_r22) = top_right;
+    *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[66] + dst_r22) = top_left;
   }
 }
 
@@ -1124,10 +1124,10 @@ static void Xray_Func13(uint16 dst_r22, uint16 a) {  // 0x91CFC1
   uint16 top_right = tile_table.tables[a].top_right;
   uint16 bottom_left = tile_table.tables[a].bottom_left;
   uint16 bottom_right = tile_table.tables[a].bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + dst_r22) = bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + dst_r22) = bottom_left;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + dst_r22) = top_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[0] + dst_r22) = top_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + dst_r22) = bottom_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + dst_r22) = bottom_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + dst_r22) = top_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[0] + dst_r22) = top_left;
 }
 
 static void Xray_Func14(uint16 dst_r22, const uint8 *jp) {  // 0x91CFEE
@@ -1136,10 +1136,10 @@ static void Xray_Func14(uint16 dst_r22, const uint8 *jp) {  // 0x91CFEE
   uint16 top_right = tile_table.tables[a].top_right;
   uint16 bottom_left = tile_table.tables[a].bottom_left;
   uint16 bottom_right = tile_table.tables[a].bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[35] + dst_r22) = bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[34] + dst_r22) = bottom_left;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[3] + dst_r22) = top_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[2] + dst_r22) = top_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[35] + dst_r22) = bottom_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[34] + dst_r22) = bottom_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[3] + dst_r22) = top_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[2] + dst_r22) = top_left;
 }
 
 static void Xray_Func15(uint16 dst_r22, const uint8 *jp) {  // 0x91D01D
@@ -1148,10 +1148,10 @@ static void Xray_Func15(uint16 dst_r22, const uint8 *jp) {  // 0x91D01D
   uint16 top_right = tile_table.tables[a].top_right;
   uint16 bottom_left = tile_table.tables[a].bottom_left;
   uint16 bottom_right = tile_table.tables[a].bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[97] + dst_r22) = bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[96] + dst_r22) = bottom_left;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[65] + dst_r22) = top_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[64] + dst_r22) = top_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[97] + dst_r22) = bottom_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[96] + dst_r22) = bottom_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[65] + dst_r22) = top_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[64] + dst_r22) = top_left;
 }
 
 static void Xray_Func16(uint16 dst_r22, uint16 a) {  // 0x91D0A6
@@ -1159,10 +1159,10 @@ static void Xray_Func16(uint16 dst_r22, uint16 a) {  // 0x91D0A6
   uint16 top_right = tile_table.tables[a].top_right;
   uint16 bottom_left = tile_table.tables[a].bottom_left;
   uint16 bottom_right = tile_table.tables[a].bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + dst_r22) = bottom_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[0] + dst_r22) = bottom_left;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + dst_r22) = top_right;
-  *(uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + dst_r22) = top_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[1] + dst_r22) = bottom_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[0] + dst_r22) = bottom_left;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[33] + dst_r22) = top_right;
+  *(unaligned_uint16 *)((uint8 *)&ram4000.xray_tilemaps[32] + dst_r22) = top_left;
 }
 
 void LoadBlockToXrayTilemap(uint16 a, uint16 k, uint16 j) {  // 0x91D04C
@@ -1191,11 +1191,11 @@ void Xray_SetupStage5(void) {  // 0x91D0D3
   }
   uint16 v0 = vram_read_queue_tail;
   v1 = vram_read_queue_tail;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + vram_read_queue_tail) = ((reg_BG2SC & 0xFC) << 8) + 1024;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + vram_read_queue_tail) = ((reg_BG2SC & 0xFC) << 8) + 1024;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v1  + 1) = 57;
   *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = 0x5800;
-  *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
+  *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
   vram_read_queue_tail = v0 + 9;
 }
 
@@ -1217,7 +1217,7 @@ void Xray_SetupStage6(void) {  // 0x91D173
     v1 = gVramWriteEntry(vram_write_queue_tail);
     v1->size = 2048;
     v1->src.addr = ADDR16_OF_RAM(ram4000);
-    *(uint16 *)&v1->src.bank = 126;
+    *(unaligned_uint16 *)&v1->src.bank = 126;
     v1->vram_dst = (reg_BG2SC & 0xFC) << 8;
     vram_write_queue_tail = v0 + 7;
   }
@@ -1231,7 +1231,7 @@ void Xray_SetupStage7(void) {  // 0x91D1A0
     v1 = gVramWriteEntry(vram_write_queue_tail);
     v1->size = 2048;
     v1->src.addr = 0x4800;
-    *(uint16 *)&v1->src.bank = 126;
+    *(unaligned_uint16 *)&v1->src.bank = 126;
     v1->vram_dst = ((reg_BG2SC & 0xFC) << 8) + 1024;
     vram_write_queue_tail = v0 + 7;
   }
@@ -1263,9 +1263,9 @@ void HdmaobjPreInstr_XraySetup(uint16 k) {  // 0x91D27F
   if (CanXrayShowBlocks()) {
     v1 = 0x4000;
 LABEL_4:
-    *(uint16 *)&reg_COLDATA[0] = 0x27;
-    *(uint16 *)&reg_COLDATA[1] = 0x47;
-    *(uint16 *)&reg_COLDATA[2] = 0x87;
+    *(unaligned_uint16 *)&reg_COLDATA[0] = 0x27;
+    *(unaligned_uint16 *)&reg_COLDATA[1] = 0x47;
+    *(unaligned_uint16 *)&reg_COLDATA[2] = 0x87;
   }
 LABEL_5:
   fx_layer_blending_config_c |= v1;
@@ -1642,8 +1642,8 @@ uint8 Samus_HandleCrystalFlashPals(void) {  // 0x91DB93
       special_samus_palette_frame = v0;
     }
     bool v1 = (int16)-- * (uint16 *)&suit_pickup_color_math_B < 0;
-    if (!*(uint16 *)&suit_pickup_color_math_B || v1) {
-      *(uint16 *)&suit_pickup_color_math_B = *(uint16 *)((uint8 *)&stru_91DC00[0].timer + special_samus_palette_timer);
+    if (!*(unaligned_uint16 *)&suit_pickup_color_math_B || v1) {
+      *(unaligned_uint16 *)&suit_pickup_color_math_B = *(unaligned_uint16 *)((uint8 *)&stru_91DC00[0].timer + special_samus_palette_timer);
       Samus_Copy10PalColors(*(VoidP *)((uint8 *)&stru_91DC00[0].ptr + special_samus_palette_timer));
       uint16 v2 = special_samus_palette_timer + 4;
       if (!sign16(special_samus_palette_timer - 36))
@@ -1880,11 +1880,11 @@ void Samus_Initialize(void) {  // 0x91E00D
   UpdateBeamTilesAndPalette();
   cinematic_function = 0;
   samus_pose = kPose_00_FaceF_Powersuit;
-  *(uint16 *)&samus_pose_x_dir = 0;
+  *(unaligned_uint16 *)&samus_pose_x_dir = 0;
   samus_prev_pose = 0;
-  *(uint16 *)&samus_prev_pose_x_dir = 0;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = 0;
   samus_last_different_pose = 0;
-  *(uint16 *)&samus_last_different_pose_x_dir = 0;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = 0;
   enemy_index_to_shake = -1;
   hud_item_index = 0;
   samus_auto_cancel_hud_item_index = 0;
@@ -1968,9 +1968,9 @@ void ResponsibleForXrayStandupGlitch(void) {  // 0x91E2AD
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   samus_movement_handler = FUNC16(Samus_MovementHandler_Normal);
   samus_input_handler = FUNC16(Samus_InputHandler_E913);
   demo_timer_counter = -1;
@@ -1993,9 +1993,9 @@ void MakeSamusFaceForward(void) {  // 0x91E3F6
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   if (samus_y_radius != 24) {
     samus_y_pos -= 3;
     samus_prev_y_pos = samus_y_pos;
@@ -2038,9 +2038,9 @@ static Func_U8 *const kSomeMotherBrainScripts[5] = {  // 0x91E4AD
 void SomeMotherBrainScripts(uint16 a) {
   if (kSomeMotherBrainScripts[a]() & 1) {
     samus_last_different_pose = samus_prev_pose;
-    *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+    *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
     samus_prev_pose = samus_pose;
-    *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+    *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
     samus_new_pose = -1;
     samus_new_pose_interrupted = -1;
     samus_new_pose_transitional = -1;
@@ -2202,9 +2202,9 @@ void SamusFunc_E633(void) {
 
 void Samus_UpdatePreviousPose_0(void) {  // 0x91E719
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
 }
 
 void SamusFunc_E633_0(void) {  // 0x91E733
@@ -2224,9 +2224,9 @@ LABEL_10:
 
 void SamusFunc_E633_3(void) {  // 0x91E776
   if (samus_pose_x_dir == 4)
-    *(uint16 *)&samus_prev_pose_x_dir = 260;
+    *(unaligned_uint16 *)&samus_prev_pose_x_dir = 260;
   else
-    *(uint16 *)&samus_prev_pose_x_dir = 264;
+    *(unaligned_uint16 *)&samus_prev_pose_x_dir = 264;
   if (samus_pose != kPose_81_FaceR_Screwattack && samus_pose != kPose_82_FaceL_Screwattack) {
     if (samus_pose != kPose_1B_FaceR_SpaceJump && samus_pose != kPose_1C_FaceL_SpaceJump)
       goto LABEL_18;
@@ -2250,9 +2250,9 @@ LABEL_18:
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   if (samus_pose_x_dir == 4)
-    *(uint16 *)&samus_prev_pose_x_dir = 772;
+    *(unaligned_uint16 *)&samus_prev_pose_x_dir = 772;
   else
-    *(uint16 *)&samus_prev_pose_x_dir = 776;
+    *(unaligned_uint16 *)&samus_prev_pose_x_dir = 776;
   Samus_UpdatePreviousPose_0();
 }
 
@@ -2549,9 +2549,9 @@ LABEL_7:
       kSamus_HandleTransitionsC[samus_hurt_switch_index]();
 LABEL_15:
       samus_last_different_pose = samus_prev_pose;
-      *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+      *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
       samus_prev_pose = samus_pose;
-      *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+      *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
       goto LABEL_16;
     }
   }
@@ -3231,7 +3231,7 @@ uint8 SamusFunc_F404(void) {  // 0x91F404
 }
 
 void SamusFunc_F433(void) {  // 0x91F433
-  *(uint16 *)&samus_pose_x_dir = *(uint16 *)(&kPoseParams[0].pose_x_dir + (8 * samus_pose));
+  *(unaligned_uint16 *)&samus_pose_x_dir = *(unaligned_uint16 *)(&kPoseParams[0].pose_x_dir + (8 * samus_pose));
   SamusFunc_F468();
   if ((samus_prev_movement_type2 == kMovementType_03_SpinJumping
        || samus_prev_movement_type2 == kMovementType_14_WallJumping)
@@ -3273,10 +3273,10 @@ static Func_U8 *const off_91F4A2[28] = {  // 0x91F468
 
 void SamusFunc_F468(void) {
   if (off_91F4A2[samus_movement_type]() & 1) {
-    *(uint16 *)&samus_pose_x_dir = *(uint16 *)(&kPoseParams[0].pose_x_dir + (8 * samus_pose));
-    if ((*(uint16 *)&samus_pose_x_dir & 0xFF00) == 3584) {
+    *(unaligned_uint16 *)&samus_pose_x_dir = *(unaligned_uint16 *)(&kPoseParams[0].pose_x_dir + (8 * samus_pose));
+    if ((*(unaligned_uint16 *)&samus_pose_x_dir & 0xFF00) == 3584) {
       off_91F4A2[14]();
-      *(uint16 *)&samus_pose_x_dir = *(uint16 *)(&kPoseParams[0].pose_x_dir + (8 * samus_pose));
+      *(unaligned_uint16 *)&samus_pose_x_dir = *(unaligned_uint16 *)(&kPoseParams[0].pose_x_dir + (8 * samus_pose));
     }
   }
 }
@@ -3370,9 +3370,9 @@ uint8 SamusFunc_F468_SpinJump(void) {  // 0x91F624
       || samus_prev_movement_type2 == kMovementType_14_WallJumping) {
     samus_anim_frame_skip = 1;
     if ((samus_prev_pose_x_dir & 0xF) == 8) {
-      if (*(uint16 *)&samus_pose_x_dir != 772)
+      if (*(unaligned_uint16 *)&samus_pose_x_dir != 772)
         goto LABEL_9;
-    } else if ((samus_prev_pose_x_dir & 0xF) != 4 || *(uint16 *)&samus_pose_x_dir != 776) {
+    } else if ((samus_prev_pose_x_dir & 0xF) != 4 || *(unaligned_uint16 *)&samus_pose_x_dir != 776) {
       goto LABEL_9;
     }
     AddToHiLo(&samus_x_base_speed, &samus_x_base_subspeed, __PAIR32__(samus_x_extra_run_speed, samus_x_extra_run_subspeed));
@@ -3803,9 +3803,9 @@ void Samus_Func20(void) {  // 0x91FCAF
       SamusFunc_F433();
       Samus_SetAnimationFrameIfPoseChanged();
       samus_last_different_pose = samus_prev_pose;
-      *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+      *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
       samus_prev_pose = samus_pose;
-      *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+      *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
     }
   } else {
     if (samus_pose_x_dir == 4) {
@@ -3828,9 +3828,9 @@ void Samus_Func20(void) {  // 0x91FCAF
     SamusFunc_F433();
     Samus_SetAnimationFrameIfPoseChanged();
     samus_last_different_pose = samus_prev_pose;
-    *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+    *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
     samus_prev_pose = samus_pose;
-    *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+    *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   }
 }
 

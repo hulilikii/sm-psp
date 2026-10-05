@@ -787,7 +787,7 @@ void HdmaobjPreInstr_XrayFunc3_DeactivateBeam(uint16 k) {  // 0x888934
     v4 = gVramWriteEntry(vram_write_queue_tail);
     v4->size = 2048;
     v4->src.addr = ADDR16_OF_RAM(ram4000) + 4096;
-    *(uint16 *)&v4->src.bank = 126;
+    *(unaligned_uint16 *)&v4->src.bank = 126;
     v4->vram_dst = (reg_BG2SC & 0xFC) << 8;
     vram_write_queue_tail = v3 + 7;
     ++demo_input_pre_instr;
@@ -810,7 +810,7 @@ void HdmaobjPreInstr_XrayFunc4_DeactivateBeam(uint16 k) {  // 0x8889BA
     v3 = gVramWriteEntry(vram_write_queue_tail);
     v3->size = 2048;
     v3->src.addr = ADDR16_OF_RAM(ram4000) + 6144;
-    *(uint16 *)&v3->src.bank = 126;
+    *(unaligned_uint16 *)&v3->src.bank = 126;
     v3->vram_dst = ((reg_BG2SC & 0xFC) << 8) + 1024;
     vram_write_queue_tail = v2 + 7;
     ++demo_input_pre_instr;
@@ -873,9 +873,9 @@ void HdmaobjPreInstr_Xray(uint16 k) {
     v1 = 0x2000;
     if (CanXrayShowBlocks()) {
       v1 = 0x4000;
-      *(uint16 *)&reg_COLDATA[0] = 0x27;
-      *(uint16 *)&reg_COLDATA[1] = 0x47;
-      *(uint16 *)&reg_COLDATA[2] = 0x87;
+      *(unaligned_uint16 *)&reg_COLDATA[0] = 0x27;
+      *(unaligned_uint16 *)&reg_COLDATA[1] = 0x47;
+      *(unaligned_uint16 *)&reg_COLDATA[2] = 0x87;
     }
   }
   fx_layer_blending_config_c |= v1;
@@ -1477,14 +1477,14 @@ static uint16 SetupSomeHdmaTablesBG3(uint16 r24, uint16 r0, uint16 r3, uint16 r6
   int16 v1;
 
   g_word_7E0598 = 32;
-  *(uint16 *)mother_brain_indirect_hdma = 31;
-  *(uint16 *)&mother_brain_indirect_hdma[1] = 0;
+  *(unaligned_uint16 *)mother_brain_indirect_hdma = 31;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[1] = 0;
   uint16 v0 = 3;
   v1 = layer1_y_pos + 32;
   uint16 r18 = layer1_y_pos + 32;
   uint16 v2 = 0;
-  while ((int16)(v1 - *(uint16 *)&RomPtr_88(r0)[v2]) < 0
-    || (int16)(v1 - *(uint16 *)&RomPtr_88(r9)[v2]) >= 0) {
+  while ((int16)(v1 - *(unaligned_uint16 *)&RomPtr_88(r0)[v2]) < 0
+    || (int16)(v1 - *(unaligned_uint16 *)&RomPtr_88(r9)[v2]) >= 0) {
     v2 += 6;
     if ((int16)(v2 - r24) >= 0)
       return v0;
@@ -1495,8 +1495,8 @@ static uint16 SetupSomeHdmaTablesBG3(uint16 r24, uint16 r0, uint16 r3, uint16 r6
   else
     v3 = r18 & 0x1F;
   uint16 R22_ = v3;
-  *(uint16 *)&mother_brain_indirect_hdma[3] = *(uint16 *)&RomPtr_88(r3)[v2] - v3;
-  *(uint16 *)&mother_brain_indirect_hdma[4] = R22_ + *(uint16 *)&RomPtr_88(r6)[v2] - g_word_7E0598;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[3] = *(unaligned_uint16 *)&RomPtr_88(r3)[v2] - v3;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[4] = R22_ + *(unaligned_uint16 *)&RomPtr_88(r6)[v2] - g_word_7E0598;
   while (1) {
     uint16 r20 = mother_brain_indirect_hdma[v0];
     r18 += r20;
@@ -1504,14 +1504,14 @@ static uint16 SetupSomeHdmaTablesBG3(uint16 r24, uint16 r0, uint16 r3, uint16 r6
     g_word_7E0598 += r20;
     if (!sign16(g_word_7E0598 - 224))
       break;
-    while ((int16)(r18 - *(uint16 *)&RomPtr_88(r0)[v2]) < 0
-      || (int16)(r18 - *(uint16 *)&RomPtr_88(r9)[v2]) >= 0) {
+    while ((int16)(r18 - *(unaligned_uint16 *)&RomPtr_88(r0)[v2]) < 0
+      || (int16)(r18 - *(unaligned_uint16 *)&RomPtr_88(r9)[v2]) >= 0) {
       v2 += 6;
       if ((int16)(v2 - r24) >= 0)
         return v0;
     }
-    *(uint16 *)&mother_brain_indirect_hdma[v0] = *(uint16 *)&RomPtr_88(r3)[v2];
-    *(uint16 *)&mother_brain_indirect_hdma[v0 + 1] = *(uint16 *)&RomPtr_88(r6)[v2] - g_word_7E0598;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[v0] = *(unaligned_uint16 *)&RomPtr_88(r3)[v2];
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[v0 + 1] = *(unaligned_uint16 *)&RomPtr_88(r6)[v2] - g_word_7E0598;
   }
   return v0;
 }
@@ -1519,7 +1519,7 @@ static uint16 SetupSomeHdmaTablesBG3(uint16 r24, uint16 r0, uint16 r3, uint16 r6
 void HdmaobjPreInstr_FxType22_BG3Yscroll(uint16 k) {  // 0x88A643
   DamageSamusInTopRow();
   k = SetupSomeHdmaTablesBG3(78, addr_word_88A8E8, addr_word_88A8E8 + 2, addr_word_88A8E8 + 4, addr_word_88A8E8 + 6);
-  *(uint16 *)&mother_brain_indirect_hdma[k] = 0;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[k] = 0;
 }
 
 const uint8 *HdmaobjInstr_SetFlagB(uint16 k, const uint8 *hdp) {  // 0x88A66C
@@ -1556,15 +1556,15 @@ void HdmaobjPreInstr_BG3Xscroll(uint16 k) {
       v5 = (v5 - 2) & 0x1F;
     }
   }
-  *(uint16 *)&hdma_window_1_left_pos[0].field_0 = 0;
-  *(uint16 *)scrolling_sky_bg2_indirect_hdma = 0;
-  *(uint16 *)&hdma_window_1_left_pos[0].field_2 = 31;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[2] = 31;
+  *(unaligned_uint16 *)&hdma_window_1_left_pos[0].field_0 = 0;
+  *(unaligned_uint16 *)scrolling_sky_bg2_indirect_hdma = 0;
+  *(unaligned_uint16 *)&hdma_window_1_left_pos[0].field_2 = 31;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[2] = 31;
   uint16 r18 = 31;
-  *(uint16 *)&hdma_window_1_left_pos[1].field_0 = -25088;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[3] = -25088;
+  *(unaligned_uint16 *)&hdma_window_1_left_pos[1].field_0 = -25088;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[3] = -25088;
   if (sign16(layer1_y_pos - 1024)) {
-    *(uint16 *)&scrolling_sky_bg2_indirect_hdma[2] = 0;
+    *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[2] = 0;
   } else {
     r18 = HdmaFunc_A786(0x105, r18, 177, 0);
   }
@@ -1573,21 +1573,21 @@ void HdmaobjPreInstr_BG3Xscroll(uint16 k) {
   v8 = 224 - r18;
   while ((int16)(v8 - 16) >= 0) {
     v8 -= 16;
-    *(uint16 *)(&hdma_window_1_left_pos[0].field_0 + v7) = 144;
-    *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v7] = 144;
-    *(uint16 *)(&hdma_window_1_left_pos[0].field_1 + v7) = -24960;
-    *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v7 + 1] = -24960;
+    *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_0 + v7) = 144;
+    *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v7] = 144;
+    *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_1 + v7) = -24960;
+    *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v7 + 1] = -24960;
     v7 += 3;
   }
   v9 = v8;
   if (v8)
     v9 = v8 + 128;
-  *(uint16 *)(&hdma_window_1_left_pos[0].field_0 + v7) = v9;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v7] = v9;
-  *(uint16 *)(&hdma_window_1_left_pos[0].field_1 + v7) = -24960;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v7 + 1] = -24960;
-  *(uint16 *)(&hdma_window_1_left_pos[1].field_0 + v7) = 0;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v7 + 3] = 0;
+  *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_0 + v7) = v9;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v7] = v9;
+  *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_1 + v7) = -24960;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v7 + 1] = -24960;
+  *(unaligned_uint16 *)(&hdma_window_1_left_pos[1].field_0 + v7) = 0;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v7 + 3] = 0;
 }
 
 uint16 HdmaFunc_A786(uint16 k, uint16 r18, uint16 r20, uint16 r22) {  // 0x88A786
@@ -1610,14 +1610,14 @@ uint16 HdmaFunc_A786(uint16 k, uint16 r18, uint16 r20, uint16 r22) {  // 0x88A78
         if (v2 < 0)
           break;
         r24 = v2;
-        *(uint16 *)(&hdma_window_1_left_pos[0].field_0 + v0) = r22 | 0x10;
-        *(uint16 *)(&hdma_window_1_left_pos[0].field_1 + v0) = r20;
+        *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_0 + v0) = r22 | 0x10;
+        *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_1 + v0) = r20;
         v1 = r24;
         v0 += 3;
       }
     }
-    *(uint16 *)(&hdma_window_1_left_pos[0].field_0 + v0) = r22 | r24;
-    *(uint16 *)(&hdma_window_1_left_pos[0].field_1 + v0) = r20;
+    *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_0 + v0) = r22 | r24;
+    *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_1 + v0) = r20;
   }
   return r18;
 }
@@ -1657,8 +1657,8 @@ void HdmaobjPreInstr_SkyLandBG2XscrollInner(uint16 k) {  // 0x88ADC2
   } while (sign16(v1 * 8 - 184));
   scrolling_sky_bg2_hdma_data[44] = 0;
   scrolling_sky_bg2_hdma_data[45] = 0;
-  *(uint16 *)scrolling_sky_bg2_indirect_hdma = 31;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[1] = 1438;
+  *(unaligned_uint16 *)scrolling_sky_bg2_indirect_hdma = 31;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[1] = 1438;
   uint16 r18 = layer1_y_pos + 32;
   uint16 r20 = layer1_y_pos + 224;
   uint16 v5 = 0;
@@ -1668,17 +1668,17 @@ void HdmaobjPreInstr_SkyLandBG2XscrollInner(uint16 k) {  // 0x88ADC2
       uint16 v8 = kHdmaScrollEntrys[v5 + 1].top_pos - r18;
       r24 = v8;
       if (!sign16(v8 - 128)) {
-        *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = 127;
-        *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = kHdmaScrollEntrys[v5].hdma_data_table_entry + 2;
+        *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = 127;
+        *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = kHdmaScrollEntrys[v5].hdma_data_table_entry + 2;
         v6 += 3;
         v8 = r24 - 127;
       }
-      *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = v8;
-      *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = kHdmaScrollEntrys[v5].hdma_data_table_entry + 2;
+      *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = v8;
+      *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = kHdmaScrollEntrys[v5].hdma_data_table_entry + 2;
       r18 += r24;
       v6 += 3;
       if (!sign16(r18 - r20)) {
-        *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 3] = 0;
+        *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 3] = 0;
         return;
       }
     }
@@ -1688,13 +1688,13 @@ void HdmaobjPreInstr_SkyLandBG2XscrollInner(uint16 k) {  // 0x88ADC2
     r24 = i;
     if (sign16(i - 128))
       break;
-    *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = 127;
-    *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = 181;
+    *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = 127;
+    *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = 181;
     v6 += 3;
   }
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = i;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = 181;
-  *(uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 3] = 0;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6] = i;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 1] = 181;
+  *(unaligned_uint16 *)&scrolling_sky_bg2_indirect_hdma[v6 + 3] = 0;
 }
 
 
@@ -1764,7 +1764,7 @@ void FxTypeFunc_24(void) {  // 0x88B07C
   fireflea_flashing_timer = 6;
   fireflea_flashing_index = 0;
   SpawnHdmaObject(0x88, &unk_88B08C);
-  *(uint16 *)&hdma_window_1_left_pos[0].field_0 = 0;
+  *(unaligned_uint16 *)&hdma_window_1_left_pos[0].field_0 = 0;
   UNUSED_word_7E177C = 0;
   fireflea_darkness_level = 0;
   UNUSED_word_7E1780 = 24;
@@ -1820,8 +1820,8 @@ void ExpandingContractingHdmaEffect(void) {  // 0x88B17F
   uint16 v1 = 2 * message_box_animation_y2;
   uint16 r18 = 0, r20 = 32;
   do {
-    *(uint16 *)&mother_brain_indirect_hdma[v0] = message_box_animation_y1 - message_box_animation_y0;
-    *(uint16 *)&mother_brain_indirect_hdma[v1] = message_box_animation_y3 - message_box_animation_y2;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[v0] = message_box_animation_y1 - message_box_animation_y0;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[v1] = message_box_animation_y3 - message_box_animation_y2;
     r18 += message_box_animation_y_radius;
     if (Unreachable()) {
       ++message_box_animation_y1;
@@ -1877,7 +1877,7 @@ void FxTypeFunc_4_Acid(void) {  // 0x88B2A1
 void FxHandleTide(void) {  // 0x88B2C9
   uint16 v2, v5;
 
-  if (*(int16 *)((uint8 *)&fx_y_vel + 1) < 0) {
+  if (*(unaligned_int16 *)((uint8 *)&fx_y_vel + 1) < 0) {
     fx_y_suboffset = 0;
     fx_y_offset = 0;
     int v0 = HIBYTE(tide_phase);
@@ -1969,7 +1969,7 @@ void HdmaobjPreInstr_LavaAcidBG3YScroll(uint16 k) {  // 0x88B3B0
     FxHandleTide();
     SetHiLo(&lava_acid_y_pos, &lava_acid_y_subpos, __PAIR32__(fx_y_offset, fx_y_suboffset) + __PAIR32__(fx_base_y_pos, fx_base_y_subpos));
     bg3_xpos = reg_BG1HOFS;
-    *(uint16 *)mother_brain_indirect_hdma = 0;
+    *(unaligned_uint16 *)mother_brain_indirect_hdma = 0;
     bg3_ypos = 0;
     v2 = (__PAIR32__(fx_y_offset, fx_y_suboffset) + __PAIR32__(fx_base_y_pos, fx_base_y_subpos)) >> 16;
     if (v2 >= 0) {
@@ -1977,7 +1977,7 @@ void HdmaobjPreInstr_LavaAcidBG3YScroll(uint16 k) {  // 0x88B3B0
       if (v3 <= 0) {
         v4 = (v3 ^ 0x1F) & 0x1F | 0x100;
 LABEL_8:
-        *(uint16 *)&mother_brain_indirect_hdma[2] = v4;
+        *(unaligned_uint16 *)&mother_brain_indirect_hdma[2] = v4;
         if (fx_type == 2 && (lava_acid_y_pos & 0x8000) == 0) {
           int v5 = (uint8)hdma_object_index >> 1;
           if (hdma_object_C[v5]-- == 1) {
@@ -2149,7 +2149,7 @@ void HdmaobjPreInstr_WaterBG3XScroll(uint16 k) {  // 0x88C48E
   }
   uint8 v7 = hdma_object_A[v5];
   for (int i = 30; (i & 0x80) == 0; i -= 2) {
-    *(uint16 *)&mother_brain_indirect_hdma[v7 + 4] = g_word_88C46E[i >> 1] + r20;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[v7 + 4] = g_word_88C46E[i >> 1] + r20;
     v7 = (v7 - 2) & 0x1E;
   }
   if ((fx_liquid_options & 1) != 0)
@@ -2319,7 +2319,7 @@ void FxTypeFunc_26_TourianEntranceStatue(void) {  // 0x88DB8A
 
   if (CheckEventHappened(0xA) & 1) {
     SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x06, 0x0c, 0xb777 });
-    *(uint16 *)scrolls = 514;
+    *(unaligned_uint16 *)scrolls = 514;
   }
   reg_BG2SC = 74;
   fx_rising_function_bank_88 = FUNC16(FxRisingFunction_C428_WaterNormal);
@@ -2330,7 +2330,7 @@ void FxTypeFunc_26_TourianEntranceStatue(void) {  // 0x88DB8A
 }
 
 void sub_88DBCB(uint16 k) {  // 0x88DBCB
-  *(uint16 *)&hdma_window_1_left_pos[0].field_0 = layer1_y_pos + hdma_object_B[k >> 1];
+  *(unaligned_uint16 *)&hdma_window_1_left_pos[0].field_0 = layer1_y_pos + hdma_object_B[k >> 1];
 }
 
 void HdmaobjPreInstr_CheckLotsOfEventsHappened(uint16 v0) {  // 0x88DBD7
@@ -2390,7 +2390,7 @@ void HdmaobjPreInstr_DC69(uint16 k) {  // 0x88DC69
 
 void HdmaobjPreInstr_DCBA(uint16 v0) {  // 0x88DCBA
   tourian_entrance_statue_finished = 0x8000;
-  *(uint16 *)scrolls = 514;
+  *(unaligned_uint16 *)scrolls = 514;
   sub_88DBCB(v0);
 }
 
@@ -2400,12 +2400,12 @@ const uint8 *HdmaobjInstr_GotoIfEventHappened(uint16 k, const uint8 *hdp) {  // 
   hdma_object_A[v2] = 0;
   if (CheckEventHappened(0xA)) {
     hdma_object_B[v2] = -240;
-    *(uint16 *)&hdma_window_1_left_pos[0].field_0 = -240;
+    *(unaligned_uint16 *)&hdma_window_1_left_pos[0].field_0 = -240;
     return INSTRB_RETURN_ADDR(GET_WORD(hdp));
   } else {
     hdma_object_B[v2] = 0;
-    *(uint16 *)&hdma_window_1_left_pos[0].field_0 = 0;
-    *(uint16 *)scrolls = 1;
+    *(unaligned_uint16 *)&hdma_window_1_left_pos[0].field_0 = 0;
+    *(unaligned_uint16 *)scrolls = 1;
     return hdp + 2;
   }
 }
@@ -2736,8 +2736,8 @@ uint8 GravitySuitPickup_6(void) {  // 0x88E25F
   hdma_table_1[0] = 255;
   substate = 0;
   suit_pickup_light_beam_pos = 0;
-  *(uint16 *)&suit_pickup_color_math_R = 0;
-  *(uint16 *)&suit_pickup_color_math_B = 0;
+  *(unaligned_uint16 *)&suit_pickup_color_math_R = 0;
+  *(unaligned_uint16 *)&suit_pickup_color_math_B = 0;
   int v0 = hdma_object_index >> 1;
   hdma_object_instruction_list_pointers[v0] += 2;
   hdma_object_instruction_timers[v0] = 1;
@@ -2781,9 +2781,9 @@ uint8 VariaSuitPickup_3(void) {  // 0x88E320
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   Samus_LoadSuitPalette();
   ++substate;
   return 1;
@@ -2796,9 +2796,9 @@ uint8 GravitySuitPickup_3(void) {  // 0x88E361
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  *(unaligned_uint16 *)&samus_last_different_pose_x_dir = *(unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  *(unaligned_uint16 *)&samus_prev_pose_x_dir = *(unaligned_uint16 *)&samus_pose_x_dir;
   Samus_LoadSuitPalette();
   ++substate;
   return 1;
@@ -2922,7 +2922,7 @@ void HdmaobjPreInstr_E567(uint16 v0) {  // 0x88E567
         r18 = ((r22 + (mult << 8)) & 0xFF00) >> 8;
         r20 = (r28 + v5) & 0x1FF;
         v8 = v11;
-        *(uint16 *)((uint8 *)&g_word_7E9100 + v11) = reg_BG2HOFS - r18;
+        *(unaligned_uint16 *)((uint8 *)&g_word_7E9100 + v11) = reg_BG2HOFS - r18;
       } else {
         uint16 r18 = kSinCosTable8bit_Sext[v6 + 64];
         uint16 r22 = Mult8x8(v7, enemy_data[3].ai_var_D) >> 8;
@@ -2933,16 +2933,16 @@ void HdmaobjPreInstr_E567(uint16 v0) {  // 0x88E567
         r18 = ((r22 + (mult << 8)) & 0xFF00) >> 8;
         r20 = (r28 + v5) & 0x1FF;
         v8 = v11;
-        *(uint16 *)((uint8 *)&g_word_7E9100 + v11) = r18 + reg_BG2HOFS;
+        *(unaligned_uint16 *)((uint8 *)&g_word_7E9100 + v11) = r18 + reg_BG2HOFS;
       }
       v4 = v8 + 2;
     } while ((int16)(v4 - r30) < 0);
     if ((enemy_data[1].parameter_1 & 1) != 0) {
       for (int i = 126; i >= 0; i -= 2)
-        *(uint16 *)((uint8 *)&g_word_7E9180 + i) = reg_BG2HOFS + reg_BG2HOFS - *(uint16 *)((uint8 *)&g_word_7E9100 + i);
+        *(unaligned_uint16 *)((uint8 *)&g_word_7E9180 + i) = reg_BG2HOFS + reg_BG2HOFS - *(unaligned_uint16 *)((uint8 *)&g_word_7E9100 + i);
     } else {
       for (j = 62; (j & 0x8000) == 0; j -= 2)
-        *(uint16 *)((uint8 *)&g_word_7E9140 + j) = reg_BG2HOFS + reg_BG2HOFS - *(uint16 *)((uint8 *)&g_word_7E9100 + j);
+        *(unaligned_uint16 *)((uint8 *)&g_word_7E9140 + j) = reg_BG2HOFS + reg_BG2HOFS - *(unaligned_uint16 *)((uint8 *)&g_word_7E9100 + j);
     }
   } else {
     int v1 = hdma_object_index >> 1;
@@ -2966,8 +2966,8 @@ void InitializeRainbowBeam(void) {  // 0x88E767
   reg_COLDATA[2] = 0x8f;
   fx_layer_blending_config_c = 36;
   mother_brain_indirect_hdma[0] = 100;
-  *(uint16 *)&mother_brain_indirect_hdma[1] = -25344;
-  *(uint16 *)&mother_brain_indirect_hdma[3] = 0;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[1] = -25344;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[3] = 0;
   hdma_table_2[0] = 0;
   hdma_table_2[1] = -32736;
   hdma_table_2[2] = 0;
@@ -3096,7 +3096,7 @@ void HdmaobjPreInstr_EACB(uint16 k) {  // 0x88EACB
     hdma_object_D[v1] = 0;
     hdma_object_C[v1] = 0;
     for (int i = 510; i >= 0; i -= 2)
-      *(uint16 *)((uint8 *)&g_word_7E9100 + (uint16)i) = 255;
+      *(unaligned_uint16 *)((uint8 *)&g_word_7E9100 + (uint16)i) = 255;
     kraid_unk9000 = 0;
     g_word_7E9002 = 0;
     g_word_7E9004 = 0;
@@ -3165,7 +3165,7 @@ void CinematicFunction_Intro_Func133(void) {  // 0x88EC3B
   unsigned int v1; // kr04_4
 
   g_word_7E0D9C = 1;
-  *(uint16 *)&g_byte_7E0D9E = 0x4000;
+  *(unaligned_uint16 *)&g_byte_7E0D9E = 0x4000;
   loop_counter_transfer_enemies_to_vram = 8;
   button_config_shoot_x_saved = 192;
   button_config_itemcancel_y_saved = 192;

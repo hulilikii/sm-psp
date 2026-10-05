@@ -494,9 +494,9 @@ CoroutineRet GameState_43_TransitionFromDemo(void) {  // 0x828593
   DisablePaletteFx();
   ClearPaletteFXObjects();
   for (int i = 656; i >= 0; i -= 2)
-    *(uint16 *)((uint8 *)&eproj_enable_flag + i) = 0;
+    *(unaligned_uint16 *)((uint8 *)&eproj_enable_flag + i) = 0;
   for (int j = 538; j >= 0; j -= 2)
-    *(uint16 *)((uint8 *)&hud_item_tilemap_palette_bits + j) = 0;
+    *(unaligned_uint16 *)((uint8 *)&hud_item_tilemap_palette_bits + j) = 0;
   next_gameplay_CGWSEL = 0;
   next_gameplay_CGADSUB = 0;
   reg_TM = 16;
@@ -561,20 +561,20 @@ void LoadDemoRoomData(void) {  // 0x828679
   do {
     int v2 = v1 >> 1;
     WORD(room_chozo_bits[v1]) = -1;
-    *(uint16 *)&item_bit_array[v1] = -1;
+    *(unaligned_uint16 *)&item_bit_array[v1] = -1;
     UNUSED_word_7ED8F0[v2] = -1;
-    *(uint16 *)&map_station_byte_array[v1] = -1;
-    *(uint16 *)&used_save_stations_and_elevators[v1] = -1;
-    *(uint16 *)&used_save_stations_and_elevators[v1 + 8] = -1;
+    *(unaligned_uint16 *)&map_station_byte_array[v1] = -1;
+    *(unaligned_uint16 *)&used_save_stations_and_elevators[v1] = -1;
+    *(unaligned_uint16 *)&used_save_stations_and_elevators[v1 + 8] = -1;
     WORD(opened_door_bit_array[v1]) = 0;
     WORD(events_that_happened[v1]) = 0;
-    *(uint16 *)&boss_bits_for_area[v1] = 0;
+    *(unaligned_uint16 *)&boss_bits_for_area[v1] = 0;
     v1 += 2;
   } while ((int16)(v1 - 8) < 0);
   do {
     int v3 = v1 >> 1;
     WORD(room_chozo_bits[v1]) = -1;
-    *(uint16 *)&item_bit_array[v1] = -1;
+    *(unaligned_uint16 *)&item_bit_array[v1] = -1;
     WORD(opened_door_bit_array[v1]) = 0;
     v1 += 2;
   } while ((int16)(v1 - 64) < 0);
@@ -595,7 +595,7 @@ void DemoRoom_ChargeBeamRoomScroll21(void) {  // 0x82891A
 }
 
 void DemoRoom_SetBG2TilemapBase(void) {  // 0x828925
-  *(uint16 *)&reg_BG2SC = 74;
+  *(unaligned_uint16 *)&reg_BG2SC = 74;
 }
 
 void DemoRoom_SetKraidFunctionTimer(void) {  // 0x82892B
@@ -789,10 +789,10 @@ void SfxHandlers_4_Reset(uint16 j) {  // 0x828A90
 }
 
 void ResetSoundQueues(void) {  // 0x828A9A
-  *(uint16 *)sfx_readpos = 0;
-  *(uint16 *)&sfx_readpos[2] = 0;
-  *(uint16 *)&sfx_writepos[1] = 0;
-  *(uint16 *)sfx_state = 0;
+  *(unaligned_uint16 *)sfx_readpos = 0;
+  *(unaligned_uint16 *)&sfx_readpos[2] = 0;
+  *(unaligned_uint16 *)&sfx_writepos[1] = 0;
+  *(unaligned_uint16 *)sfx_state = 0;
   sfx_state[2] = 0;
 }
 
@@ -1369,7 +1369,7 @@ void PauseMenu_3_MapToEquipment_Load(void) {  // 0x8291AB
   pause_screen_mode = 1;
   SetPauseScreenButtonLabelPalettes();
   pausemenu_lr_animation_frame = 0;
-  pausemenu_lr_animation_timer = *(uint16 *)kPauseLrHighlightAnimData;
+  pausemenu_lr_animation_timer = *(unaligned_uint16 *)kPauseLrHighlightAnimData;
   screen_fade_delay = 1;
   screen_fade_counter = 1;
   ++menu_index;
@@ -1380,7 +1380,7 @@ void PauseMenu_6_EquipmentToMap_Load(void) {  // 0x8291D7
   LoadPauseMenuMapTilemapAndAreaLabel();
   SetPauseScreenButtonLabelPalettes();
   pausemenu_lr_animation_frame = 0;
-  pausemenu_lr_animation_timer = *(uint16 *)kPauseLrHighlightAnimData;
+  pausemenu_lr_animation_timer = *(unaligned_uint16 *)kPauseLrHighlightAnimData;
   screen_fade_delay = 1;
   screen_fade_counter = 1;
   pause_screen_mode = 0;
@@ -1564,9 +1564,9 @@ void LoadPauseMenuMapTilemap(void) {  // 0x82943D
   uint16 v0 = area_index;
   if (!sign16(area_index - 7))
     v0 = 0;
-  const uint16 *r0 = (const uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[v0]));
+  const unaligned_uint16 *r0 = (const unaligned_uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[v0]));
   uint16 *r3 = (uint16 *)&ram4000;
-  const uint16 *r6 = (const uint16 *)RomPtr_82(kPauseMenuMapData[v0]);
+  const unaligned_uint16 *r6 = (const unaligned_uint16 *)RomPtr_82(kPauseMenuMapData[v0]);
   const uint16 *r9 = (const uint16 *)map_tiles_explored;
   if (map_station_byte_array[area_index]) {
     uint16 r38 = swap16(*r6++);
@@ -1625,9 +1625,9 @@ void DrawRoomSelectMap(void) {  // 0x829517
   if (!sign16(area_index - 7))
     v0 = 0;
 
-  const uint16 *r0 = (const uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[v0]));
+  const unaligned_uint16 *r0 = (const unaligned_uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[v0]));
   uint16 *r3 = (uint16 *)&ram3000;
-  const uint16 *r6 = (const uint16 *)RomPtr_82(kPauseMenuMapData[v0]);
+  const unaligned_uint16 *r6 = (const unaligned_uint16 *)RomPtr_82(kPauseMenuMapData[v0]);
   const uint16 *r9 = (const uint16 *)map_tiles_explored;
 
   if (map_station_byte_array[area_index]) {
@@ -1855,7 +1855,7 @@ void ResetPauseMenuAnimations(void) {  // 0x82A0F7
   samus_position_indicator_animation_frame = 0;
   samus_position_indicator_animation_timer = 0;
   samus_position_indicator_animation_loop_counter = 0;
-  pausemenu_lr_animation_timer = *(uint16 *)kPauseLrHighlightAnimData;
+  pausemenu_lr_animation_timer = *(unaligned_uint16 *)kPauseLrHighlightAnimData;
   pausemenu_palette_animation_timer = 1;
   pausemenu_palette_animation_frame = 0;
 }
@@ -1870,7 +1870,7 @@ void LoadEquipmentScreenEquipmentTilemaps(void) {  // 0x82A12B
     memcpy(g_ram + kEquipmentTilemapOffs_Tanks[0], RomPtr_82(kEquipmentTilemaps_Tanks[0]), 14);
     memcpy(g_ram + kEquipmentTilemapOffs_Tanks[1], RomPtr_82(kEquipmentTilemaps_Tanks[1]), 14);
   }
-  const uint16 *p = (uint16*)RomPtr_82(addr_kEquipmentTilemapOffs_Weapons);
+  const unaligned_uint16 *p = (unaligned_uint16 *)RomPtr_82(addr_kEquipmentTilemapOffs_Weapons);
   if (hyper_beam_flag) {
     for(int i = 0; i < 5; i++)
       memcpy(g_ram + p[i], RomPtr_82(kHyperBeamWeaponsTilemaps[i]), 10);
@@ -2291,8 +2291,8 @@ void UpdatePauseMenuLRStartVramTilemap(void) {  // 0x82A84D
 
 void DrawPauseScreenSpriteAnim(uint16 a, uint16 input_k, uint16 input_j) {  // 0x82A881
   int t = a - 1;
-  uint16 *v8 = (uint16*)RomPtr_RAM(kPauseScreenSpriteAnimationData_1.arr[t]);
-  uint16 *v5 = (uint16*)RomPtr_RAM(kPauseScreenSpriteAnimationData_0.arr[t]);
+  unaligned_uint16 *v8 = (unaligned_uint16 *)RomPtr_RAM(kPauseScreenSpriteAnimationData_1.arr[t]);
+  unaligned_uint16 *v5 = (unaligned_uint16 *)RomPtr_RAM(kPauseScreenSpriteAnimationData_0.arr[t]);
   const uint8 *v3 = RomPtr_82(kPauseScreenSpriteAnimationData_3.arr[t]);
   if ((int16)--(*v5) <= 0) {
     uint16 v10 = v3[3 * ++(*v8)];
@@ -2348,7 +2348,7 @@ void EquipmentScreenSetupReserveMode(void) {  // 0x82AB47
     v0 = addr_kEquipmentScreenTilemap_AUTO;
     if (reserve_health_mode != 1)
       v0 = addr_kEquipmentScreenTilemap_MANUAL;
-    uint16 *table = (uint16 *)RomPtr_82(v0);
+    unaligned_uint16 *table = (unaligned_uint16 *)RomPtr_82(v0);
     for (int i = 0; i < 4; i++)
       ram3800.cinematic_bg_tilemap[i + 327] = ram3800.cinematic_bg_tilemap[i + 327] & 0xFC00 | table[i];
   }
@@ -2585,7 +2585,7 @@ void EquipmentScreenHudReserveAutoTilemap_On_BUGGY(void) {  // 0x82AEFD
   uint16 v0 = -26229;
   if (!samus_reserve_health)
     v0 = -26217;
-  const uint16 *v1 = (const uint16 *)RomPtr_82(v0);
+  const unaligned_uint16 *v1 = (const unaligned_uint16 *)RomPtr_82(v0);
   hud_tilemap[8] = *v1;
   hud_tilemap[9] = v1[1];
   hud_tilemap[40] = v1[2];
@@ -2751,7 +2751,7 @@ void WriteSamusWireframeTilemap(void) {  // 0x82B20C
   for (i = 0; (equipped_items & 0x101) != kEquipmentScreenWireframeCmp[i >> 1]; i += 2)
     ;
   
-  const uint16 *src = (const uint16*)RomPtr_82(kEquipmentScreenWireframePtrs[i >> 1]);
+  const unaligned_uint16 *src = (const unaligned_uint16 *)RomPtr_82(kEquipmentScreenWireframePtrs[i >> 1]);
   int m = 17;
   uint16 v1 = 0;
   uint16 v2 = 472;
@@ -2759,7 +2759,7 @@ void WriteSamusWireframeTilemap(void) {  // 0x82B20C
     uint16 v3 = v2;
     int n = 8;
     do {
-      *(uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + v2) = *src++;
+      *(unaligned_uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + v2) = *src++;
       v2 += 2;
     } while (--n);
     v2 = v3 + 64;
@@ -2769,7 +2769,7 @@ void WriteSamusWireframeTilemap(void) {  // 0x82B20C
 
 void EquipmentScreenDrawItemSelector(void) {  // 0x82B267
   if (samus_max_reserve_health | (uint16)(collected_items | collected_beams)) {
-    uint16 *t = (uint16*)RomPtr_82(kEquipmentScreenPtrsToItemXYpos[(uint8)pausemenu_equipment_category_item] + 
+    unaligned_uint16 *t = (unaligned_uint16 *)RomPtr_82(kEquipmentScreenPtrsToItemXYpos[(uint8)pausemenu_equipment_category_item] +
         4 * HIBYTE(pausemenu_equipment_category_item));
     DrawPauseScreenSpriteAnim(3, t[0] - 1, t[1]);
   }
@@ -2949,7 +2949,7 @@ void EquipmentScreenCategory_ButtonResponse(uint16 r24) {  // 0x82B568
     int item = HIBYTE(pausemenu_equipment_category_item);
     int category = (uint8)pausemenu_equipment_category_item;
     uint8 *target = g_ram + *(unaligned_uint16 *)RomPtr_82(kEquipmentPtrsToRamTilemapOffsets[category] + item * 2);
-    uint16 *var = (uint16 *)RomPtr_RAM(kEquipmentPtrsToBitsets[category]);
+    unaligned_uint16 *var = (unaligned_uint16 *)RomPtr_RAM(kEquipmentPtrsToBitsets[category]);
     uint16 mask = *(unaligned_uint16 *)RomPtr_82(kEquipmentPtrsToBitmasks[category] + item * 2);
     if ((*var & mask) != 0) {
       *var &= ~mask;
@@ -3006,7 +3006,7 @@ void DrawFileSelectMapIcons(void) {  // 0x82B6DD
   DrawSimpleMapIcons(0xA, 0xC7EB, 3584);
   DrawSimpleMapIcons(0x4E, 0xC7FB, 3584);
   uint16 a = UpdateSamusPositionIndicatorAnimation();
-  const uint16 *data = (uint16 *)RomPtr_82(*(VoidP *)((uint8 *)&kMapIconDataPointers[4].crateria + 2 * area_index)) + load_station_index * 2;
+  const unaligned_uint16 *data = (unaligned_uint16 *)RomPtr_82(*(VoidP *)((uint8 *)&kMapIconDataPointers[4].crateria + 2 * area_index)) + load_station_index * 2;
   uint16 v1 = data[0] - reg_BG1HOFS;
   uint16 v2 = data[1] - reg_BG1VOFS;
   if ((samus_position_indicator_animation_loop_counter & 1) == 0)
@@ -3025,7 +3025,7 @@ void DrawSaveStationMapIcon(uint16 a, uint16 k, uint16 r3) {  // 0x82B798
   static const uint8 kShlBit[8] = { 1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80 };
   uint16 R34 = a;
   if (area_index == sram_area_index) {
-    uint16 R36 = *(uint16 *)&used_save_stations_and_elevators[2 * area_index];
+    uint16 R36 = *(unaligned_uint16 *)&used_save_stations_and_elevators[2 * area_index];
     LOBYTE(R36) = R36 & kShlBit[load_station_index];
     uint16 v2 = *(unaligned_uint16 *)RomPtr_82(k + 2 * area_index);
     if (v2)
@@ -3035,7 +3035,7 @@ void DrawSaveStationMapIcon(uint16 a, uint16 k, uint16 r3) {  // 0x82B798
 
 void DrawDebugSaveMapIcons(uint16 a, uint16 k, uint16 r3) {  // 0x82B7D1
   uint16 R34 = a;
-  uint16 R36 = *(uint16 *)&used_save_stations_and_elevators[2 * area_index];
+  uint16 R36 = *(unaligned_uint16 *)&used_save_stations_and_elevators[2 * area_index];
   uint16 v2 = *(unaligned_uint16 *)RomPtr_82(k + 2 * area_index);
   if (v2)
     DrawMapIconsOfType(v2, R34, R36, r3);
@@ -3043,7 +3043,7 @@ void DrawDebugSaveMapIcons(uint16 a, uint16 k, uint16 r3) {  // 0x82B7D1
 
 void DrawDebugElevatorMapIcons(uint16 a, uint16 k, uint16 r3) {  // 0x82B7EB
   uint16 R34 = a;
-  uint16 R36 = *(uint16 *)&used_save_stations_and_elevators[2 * area_index + 1];
+  uint16 R36 = *(unaligned_uint16 *)&used_save_stations_and_elevators[2 * area_index + 1];
   uint16 v2 = *(unaligned_uint16 *)RomPtr_82(k + 2 * area_index);
   if (v2)
     DrawMapIconsOfType(v2, R34, R36, r3);
@@ -3061,7 +3061,7 @@ void DrawMapIconsOfType(uint16 a, uint16 r34, uint16 r36, uint16 r3) {  // 0x82B
   int16 v4;
 
   while (1) {
-    const uint16 *v2 = (const uint16 *)RomPtr_82(a);
+    const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_82(a);
     if ((*v2 & 0x8000) != 0)
       break;
     v3 = r36 & 1;
@@ -3089,7 +3089,7 @@ void DrawBossMapIcons(uint16 a, uint16 k) {  // 0x82B892
   int t = *(unaligned_uint16 *)RomPtr_82(k + 2 * area_index);
   if (t == 0)
     return;
-  const uint16 *v4 = (const uint16 *)RomPtr_82(t);
+  const unaligned_uint16 *v4 = (const unaligned_uint16 *)RomPtr_82(t);
   for (; ; v4 += 2) {
     if (v4[0] == 0xffff)
       return;
@@ -3111,7 +3111,7 @@ void DrawBossMapIcons(uint16 a, uint16 k) {  // 0x82B892
 }
 
 void DrawMapScrollArrowAndCheckToScroll(uint8 db, uint16 k) {  // 0x82B90A
-  const uint16 *v1 = (const uint16 *)RomPtrWithBank(db, k);
+  const unaligned_uint16 *v1 = (const unaligned_uint16 *)RomPtrWithBank(db, k);
   DrawPauseScreenSpriteAnim(v1[2], *v1, v1[1]);
   const uint8 *v2 = RomPtrWithBank(db, k);
   if ((joypad1_lastkeys & GET_WORD(v2 + 6)) != 0 && !map_scrolling_direction)
@@ -3609,7 +3609,7 @@ void LoadDoorHeader(void) {  // 0x82DE12
 
   DoorDef = get_DoorDef(door_def_ptr);
   room_ptr = DoorDef->room_definition_ptr;
-  elevator_door_properties_orientation = *(uint16 *)&DoorDef->door_bitflags;
+  elevator_door_properties_orientation = *(unaligned_uint16 *)&DoorDef->door_bitflags;
   elevator_flags = elevator_door_properties_orientation & 0x80;
   door_direction = DoorDef->door_orientation;
   door_destination_x_pos = DoorDef->x_pos_in_room << 8;
@@ -3658,7 +3658,7 @@ void LoadStateHeader(void) {  // 0x82DEF2
   room_layer3_asm_ptr = RD->room_layer3_fx_ptr;
   room_enemy_population_ptr = RD->enemy_population_ptr_;
   room_enemy_tilesets_ptr = RD->enemy_tilesets_ptr;
-  *(uint16 *)&layer2_scroll_x = RD->vertical_screen_nudge_limit;
+  *(unaligned_uint16 *)&layer2_scroll_x = RD->vertical_screen_nudge_limit;
   room_main_code_ptr = RD->main_code_ptr;
 }
 
@@ -4143,8 +4143,8 @@ CoroutineRet DoorTransition_HandleTransition(void) {  // 0x82E6A2
   if ((samus_y_pos & 0xF0) == 16)
     samus_y_pos = (samus_y_pos | 0xF) + 8;
   for (int i = 510; i >= 0; i -= 2) {
-    *(uint16 *)&mother_brain_indirect_hdma[i] = 0;
-    *(uint16 *)(&hdma_window_1_left_pos[0].field_0 + i) = 0;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[i] = 0;
+    *(unaligned_uint16 *)(&hdma_window_1_left_pos[0].field_0 + i) = 0;
   }
   uint16 v1 = room_loading_irq_handler;
   if (!room_loading_irq_handler)
@@ -4159,7 +4159,7 @@ CoroutineRet DoorTransition_HandleTransition(void) {  // 0x82E6A2
   }
   SetLiquidPhysicsType();
   door_transition_function = FUNC16(DoorTransition_FadeInScreenAndFinish);
-  *(uint16 *)&reg_INIDISP |= 0x1F;
+  *(unaligned_uint16 *)&reg_INIDISP |= 0x1F;
   return kCoroutineNone;
 }
 
@@ -4240,7 +4240,7 @@ void LoadLevelDataAndOtherThings(void) {  // 0x82E7D3
     } while (v10 != (uint8)room_height_in_scrolls);
   } else {
     for (m = 0; m != 50; m += 2) {
-      *(uint16 *)&scrolls[m] = *(unaligned_uint16 *)RomPtr_8F(rdf_scroll_ptr);
+      *(unaligned_uint16 *)&scrolls[m] = *(unaligned_uint16 *)RomPtr_8F(rdf_scroll_ptr);
       rdf_scroll_ptr += 2;
     }
   }
@@ -4256,11 +4256,11 @@ void LoadLevelDataAndOtherThings(void) {  // 0x82E7D3
 
 void SpawnDoorClosingPLM(void) {  // 0x82E8EB
   if (!CheckIfColoredDoorCapSpawned()) {
-    const uint16 *v0 = (const uint16 *)RomPtr_8F(2 * door_direction + addr_kDoorClosingPlmIds);
+    const unaligned_uint16 *v0 = (const unaligned_uint16 *)RomPtr_8F(2 * door_direction + addr_kDoorClosingPlmIds);
     if (*v0) {
       RoomPlmEntry *rp = (RoomPlmEntry *)(g_ram + 0x12);
       rp->plm_header_ptr_ = *v0;
-      WORD(rp->x_block) = *(uint16 *)&get_DoorDef(door_def_ptr)->x_pos_plm;
+      WORD(rp->x_block) = *(unaligned_uint16 *)&get_DoorDef(door_def_ptr)->x_pos_plm;
       rp->plm_room_argument = 0;
       SpawnRoomPLM(0x12); // This reads from r18
     }
@@ -4338,12 +4338,12 @@ uint16 LoadLibraryBackgroundFunc_E_DoorDependentTransferToVram(uint16 j) {  // 0
 }
 
 uint16 LoadLibraryBackgroundFunc_2_TransferToVram(uint16 j) {  // 0x82E9F9
-  uint16 *LoadBg_28 = (uint16 *)RomPtr_8F(j);
-  WriteRegWord(VMADDL, *(uint16 *)((uint8 *)LoadBg_28 + 3));
+  unaligned_uint16 *LoadBg_28 = (unaligned_uint16 *)RomPtr_8F(j);
+  WriteRegWord(VMADDL, *(unaligned_uint16 *)((uint8 *)LoadBg_28 + 3));
   WriteRegWord(DMAP1, 0x1801);
   WriteRegWord(A1T1L, *LoadBg_28);
   WriteRegWord(A1B1, LoadBg_28[1]);
-  WriteRegWord(DAS1L, *(uint16 *)((uint8 *)LoadBg_28 + 5));
+  WriteRegWord(DAS1L, *(unaligned_uint16 *)((uint8 *)LoadBg_28 + 5));
   WriteReg(VMAIN, 0x80);
   WriteReg(MDMAEN, 2);
   return j + 7;
@@ -4424,7 +4424,7 @@ void LoadLevelScrollAndCre(void) {  // 0x82EA73
     } while (v12 + 1 != (uint8)room_height_in_scrolls);
   } else {
     for (m = 0; m != 50; m += 2) {
-      *(uint16 *)&scrolls[m] = *(unaligned_uint16 *)RomPtr_8F(rdf_scroll_ptr);
+      *(unaligned_uint16 *)&scrolls[m] = *(unaligned_uint16 *)RomPtr_8F(rdf_scroll_ptr);
       rdf_scroll_ptr += 2;
     }
   }
@@ -4543,7 +4543,7 @@ void OptionsMenu_AddToVramQueue(void) {  // 0x82ECFF
 
 void OptionsMenuFunc5(uint16 a, uint16 k, uint16 j) {  // 0x82ED28
   do {
-    *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + k) = a | *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + k) & 0xE3FF;
+    *(unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + k) = a | *(unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + k) & 0xE3FF;
     k += 2;
     j -= 2;
   } while (j);
@@ -4760,9 +4760,9 @@ void GameOptionsMenu_8_SpecialSettings(void) {
 void GameOptionsMenuSpecialSettings_0(void) {  // 0x82F08E
   uint8 *v0 = RomPtr_RAM(kOptionsMenuSpecialPtrs[menu_option_index]);
   if (GET_WORD(v0))
-    *(uint16 *)v0 = 0;
+    *(unaligned_uint16 *)v0 = 0;
   else
-    *(uint16 *)v0 = 1;
+    *(unaligned_uint16 *)v0 = 1;
   OptionsMenuFunc7();
 }
 
@@ -4896,7 +4896,7 @@ void OptionsPreInstr_F2A9(uint16 v0) {  // 0x82F2A9
     int v2 = game_options_screen_index;
     uint16 v3 = off_82F2ED[v2];
     if (v3) {
-      const uint16 *v4 = (const uint16 *)RomPtr_82(v3 + 4 * menu_option_index);
+      const unaligned_uint16 *v4 = (const unaligned_uint16 *)RomPtr_82(v3 + 4 * menu_option_index);
       int v5 = v0 >> 1;
       eproj_y_pos[v5 + 13] = *v4;
       eproj_x_vel[v5 + 3] = v4[1];
@@ -4998,7 +4998,7 @@ void LoadControllerOptionsFromControllerBindings(void) {  // 0x82F4DC
   uint16 v0 = 0;
   do {
     int v1 = v0 >> 1;
-    v2 = *(uint16 *)&g_ram[off_82F54A[v1]];
+    v2 = *(unaligned_uint16 *)&g_ram[off_82F54A[v1]];
     if ((v2 & kButton_X) != 0) {
 LABEL_9:
       eproj_F[v1 + 13] = 0;
@@ -5038,7 +5038,7 @@ uint8 OptionsMenuFunc8(void) {
   int v0 = 0, v2;
   do {
     v2 = v0;
-    *(uint16 *)&g_ram[off_82F54A[v0 >> 1]] = word_82F575[eproj_F[(v0 >> 1) + 13]];
+    *(unaligned_uint16 *)&g_ram[off_82F54A[v0 >> 1]] = word_82F575[eproj_F[(v0 >> 1) + 13]];
     v0 += 2;
   } while (v2 < 12);
   return 0;
@@ -5058,25 +5058,25 @@ void OptionsMenuFunc6(void) {
     v4 = v0;
     int v1 = v0 >> 1;
     uint16 v2 = g_word_82F639[v1];
-    const uint16 *v3 = (const uint16 *)RomPtr_82(g_off_82F647[eproj_F[v1 + 13]]);
-    *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + v2) = *v3;
-    *(uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[1] + v2) = v3[1];
-    *(uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[2] + v2) = v3[2];
-    *(uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[32] + v2) = v3[3];
-    *(uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[33] + v2) = v3[4];
-    *(uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[34] + v2) = v3[5];
+    const unaligned_uint16 *v3 = (const unaligned_uint16 *)RomPtr_82(g_off_82F647[eproj_F[v1 + 13]]);
+    *(unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + v2) = *v3;
+    *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[1] + v2) = v3[1];
+    *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[2] + v2) = v3[2];
+    *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[32] + v2) = v3[3];
+    *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[33] + v2) = v3[4];
+    *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[34] + v2) = v3[5];
     v0 = v4 + 2;
   } while ((int16)(v4 - 12) < 0);
   if (eproj_instr_list_ptr[0] != 5 && eproj_instr_list_ptr[0] != 6) {
-    *(uint32 *)&ram3000.menu.backup_of_io_registers_in_gameover[46] = *(uint32 *)g_word_82F6AD;
+    *(unaligned_uint32 *)&ram3000.menu.backup_of_io_registers_in_gameover[46] = *(unaligned_uint32 *)g_word_82F6AD;
     ram3000.pause_menu_map_tilemap[665] = g_word_82F6AD[2];
-    *(uint32 *)&ram3000.menu.field_536[56] = *(uint32 *)&g_word_82F6AD[3];
+    *(unaligned_uint32 *)&ram3000.menu.field_536[56] = *(unaligned_uint32 *)&g_word_82F6AD[3];
     ram3000.pause_menu_map_tilemap[697] = g_word_82F6AD[5];
   }
   if (eproj_instr_list_ptr[1] != 5 && eproj_instr_list_ptr[1] != 6) {
-    *(uint32 *)&ram3000.menu.field_536[184] = *(uint32 *)g_word_82F6AD;
+    *(unaligned_uint32 *)&ram3000.menu.field_536[184] = *(unaligned_uint32 *)g_word_82F6AD;
     ram3000.pause_menu_map_tilemap[761] = g_word_82F6AD[2];
-    *(uint32 *)&ram3000.menu.menu_tilemap[46] = *(uint32 *)&g_word_82F6AD[3];
+    *(unaligned_uint32 *)&ram3000.menu.menu_tilemap[46] = *(unaligned_uint32 *)&g_word_82F6AD[3];
     ram3000.pause_menu_map_tilemap[793] = g_word_82F6AD[5];
   }
 }

@@ -269,7 +269,7 @@ static inline uint8 *RomPtr_84orRAM(uint16_t addr) {
 
 void ProcessPlmDrawInstruction(uint16 v0) {  // 0x84861E
   int v1 = v0 >> 1;
-  uint16 *p = (uint16 *)RomPtr_84orRAM(plm_instruction_draw_ptr[v1]);
+  unaligned_uint16 *p = (unaligned_uint16 *)RomPtr_84orRAM(plm_instruction_draw_ptr[v1]);
   uint16 dst = plm_block_indices[v1], dst_base = dst;
   while (1) {
     uint16 v4 = *p++;
@@ -357,7 +357,7 @@ const uint8 *PlmInstr_LoadItemPlmGfx(const uint8 *plmp, uint16 k) {  // 0x848764
   int v7 = r20;
   int R24 = r20 + 16;
   do {
-    *(uint16 *)((uint8 *)&tile_table.tables[0].top_left + v7) = R22 + (plmp[0] << 10);
+    *(unaligned_uint16 *)((uint8 *)&tile_table.tables[0].top_left + v7) = R22 + (plmp[0] << 10);
     ++R22;
     plmp++;
     v7 += 2;
@@ -715,7 +715,7 @@ const uint8 *PlmInstr_QueueSfx3_Max1(const uint8 *plmp, uint16 k) {  // 0x848C85
 }
 
 const uint8 *PlmInstr_ActivateMapStation(const uint8 *plmp, uint16 k) {  // 0x848C8F
-  *(uint16 *)&map_station_byte_array[area_index] |= 0xFF;
+  *(unaligned_uint16 *)&map_station_byte_array[area_index] |= 0xFF;
   DisplayMessageBox(0x14);
   has_area_map = 1;
   return plmp;
@@ -1054,7 +1054,7 @@ uint8 PlmSetup_CrumbleBotwoonWall(uint16 j) {  // 0x84AB28
 }
 
 const uint8 *PlmInstr_Scroll_0_1_Blue(const uint8 *plmp, uint16 k) {  // 0x84AB51
-  *(uint16 *)scrolls = 257;
+  *(unaligned_uint16 *)scrolls = 257;
   return plmp;
 }
 
@@ -1373,7 +1373,7 @@ uint8 UNUSED_sub_84B3E3(uint16 j) {  // 0x84B3E3
 
 uint8 PlmSetup_B70F_IcePhysics(uint16 j) {  // 0x84B3EB
   if (((samus_y_radius + samus_y_pos - 1) & 0xF) == 7 || ((samus_y_radius + samus_y_pos - 1) & 0xF) == 15) {
-    *(uint16 *)&samus_x_decel_mult = 16;
+    *(unaligned_uint16 *)&samus_x_decel_mult = 16;
   }
   return 0;
 }
@@ -1654,8 +1654,8 @@ uint8 PlmSetup_SpeedBoosterEscape(uint16 j) {  // 0x84B89C
 
 void PlmPreInstr_ShaktoolsRoom(uint16 k) {  // 0x84B8B0
   if (power_bomb_explosion_status) {
-    *(uint16 *)scrolls = 257;
-    *(uint16 *)&scrolls[2] = 257;
+    *(unaligned_uint16 *)scrolls = 257;
+    *(unaligned_uint16 *)&scrolls[2] = 257;
   }
   if (samus_x_pos > 0x348) {
     SetEventHappened(0xD);
@@ -1664,8 +1664,8 @@ void PlmPreInstr_ShaktoolsRoom(uint16 k) {  // 0x84B8B0
 }
 
 uint8 PlmSetup_ShaktoolsRoom(uint16 j) {  // 0x84B8DC
-  *(uint16 *)scrolls = 1;
-  *(uint16 *)&scrolls[2] = 0;
+  *(unaligned_uint16 *)scrolls = 1;
+  *(unaligned_uint16 *)&scrolls[2] = 0;
   return 0;
 }
 
@@ -2038,7 +2038,7 @@ void SetBts0x10FiveStepsDown(uint16 j) {  // 0x84C66A
 }
 
 uint16 SetBtsTo0x10AdvanceRow(uint16 k) {  // 0x84C67F
-  *(uint16 *)&BTS[k] = (BTS[k + 1] << 8) | 0x10;
+  *(unaligned_uint16 *)&BTS[k] = (BTS[k + 1] << 8) | 0x10;
   return room_width_in_blocks + k;
 }
 
@@ -2051,7 +2051,7 @@ void SetBts0x10FiveStepsUp(uint16 j) {  // 0x84C694
 }
 
 uint16 SetBtsTo0x10AdvanceRowUp(uint16 k) {  // 0x84C6A9
-  *(uint16 *)&BTS[k] = (BTS[k + 1] << 8) | 0x10;
+  *(unaligned_uint16 *)&BTS[k] = (BTS[k + 1] << 8) | 0x10;
   return k - room_width_in_blocks;
 }
 
@@ -2293,7 +2293,7 @@ uint8 PlmSetup_D0DC_BreakableGrappleBlock(uint16 j) {  // 0x84CFB5
   int v1 = j >> 1;
   uint16 v2 = plm_block_indices[v1];
   plm_variable[v1] = level_data[v2 >> 1];
-  *(uint16 *)&BTS[v2 >> 1] = BTS[(v2 >> 1) + 1] << 8;
+  *(unaligned_uint16 *)&BTS[v2 >> 1] = BTS[(v2 >> 1) + 1] << 8;
   return 0x41;
 }
 
@@ -2496,8 +2496,8 @@ uint8 PlmSetup_D6F2_WreckedShipChozoHandTrigger(uint16 j) {  // 0x84D620
           || samus_pose == kPose_79_FaceR_Springball_Ground
           || samus_pose == kPose_7A_FaceL_Springball_Ground)) {
     enemy_data[0].parameter_1 = 1;
-    *(uint16 *)&scrolls[7] = 514;
-    *(uint16 *)&scrolls[13] = 257;
+    *(unaligned_uint16 *)&scrolls[7] = 514;
+    *(unaligned_uint16 *)&scrolls[13] = 257;
     int v1 = plm_block_indices[j >> 1] >> 1;
     level_data[v1] &= 0xFFF;
     CallSomeSamusCode(0);
@@ -2655,7 +2655,7 @@ void PlmPreInstr_GotoLinkIfShotWithSuperMissile(uint16 k) {  // 0x84DB64
 }
 
 void SetPlmVarPtr(uint16 k, uint16 a) {
-  *(uint16 *)&g_ram[plm_variable[k >> 1]] = a;
+  *(unaligned_uint16 *)&g_ram[plm_variable[k >> 1]] = a;
 }
 
 const uint8 *PlmInstr_DamageDraygonTurret(const uint8 *plmp, uint16 k) {  // 0x84DB8E

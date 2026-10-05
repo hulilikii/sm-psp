@@ -99,7 +99,7 @@ void LoadFXHeader(void) {
     const uint8 *v11 = RomPtr_83(kAreaPalFxListPointers[area_index]);
     for (int j = 0; j != 16; j += 2, bits >>= 1) {
       if (bits & 1)
-        SpawnPalfxObject(*(uint16 *)&v11[j]);
+        SpawnPalfxObject(*(unaligned_uint16 *)&v11[j]);
     }
   }
   if (FD->animtiles_bitset) {
@@ -107,7 +107,7 @@ void LoadFXHeader(void) {
     const uint8 *v14 = RomPtr_83(kAreaAnimtilesListPtrs[area_index]);
     for (int k = 0; k != 16; k += 2, bits >>= 1) {
       if (bits & 1)
-        SpawnAnimtiles(*(uint16 *)&v14[k]);
+        SpawnAnimtiles(*(unaligned_uint16 *)&v14[k]);
     }
   }
 }
@@ -127,24 +127,24 @@ void RoomCode_CeresElevatorShaft(void) {  // 0x89ACC3
       screen_fade_counter = 0;
       game_state = 32;
     }
-    -- *(uint16 *)&room_main_asm_variables[2];
-    if (*(int16 *)&room_main_asm_variables[2] < 0) {
-      int v0 = (uint16)(6 * *(uint16 *)room_main_asm_variables) >> 1;
-      *(uint16 *)&room_main_asm_variables[2] = g_word_89AD5F[v0];
+    -- *(unaligned_uint16 *)&room_main_asm_variables[2];
+    if (*(unaligned_int16 *)&room_main_asm_variables[2] < 0) {
+      int v0 = (uint16)(6 * *(unaligned_uint16 *)room_main_asm_variables) >> 1;
+      *(unaligned_uint16 *)&room_main_asm_variables[2] = g_word_89AD5F[v0];
       reg_M7B = g_word_89AD5F[v0 + 1];
       reg_M7C = -reg_M7B;
       reg_M7A = g_word_89AD5F[v0 + 2];
       reg_M7D = reg_M7A;
-      if (*(int16 *)room_main_asm_variables < 0) {
-        v1 = *(uint16 *)room_main_asm_variables - 1;
-        if (*(uint16 *)room_main_asm_variables == 0x8001)
+      if (*(unaligned_int16 *)room_main_asm_variables < 0) {
+        v1 = *(unaligned_uint16 *)room_main_asm_variables - 1;
+        if (*(unaligned_uint16 *)room_main_asm_variables == 0x8001)
           v1 = 0;
       } else {
-        v1 = *(uint16 *)room_main_asm_variables + 1;
-        if (*(uint16 *)room_main_asm_variables == 67)
+        v1 = *(unaligned_uint16 *)room_main_asm_variables + 1;
+        if (*(unaligned_uint16 *)room_main_asm_variables == 67)
           v1 = -32700;
       }
-      *(uint16 *)room_main_asm_variables = v1;
+      *(unaligned_uint16 *)room_main_asm_variables = v1;
     }
   }
 }
