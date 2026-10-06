@@ -37,7 +37,7 @@ static void InitializePpuForMessageBoxes(void) {  // 0x858143
   WriteReg(BG3VOFS, 0);
   WriteReg(BG3VOFS, 0);
   for (int i = 128; i >= 0; i -= 2)
-    *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + (uint16)i) = 0;
+    *(unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + (uint16)i) = 0;
   WriteRegWord(VMADDL, addr_unk_605880);
   ReadRegWord(RDVRAML);
   WriteRegWord(DMAP1, 0x3981);

@@ -63,7 +63,7 @@ void PalFx_ProcessOne(uint16 k) {  // 0x8DC54A
     return;
   uint16 j = palettefx_instr_list_ptrs[v1 >> 1], v6;
   while (1) {
-    const uint16 *p = (const uint16 *)RomPtr_8D(j);
+    const unaligned_uint16 *p = (const unaligned_uint16 *)RomPtr_8D(j);
     v6 = *p;
     if ((*p & 0x8000) == 0)
       break;
@@ -170,19 +170,19 @@ PairU16 PalInstr_QueueMusic(uint16 k, uint16 j) {  // 0x8DC65E
 }
 
 PairU16 PalInstr_QueueSfx1(uint16 k, uint16 j) {  // 0x8DC66A
-  const uint16 *v2 = (const uint16 *)RomPtr_8D(j);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_8D(j);
   QueueSfx1_Max6(*v2);
   return MakePairU16(k, j + 1);
 }
 
 PairU16 PalInstr_QueueSfx2(uint16 k, uint16 j) {  // 0x8DC673
-  const uint16 *v2 = (const uint16 *)RomPtr_8D(j);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_8D(j);
   QueueSfx2_Max6(*v2);
   return MakePairU16(k, j + 1);
 }
 
 PairU16 PalInstr_QueueSfx3(uint16 k, uint16 j) {  // 0x8DC67C
-  const uint16 *v2 = (const uint16 *)RomPtr_8D(j);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_8D(j);
   QueueSfx3_Max6(*v2);
   return MakePairU16(k, j + 1);
 }
@@ -222,7 +222,7 @@ void PalPreInstr_SamusInHeat(uint16 k) {  // 0x8DE379
     } else {
       v4 = addr_off_8DE420;
     }
-    palettefx_instr_list_ptrs[v3] = *(uint16 *)&RomPtr_8D(v4)[v2];
+    palettefx_instr_list_ptrs[v3] = *(unaligned_uint16 *)&RomPtr_8D(v4)[v2];
   }
 }
 
@@ -255,7 +255,7 @@ void PalPreInstr_SwitchIfYpos2(uint16 k) {  // 0x8DED84
 }
 
 void PalPreInstr_DeletePalfxIfMinibossDead(uint16 k) {  // 0x8DEEC5
-  if ((*(uint16 *)&boss_bits_for_area[area_index] & 2) != 0)
+  if ((*(unaligned_uint16 *)&boss_bits_for_area[area_index] & 2) != 0)
     palettefx_ids[k >> 1] = 0;
 }
 
@@ -265,12 +265,12 @@ PairU16 PalInstr_SetPalfxIndex(uint16 k, uint16 j) {  // 0x8DF1C6
 }
 
 void PalPreInstr_F621(uint16 k) {  // 0x8DF621
-  if (*(uint16 *)((uint8 *)&flag_for_palette_fx_objects + k))
+  if (*(unaligned_uint16 *)((uint8 *)&flag_for_palette_fx_objects + k))
     palettefx_ids[k >> 1] = 0;
 }
 
 void PalInit_F779_Brinstar8(uint16 k, uint16 j) {  // 0x8DF730
-  if ((*(uint16 *)&boss_bits_for_area[area_index] & 2) != 0)
+  if ((*(unaligned_uint16 *)&boss_bits_for_area[area_index] & 2) != 0)
     palettefx_ids[j >> 1] = 0;
 }
 

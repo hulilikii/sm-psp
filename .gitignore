@@ -10,3 +10,9 @@
 SDL2.dll
 /sm.exe
 /glsl-shaders/
+EBOOT.PBP
+PARAM.SFO
+/PSP/
+*.elf
+*.prx
+

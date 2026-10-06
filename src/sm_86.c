@@ -2168,13 +2168,13 @@ static void EprojInit_AB07(uint16 j) {  // 0x86AA3D
   VramWriteEntry *v2 = gVramWriteEntry(vram_write_queue_tail);
   v2->size = 64;
   v2->src.addr = addr_kEprojInit_AB07_Tile0;
-  *(uint16 *)&v2->src.bank = 134;
+  *(unaligned_uint16 *)&v2->src.bank = 134;
   v2->vram_dst = 28160;
   v1 += 7;
   VramWriteEntry *v3 = gVramWriteEntry(v1);
   v3->size = 64;
   v3->src.addr = addr_kEprojInit_AB07_Tile1;
-  *(uint16 *)&v3->src.bank = 134;
+  *(unaligned_uint16 *)&v3->src.bank = 134;
   v3->vram_dst = 28416;
   vram_write_queue_tail = v1 + 7;
   int v4 = j >> 1;
@@ -2753,8 +2753,8 @@ void EprojPreInstr_TourianStatueStuff(uint16 k) {  // 0x86BA37
 void sub_86BB30(uint16 j) {  // 0x86BB30
   ExtraEnemyRam8000 *v1 = gExtraEnemyRam8000(cur_enemy_index);
   int v2 = j >> 1;
-  eproj_x_pos[v2] = *(uint16 *)&v1->pad[34];
-  eproj_y_pos[v2] = *(uint16 *)&v1->pad[36];
+  eproj_x_pos[v2] = *(unaligned_uint16 *)&v1->pad[34];
+  eproj_y_pos[v2] = *(unaligned_uint16 *)&v1->pad[36];
   eproj_instr_list_ptr[v2] = off_86BB1E[eproj_init_param_1];
 }
 
