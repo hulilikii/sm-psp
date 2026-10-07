@@ -506,7 +506,7 @@ void mov24(struct LongPtr *a, uint32 d) {
 }
 
 uint32 Load24(const LongPtr *src) {
-  return *(uint32 *)src & 0xffffff;
+  return src->addr | ((uint32)src->bank << 16);
 }
 
 bool Unreachable(void) {

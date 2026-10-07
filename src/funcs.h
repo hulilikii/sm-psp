@@ -1,5 +1,6 @@
 #include "types.h"
 
+void RunOneFrameOfGame(void);
 
 // Bank 80
 uint16 CheckEventHappened(uint16 a);

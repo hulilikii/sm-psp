@@ -18,7 +18,7 @@ uint16 eproj_spawn_varE24;
 #define off_86A64D ((unaligned_uint16*)RomFixedPtr(0x86a64d))
 #define off_86BB1E ((unaligned_uint16*)RomFixedPtr(0x86bb1e))
 #define kCommonEnemySpeeds_Quadratic_Copy ((unaligned_uint16*)RomFixedPtr(0xa0cbc7))
-#define kCommonEnemySpeeds_Quadratic32 ((uint32*)RomFixedPtr(0xa0cbc7))
+#define kCommonEnemySpeeds_Quadratic32 ((unaligned_uint32*)RomFixedPtr(0xa0cbc7))
 #define off_86C040 ((unaligned_uint16*)RomFixedPtr(0x86c040))
 #define off_86C929 ((unaligned_uint16*)RomFixedPtr(0x86c929))
 #define CHECK_locret_868728(i) (unk_868729[i] & 0x80 ? -1 : 0)

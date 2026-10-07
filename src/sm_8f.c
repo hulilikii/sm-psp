@@ -405,8 +405,8 @@ CoroutineRet UnpauseHook_DraygonRoom(void) {  // 0x8FC8FC
 }
 
 void RoomCode_SetCollectedMap(void) {  // 0x8FC90A
-  uint16 v0 = *(uint16 *)&map_station_byte_array[area_index] | 1;
-  *(uint16 *)&map_station_byte_array[area_index] = v0;
+  uint16 v0 = *(unaligned_uint16 *)&map_station_byte_array[area_index] | 1;
+  *(unaligned_uint16 *)&map_station_byte_array[area_index] = v0;
   has_area_map = v0;
 }
 
@@ -418,8 +418,8 @@ void RoomCode_SetZebesTimebombEvent(void) {  // 0x8FC91F
 
 void RoomCode_SetLightHorizRoomShake(void) {  // 0x8FC933
   earthquake_type = 18;
-  *(uint16 *)&room_main_asm_variables[2] = 18;
-  *(uint16 *)room_main_asm_variables = 0;
+  *(unaligned_uint16 *)&room_main_asm_variables[2] = 18;
+  *(unaligned_uint16 *)room_main_asm_variables = 0;
   earthquake_timer = -1;
 }
 
@@ -431,8 +431,8 @@ void RoomCode_SetMediumHorizRoomShake(void) {  // 0x8FC946
 void RoomCode_Escape4_SetMediumHorizRoomShake(void) {  // 0x8FC953
   SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x10, 0x10, 0xb968 });
   earthquake_type = 21;
-  *(uint16 *)&room_main_asm_variables[2] = 21;
-  *(uint16 *)room_main_asm_variables = 0;
+  *(unaligned_uint16 *)&room_main_asm_variables[2] = 21;
+  *(unaligned_uint16 *)room_main_asm_variables = 0;
   earthquake_timer = -1;
 }
 
@@ -488,15 +488,15 @@ void DoorCode_SetScroll_49(void) {  // 0x8FE229
 }
 
 void DoorCode_SetupElevatubeFromSouth(void) {  // 0x8FE26C
-  *(uint16 *)&room_main_asm_variables[4] = -256;
-  *(uint16 *)&room_main_asm_variables[2] = 2496;
-  *(uint16 *)&room_main_asm_variables[6] = -32;
+  *(unaligned_uint16 *)&room_main_asm_variables[4] = -256;
+  *(unaligned_uint16 *)&room_main_asm_variables[2] = 2496;
+  *(unaligned_uint16 *)&room_main_asm_variables[6] = -32;
   CallSomeSamusCode(0);
   SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x01, 0x00, 0xb8f9 });
 }
 
 void DoorCode_SetupElevatubeFromNorth(void) {  // 0x8FE291
-  *(uint16 *)&room_main_asm_variables[4] = 256;
+  *(unaligned_uint16 *)&room_main_asm_variables[4] = 256;
   strcpy((uint8 *)&room_main_asm_variables[2], "@");
   strcpy((uint8 *)&room_main_asm_variables[6], " ");
   CallSomeSamusCode(0);
@@ -508,13 +508,13 @@ void RoomCode_Elevatube(void) {  // 0x8FE2B6
 
   samus_x_pos = 128;
   samus_x_subpos = 0;
-  int32 amt = INT16_SHL8(*(uint16 *)&room_main_asm_variables[4]);
+  int32 amt = INT16_SHL8(*(unaligned_uint16 *)&room_main_asm_variables[4]);
   v0 = (amt + *(uint32 *)room_main_asm_variables) >> 16;
-  *(uint16 *)room_main_asm_variables += amt;
-  *(uint16 *)&room_main_asm_variables[2] = v0;
+  *(unaligned_uint16 *)room_main_asm_variables += amt;
+  *(unaligned_uint16 *)&room_main_asm_variables[2] = v0;
   Samus_MoveDown_NoSolidColl(amt);
-  if ((uint16)(*(uint16 *)&room_main_asm_variables[6] + *(uint16 *)&room_main_asm_variables[4] + 3616) < 0x1C41)
-    *(uint16 *)&room_main_asm_variables[4] += *(uint16 *)&room_main_asm_variables[6];
+  if ((uint16)(*(unaligned_uint16 *)&room_main_asm_variables[6] + *(unaligned_uint16 *)&room_main_asm_variables[4] + 3616) < 0x1C41)
+    *(unaligned_uint16 *)&room_main_asm_variables[4] += *(unaligned_uint16 *)&room_main_asm_variables[6];
 }
 
 void DoorCode_ResetElevatubeNorthExit(void) {  // 0x8FE301
@@ -633,7 +633,7 @@ static const uint16 kRoomCode_SpawnCeresFallingDebris_Tab[16] = {  // 0x8FE525
 };
 
 void RoomCode_SpawnCeresFallingDebris(void) {
-  if (ceres_status && (-- * (uint16 *)room_main_asm_variables, *(int16 *)room_main_asm_variables < 0)) {
+  if (ceres_status && (--*(unaligned_uint16 *)room_main_asm_variables, *(unaligned_int16 *)room_main_asm_variables < 0)) {
     room_main_asm_variables[0] = 8;
     room_main_asm_variables[1] = 0;
     uint16 v0 = (random_number & 0x8000) ? addr_stru_869742 : addr_stru_869734;
@@ -648,8 +648,8 @@ void RoomCode_HandleCeresRidleyGetaway(void) {  // 0x8FE571
 
 void RoomCode_ShakeScreenHorizDiag(void) {  // 0x8FE57C
   uint16 v0;
-  if (*(uint16 *)room_main_asm_variables) {
-    if (!--*(uint16 *)room_main_asm_variables) {
+  if (*(unaligned_uint16 *)room_main_asm_variables) {
+    if (!--*(unaligned_uint16 *)room_main_asm_variables) {
       v0 = 18;
 LABEL_6:
       earthquake_type = v0;
@@ -665,18 +665,18 @@ LABEL_6:
 void RoomCode_ShakeScreenHorizDiagStrong(void) {  // 0x8FE5A4
   int16 v0;
 
-  if (*(uint16 *)room_main_asm_variables) {
-    if (!--*(uint16 *)room_main_asm_variables) {
+  if (*(unaligned_uint16 *)room_main_asm_variables) {
+    if (!--*(unaligned_uint16 *)room_main_asm_variables) {
       v0 = 21;
 LABEL_6:
-      *(uint16 *)&room_main_asm_variables[2] = v0;
+      *(unaligned_uint16 *)&room_main_asm_variables[2] = v0;
     }
   } else if (NextRandom() < 0x180) {
     strcpy((uint8 *)room_main_asm_variables, "*");
     v0 = 26;
     goto LABEL_6;
   }
-  earthquake_type = *(uint16 *)&room_main_asm_variables[2];
+  earthquake_type = *(unaligned_uint16 *)&room_main_asm_variables[2];
   RoomCode_GenRandomExplodes_4th();
 }
 

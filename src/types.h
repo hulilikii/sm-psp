@@ -35,7 +35,7 @@ typedef uint16 VoidP;
 #define sign8(x) ((x) & 0x80)
 #define sign16(x) ((x) & 0x8000)
 #define sign32(x) ((x) & 0x80000000)
-#define load24(x) ((*(uint32*)&(x))&0xffffff)
+#define load24(x) (DWORD(x) & 0xffffff)
 
 #ifdef _MSC_VER
 #define countof _countof
