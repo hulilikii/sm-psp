@@ -1887,7 +1887,7 @@ void LoadEquipmentScreenEquipmentTilemaps(void) {  // 0x82A12B
     }
   }
 
-  p = (uint16*)RomPtr_82(addr_kEquipmentTilemapOffs_Suits);
+  p = (unaligned_uint16*)RomPtr_82(addr_kEquipmentTilemapOffs_Suits);
   for(int i = 0; i < 6; i++) {
     uint16 *target = (uint16*)(g_ram + p[i]);
     if ((collected_items & kEquipmentBitmasks_Suits[i]) != 0) {
@@ -1899,7 +1899,7 @@ void LoadEquipmentScreenEquipmentTilemaps(void) {  // 0x82A12B
     }
   }
   
-  p = (uint16*)RomPtr_82(addr_kEquipmentTilemapOffs_Boots);
+  p = (unaligned_uint16*)RomPtr_82(addr_kEquipmentTilemapOffs_Boots);
   for (int i = 0; i < 3; i++) {
     uint16 *target = (uint16*)(g_ram + p[i]);
     if ((collected_items & kEquipmentBitmasks_Boots[i]) != 0) {

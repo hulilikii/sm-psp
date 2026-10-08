@@ -1030,11 +1030,11 @@ void Crocomire_Func_60(void) {  // 0xA4943D
   E->crocom_var_A += 2;
   g_word_7E0692 = 256;
   croco_cur_vline_idx = 0;
-  g_word_7E0698 = *(uint16 *)((uint8 *)&g_word_A49BC5 + croco_word_7E069A);
+  g_word_7E0698 = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC5 + croco_word_7E069A);
   g_word_7E0694 = g_word_7E0698;
-  g_word_7E0696 = *(uint16 *)((uint8 *)&g_word_A49BC7 + croco_word_7E069A);
-  g_word_7E068E = *(uint16 *)((uint8 *)&g_word_A49BC9 + croco_word_7E069A);
-  uint8 bank = *(uint16 *)((uint8 *)&g_word_A49BCB + croco_word_7E069A);
+  g_word_7E0696 = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC7 + croco_word_7E069A);
+  g_word_7E068E = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC9 + croco_word_7E069A);
+  uint8 bank = *(unaligned_uint16 *)((uint8 *)&g_word_A49BCB + croco_word_7E069A);
   uint16 v6;
   for (i = croco_word_7E069A + 8; ; i = v6 + 4) {
     uint16 v2 = *(uint16 *)((uint8 *)&g_word_A49BC5 + i);

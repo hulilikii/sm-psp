@@ -859,7 +859,7 @@ void LayerBlendingHandler(void);
 void MoveXrayDown(void);
 void MoveXrayUp(void);
 void RoomCode_ScrollingSkyLand(void);
-void RoomMainAsm_ScrollingSky(const uint16 *src);
+void RoomMainAsm_ScrollingSky(const unaligned_uint16 *src);
 void RoomMainAsm_ScrollingSkyOcean(void);
 void RoomSetupAsm_ScrollingSkyOcean(void);
 void SpawnBG3ScrollHdmaObject(void);

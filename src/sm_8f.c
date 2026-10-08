@@ -509,7 +509,7 @@ void RoomCode_Elevatube(void) {  // 0x8FE2B6
   samus_x_pos = 128;
   samus_x_subpos = 0;
   int32 amt = INT16_SHL8(*(unaligned_uint16 *)&room_main_asm_variables[4]);
-  v0 = (amt + *(uint32 *)room_main_asm_variables) >> 16;
+  v0 = (amt + *(unaligned_uint32 *)room_main_asm_variables) >> 16;
   *(unaligned_uint16 *)room_main_asm_variables += amt;
   *(unaligned_uint16 *)&room_main_asm_variables[2] = v0;
   Samus_MoveDown_NoSolidColl(amt);

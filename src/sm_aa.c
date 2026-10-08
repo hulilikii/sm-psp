@@ -1393,7 +1393,7 @@ void Shaktool_Init(void) {  // 0xAADE43
   int v3 = shakto_parameter_2 >> 1;
   E->base.properties |= g_word_AADE95[v3];
   E->shakt_var_E = cur_enemy_index - g_word_AADEA3[v3];
-  E->shakt_var_F = *(uint16 *)((uint8 *)g_off_AADEDB + shakto_parameter_2);
+  E->shakt_var_F = *(unaligned_uint16 *)((uint8 *)g_off_AADEDB + shakto_parameter_2);
   E->shakt_var_C = *(uint16 *)((uint8 *)g_word_AADEE9 + shakto_parameter_2) - g_word_AADEF7[v3];
   E->shakt_var_B = g_word_AADEB1[v3];
   E->base.current_instruction = g_word_AADEB1[v3 + 7];

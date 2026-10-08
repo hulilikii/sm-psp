@@ -1144,7 +1144,7 @@ void Draygon_Func_46(void) {  // 0xA5A13E
     uint16 v1 = Get_Draygon(0)->draygon_var_46 + g_word_A5A19F[(uint16)(v0 - 56) >> 1];
     if ((v1 & 0x8000) == 0) {
       uint16 v2 = v1;
-      if (*(uint16 *)&g_byte_A5CE07[v1] == 0x8080) {
+      if (*(unaligned_uint16 *)&g_byte_A5CE07[v1] == 0x8080) {
         sprite_instr_list_ptrs[v0 >> 1] = 0;
       } else {
         int v3 = v0 >> 1;

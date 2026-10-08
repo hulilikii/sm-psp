@@ -4568,7 +4568,7 @@ const uint16 *CeresSteam_Instr_2(uint16 k, const uint16 *jp) {  // 0xA6F127
   Enemy_CeresSteam *E = Get_CeresSteam(k);
   if (E->csm_var_D-- != 1)
     return INSTR_RETURN_ADDR(jp[0]);
-  return CeresSteam_Instr_3(k, (uint16 *)RomPtr_A6(jp[1]));
+  return CeresSteam_Instr_3(k, (unaligned_uint16 *)RomPtr_A6(jp[1]));
 }
 
 const uint16 *CeresSteam_Instr_3(uint16 k, const uint16 *jp) {  // 0xA6F135
