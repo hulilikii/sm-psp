@@ -2525,9 +2525,9 @@ void HandleGrappleBeamGfx(void) {  // 0x94AFBA
   do {
     int i;
     if (grapple_segment_anim_instr_timers[q]-- == 1) {
-      const uint16 *v9;
+      const unaligned_uint16 *v9;
       for (i = grapple_segment_anim_instr_ptrs[q]; ; ) {
-        v9 = (const uint16 *)RomPtr_94(i);
+        v9 = (const unaligned_uint16 *)RomPtr_94(i);
         if ((*v9 & 0x8000) == 0)
           break;
         i = CallGrappleInstr(*v9 | 0x940000, i + 2);

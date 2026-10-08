@@ -621,7 +621,7 @@ uint16 Kraid_ExecuteInstr(void) {  // 0xA7AF3D
   Enemy_Kraid *E = Get_Kraid(0);
 RESTART:;
   uint16 kraid_var_B = E->kraid_var_B;
-  const uint16 *v2 = (const uint16 *)RomPtr_A7(kraid_var_B);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_A7(kraid_var_B);
   uint16 result = *v2;
   if (*v2 != 0xFFFF) {
     if ((int16)(*v2 + 1) < 0) {
@@ -1205,7 +1205,7 @@ void KraidsFoot_SecondPhase_Thinking(void) {  // 0xA7BA2E
     v4 = random_number & 0x1C;
     if (!sign16(v4 - 16))
       v4 = 16;
-    const uint16 *v5 = (const uint16 *)RomPtr_A7(g_word_A7BA7D[(v2 >> 1) + 1] + v4);
+    const unaligned_uint16 *v5 = (const unaligned_uint16 *)RomPtr_A7(g_word_A7BA7D[(v2 >> 1) + 1] + v4);
     uint16 v6 = v5[1];
     if ((int16)(*v5 - E0->base.x_pos) >= 0)
       Kraid_SetWalkingBackwards(v6, *v5);
@@ -3083,7 +3083,7 @@ PairU16 Phantoon_SetColorBasedOnHp_FindEntry(uint16 k) {  // 0xA7DC0F
     r20 += r18;
     ++r22;
   } while (sign16(r22 - 7));
-  const uint16 *v1 = (const uint16 *)RomPtr_A7(r24 + g_off_A7DC4A[r22]);
+  const unaligned_uint16 *v1 = (const unaligned_uint16 *)RomPtr_A7(r24 + g_off_A7DC4A[r22]);
   return MakePairU16(r24, *v1);
 }
 

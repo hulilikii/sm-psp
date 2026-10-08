@@ -3612,7 +3612,7 @@ void Ridley_Func_92(void) {  // 0xA6D2D6
 
 void Ridley_Func_93(uint16 j, uint16 k) {  // 0xA6D3B4
   uint16 *dst = (uint16*)(g_ram + j);
-  const uint16 *src = (const uint16 *)RomPtr_A6(k);
+  const unaligned_uint16 *src = (const unaligned_uint16 *)RomPtr_A6(k);
   int v3 = 7;
   do {
     *dst = *src;
@@ -4054,7 +4054,7 @@ void Ridley_Func_118(void) {  // 0xA6DA0C
     uint16 v3, *v4;
     for (i = E->ridley_var_05; ; E->ridley_var_05 = i) {
       v3 = i;
-      v4 = (uint16 *)RomPtr_A6(i);
+      v4 = (unaligned_uint16 *)RomPtr_A6(i);
       i = *v4;
       if ((*v4 & 0x8000) == 0)
         break;
@@ -4148,7 +4148,7 @@ static int BabyMetroid_DBCB_DoubleRetEx(uint16 a) {
   if ((st->ip & 0x8000) == 0)
     return -1;  // double ret
   uint16 v2 = st->ip;
-  const uint16 *v3 = (uint16 *)RomPtr_A6(v2);
+  const unaligned_uint16 *v3 = (unaligned_uint16 *)RomPtr_A6(v2);
   if (sign16(v3[0]))
     goto LABEL_7;
   if (st->timer != v3[0]) {
@@ -4157,7 +4157,7 @@ static int BabyMetroid_DBCB_DoubleRetEx(uint16 a) {
   }
   v2 += 4;
   for (; ; ) {
-    v3 = (uint16 *)RomPtr_A6(v2);
+    v3 = (unaligned_uint16 *)RomPtr_A6(v2);
     if (!sign16(v3[0]))
       break;
 LABEL_7:

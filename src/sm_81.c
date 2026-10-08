@@ -1979,7 +1979,7 @@ void SelectFileSelectMapArea(void) {  // 0x81A8A9
   area_index = kFileSelectMap_AreaIndexes[file_select_map_area_index];
   uint16 q = *(unaligned_uint16 *)&used_save_stations_and_elevators[2 * area_index];
   uint16 v0 = 0;
-  const uint16 *r0 = (const uint16 *)RomPtr_82(GET_WORD(RomPtr_82(addr_kMapIconDataPointers + 64 + 2 * area_index)));
+  const unaligned_uint16 *r0 = (const unaligned_uint16 *)RomPtr_82(GET_WORD(RomPtr_82(addr_kMapIconDataPointers + 64 + 2 * area_index)));
   uint16 r20 = 16;
   while (1) {
     v2 = q & 1;
@@ -2043,7 +2043,7 @@ void DrawAreaSelectMapLabels(void) {
     r3 = (i == file_select_map_area_index) ? 0 : 512;
     uint16 v1 = 2 * kFileSelectMap_AreaIndexes[i];
     uint16 r36 = *(unaligned_uint16 *)&used_save_stations_and_elevators[v1];
-    const uint16 *v2 = (const uint16 *)RomPtr_82(*(unaligned_uint16 *)((uint8 *)&kMapIconDataPointers[4].crateria + v1));
+    const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_82(*(unaligned_uint16 *)((uint8 *)&kMapIconDataPointers[4].crateria + v1));
     int R30 = 16;
     while (*v2 != 0xffff) {
       int v4 = r36 & 1;
@@ -2238,7 +2238,7 @@ void FileSelectMap_10_RoomSelectMap(void) {  // 0x81AD7F
       --v1;
     } while (v1 >= 0);
 
-    const uint16 *r0 = (const uint16 *)RomPtr_82(GET_WORD(RomPtr_82(addr_kMapIconDataPointers + 64 + 2 * area_index)));
+    const unaligned_uint16 *r0 = (const unaligned_uint16 *)RomPtr_82(GET_WORD(RomPtr_82(addr_kMapIconDataPointers + 64 + 2 * area_index)));
     v3 = 4 * load_station_index;
     uint16 r18 = r0[v3 >> 1];
     uint16 r20 = r0[(v3 >> 1) + 1];

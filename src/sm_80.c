@@ -1283,22 +1283,22 @@ void AddMissilesToHudTilemap(void) {
 }
 
 void AddSuperMissilesToHudTilemap(void) {  // 0x809A0E
-  AddToTilemapInner(0x1C, (const uint16*)RomPtr_80(addr_kHudTilemaps_Missiles + 12));
+  AddToTilemapInner(0x1C, (const unaligned_uint16*)RomPtr_80(addr_kHudTilemaps_Missiles + 12));
 }
 
 void AddPowerBombsToHudTilemap(void) {  // 0x809A1E
-  AddToTilemapInner(0x22, (const uint16 *)RomPtr_80(addr_kHudTilemaps_Missiles + 20));
+  AddToTilemapInner(0x22, (const unaligned_uint16 *)RomPtr_80(addr_kHudTilemaps_Missiles + 20));
 }
 
 void AddGrappleToHudTilemap(void) {  // 0x809A2E
-  AddToTilemapInner(0x28, (const uint16 *)RomPtr_80(addr_kHudTilemaps_Missiles + 28));
+  AddToTilemapInner(0x28, (const unaligned_uint16 *)RomPtr_80(addr_kHudTilemaps_Missiles + 28));
 }
 
 void AddXrayToHudTilemap(void) {  // 0x809A3E
-  AddToTilemapInner(0x2E, (const uint16 *)RomPtr_80(addr_kHudTilemaps_Missiles + 36));
+  AddToTilemapInner(0x2E, (const unaligned_uint16 *)RomPtr_80(addr_kHudTilemaps_Missiles + 36));
 }
 
-void AddToTilemapInner(uint16 k, const uint16 *j) {  // 0x809A4C
+void AddToTilemapInner(uint16 k, const unaligned_uint16 *j) {  // 0x809A4C
   int v2 = k >> 1;
   if ((hud_tilemap[v2] & 0x3FF) == 15) {
     hud_tilemap[v2] = j[0];
@@ -1347,7 +1347,7 @@ static const uint16 kEnergyTankIconTilemapOffsets[14] = { 0x42, 0x44, 0x46, 0x48
 
 void HandleHudTilemap(void) {  // 0x809B44
   if (reserve_health_mode == 1) {
-    const uint16 *v1 = (const uint16 *)RomPtr_80(addr_kHudTilemaps_AutoReserve);
+    const unaligned_uint16 *v1 = (const unaligned_uint16 *)RomPtr_80(addr_kHudTilemaps_AutoReserve);
     if (!samus_reserve_health)
       v1 += 6;
     hud_tilemap[8] = v1[0];

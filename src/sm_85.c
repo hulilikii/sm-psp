@@ -91,7 +91,7 @@ static uint16 WriteMessageTilemap(void) {  // 0x8582B8
   uint16 v1 = 32;
   uint16 v2 = 0;
   do {
-    ram3000.pause_menu_map_tilemap[v1 + 256] = *(uint16 *)&RomPtr_85(r0)[v2];
+    ram3000.pause_menu_map_tilemap[v1 + 256] = *(unaligned_uint16 *)&RomPtr_85(r0)[v2];
     ++v1;
     v2 += 2;
   } while (--n);

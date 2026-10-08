@@ -1708,7 +1708,7 @@ void HdmaobjPreInstr_SkyLandBG2Xscroll2(uint16 k) {  // 0x88ADBA
     HdmaobjPreInstr_SkyLandBG2XscrollInner(k);
 }
 
-void RoomMainAsm_ScrollingSky(const uint16 *src) {  // 0x88AFA3
+void RoomMainAsm_ScrollingSky(const unaligned_uint16 *src) {  // 0x88AFA3
   if (time_is_frozen_flag) {
     WORD(scrolling_sky_bg2_indirect_hdma[0]) = 0;
   } else {

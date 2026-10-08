@@ -367,9 +367,9 @@ void ProcessDemoInputObject(void) {  // 0x9183F2
   CallDemoPreInstr(demo_input_pre_instr | 0x910000);
   if (!--demo_input_instr_timer) {
     uint16 v0 = demo_input_instr_ptr;
-    uint16 *v1;
+    unaligned_uint16 *v1;
     while (1) {
-      v1 = (uint16 *)RomPtr_91(v0);
+      v1 = (unaligned_uint16 *)RomPtr_91(v0);
       uint16 v2 = *v1;
       if ((*v1 & 0x8000) == 0)
         break;

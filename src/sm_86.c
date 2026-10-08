@@ -1159,7 +1159,7 @@ uint16 MoveEprojWithVelocityX(uint16 k) {  // 0x869311
 
 void SetAreaDependentEprojPropertiesEx(uint16 k, uint16 j) {  // 0x86932F
   uint16 v2;
-  uint16 *p = (uint16 *)RomPtr_86(k);
+  unaligned_uint16 *p = (unaligned_uint16 *)RomPtr_86(k);
   if (area_index == 2) {
     v2 = p[1];
   } else if (area_index == 5) {
@@ -2199,7 +2199,7 @@ const uint8 *EprojInstr_SpawnEnemyDrops(uint16 k, const uint8 *epjp) {  // 0x86A
 }
 
 static void Eproj_InitXYVelRandom(uint16 j, uint16 k, Point16U pt) {  // 0x86ABAE
-  const uint16 *v2 = (const uint16 *)RomPtr_86(k);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_86(k);
   int v3 = j >> 1;
   eproj_instr_list_ptr[v3] = *v2;
   eproj_x_pos[v3] = v2[1] + pt.x;

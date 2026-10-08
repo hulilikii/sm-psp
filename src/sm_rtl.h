@@ -170,7 +170,7 @@ extern const int16 kSinCosTable8bit_Sext[320];
 #define kSamusAnimationDelayData ((unaligned_uint16*)RomFixedPtr(0x91b010))
 #define kCommonEnemySpeeds_Linear ((unaligned_uint16*)RomFixedPtr(0xa28187))
 #define kCommonEnemySpeeds_Quadratic ((unaligned_uint16*)RomFixedPtr(0xa2838f))
-#define kCommonEnemySpeeds_Quadratic32 ((uint32*)RomFixedPtr(0xa0cbc7))
+#define kCommonEnemySpeeds_Quadratic32 ((unaligned_uint32*)RomFixedPtr(0xa0cbc7))
 #define kSine16bit ((unaligned_uint16*)RomFixedPtr(0xa0b1c3))
 #define kTanTable ((unaligned_uint16*)RomFixedPtr(0x91c9d4))
 

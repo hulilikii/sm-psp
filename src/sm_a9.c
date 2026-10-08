@@ -1468,13 +1468,13 @@ uint16 MotherBrain_Instr_DisableNeckMovement(uint16 k) {  // 0xA99B20
 }
 
 uint16 MotherBrain_Instr_QueueSfx2(uint16 k) {  // 0xA99B28
-  const uint16 *v2 = (const uint16 *)RomPtr_A9(k);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_A9(k);
   QueueSfx2_Max6(*v2);
   return k + 2;
 }
 
 uint16 MotherBrain_Instr_QueueSfx3(uint16 k) {  // 0xA99B32
-  const uint16 *v2 = (const uint16 *)RomPtr_A9(k);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_A9(k);
   QueueSfx3_Max6(*v2);
   return k + 2;
 }
@@ -1583,7 +1583,7 @@ uint16 MotherBrain_Instr_SetShitroidAttackCtr0(uint16 k) {  // 0xA99EB5
 }
 
 uint16 MotherBrain_Instr_SpawnBombEproj(uint16 k) {  // 0xA99EBD
-  const uint16 *v2 = (const uint16 *)RomPtr_A9(k);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 *)RomPtr_A9(k);
   SpawnEprojWithRoomGfx(addr_kEproj_MotherBrainBomb, *v2);
   return k + 2;
 }
@@ -1727,7 +1727,7 @@ void MotherBrain_GenerateExplosions(uint16 a, uint16 r22, uint16 r24) {  // 0xA9
       v9 = v4;
       int v5 = v3 >> 1;
       eproj_spawn_pt = (Point16U){ g_word_A9B099[v5], g_word_A9B099[v5 + 1] };
-      const uint16 *v6 = (const uint16 *)RomPtr_A9(r22);
+      const unaligned_uint16 *v6 = (const unaligned_uint16 *)RomPtr_A9(r22);
       uint16 v7 = *v6;
       uint16 Random = NextRandom();
       if (Random >= 0x4000) {
@@ -3759,7 +3759,7 @@ void ShitroidInCutscene_MoveToSamus(uint16 k) {  // 0xA9C9C3
   if ((random_number & 0xFFF) >= 0xFA0)
     QueueSfx2_Max6(0x52);
   uint16 sice_var_0E = E->sice_var_0E;
-  const uint16 *v3 = (const uint16 *)RomPtr_A9(sice_var_0E);
+  const unaligned_uint16 *v3 = (const unaligned_uint16 *)RomPtr_A9(sice_var_0E);
   Rect16U rect = { v3[0], v3[1], 4, 4 };
   CallShitroidMoveFunc(v3[3] | 0xA90000, k, v3[2], rect.x, rect.y);
   if (!Shitroid_Func_2(k, rect)) {
@@ -4186,7 +4186,7 @@ uint16 HandleMotherBrainInstructionList(uint16 a) {  // 0xA9D192
   if ((st->ip & 0x8000) == 0)
     return 0;
   uint16 v2 = st->ip;
-  const uint16 *v3 = (uint16 *)RomPtr_A9(v2);
+  const unaligned_uint16 *v3 = (unaligned_uint16 *)RomPtr_A9(v2);
   if (sign16(v3[0]))
     goto LABEL_8;
   if (st->timer != v3[0]) {
@@ -4195,7 +4195,7 @@ uint16 HandleMotherBrainInstructionList(uint16 a) {  // 0xA9D192
   }
   v2 += 4;
   for (; ; ) {
-    v3 = (uint16 *)RomPtr_A9(v2);
+    v3 = (unaligned_uint16 *)RomPtr_A9(v2);
     if (!sign16(v3[0]))
       break;
 LABEL_8:

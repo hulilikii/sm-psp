@@ -972,9 +972,9 @@ void OptionsMenuFunc2(uint16 k) {  // 0x828C2B
   int v2 = optionsmenu_index >> 1;
   if (optionsmenu_instr_timer[v2]-- == 1) {
     uint16 v4 = optionsmenu_instr_ptr[v2];
-    uint16 *v5;
+    unaligned_uint16 *v5;
     while (1) {
-      v5 = (uint16 *)RomPtr_82(v4);
+      v5 = (unaligned_uint16 *)RomPtr_82(v4);
       if ((v5[0] & 0x8000) == 0)
         break;
       v4 = CallOptionsInstr(v5[0] | 0x820000, v1, v4 + 2);
@@ -1688,7 +1688,7 @@ void DrawRoomSelectMap(void) {  // 0x829517
 }
 
 void DrawRoomSelectMapAreaLabel(uint16 *dst) {  // 0x829628
-  const uint16 *v2 = (const uint16 * )RomPtr_82(kPauseAreaLabelTilemap[area_index]);
+  unaligned_uint16 *v2 = (unaligned_uint16 * )RomPtr_82(kPauseAreaLabelTilemap[area_index]);
   for(int i = 0; i < 12; i++)
     dst[i] = v2[i] & 0xEFFF;
 }
