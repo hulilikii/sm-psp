@@ -763,7 +763,7 @@ const uint16 *Torizo_Instr_58(uint16 k, const uint16 *jp) {  // 0xAAD0F3
   int16 v2;
 
   v2 = 34;
-  while (*(uint16 *)((uint8 *)eproj_id + (uint16)v2) != 0xB1C0) {
+  while (*(unaligned_uint16 *)((uint8 *)eproj_id + (uint16)v2) != 0xB1C0) {
     v2 -= 2;
     if (v2 < 0)
       return jp + 1;
@@ -1534,7 +1534,7 @@ void ChozoStatue_Main(void) {  // 0xAAE7A7
 }
 
 void Shaktool_PreInstr_0(uint16 k) {  // 0xAAE7AE
-  if ((*(uint16 *)&boss_bits_for_area[area_index] & 1) != 0) {
+  if ((*(unaligned_uint16 *)&boss_bits_for_area[area_index] & 1) != 0) {
     Enemy_Shaktool *E = Get_Shaktool(k);
     if (E->shakt_parameter_1) {
       E->base.current_instruction = addr_kShaktool_Ilist_E461;

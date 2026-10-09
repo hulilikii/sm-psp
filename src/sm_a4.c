@@ -1037,11 +1037,11 @@ void Crocomire_Func_60(void) {  // 0xA4943D
   uint8 bank = *(unaligned_uint16 *)((uint8 *)&g_word_A49BCB + croco_word_7E069A);
   uint16 v6;
   for (i = croco_word_7E069A + 8; ; i = v6 + 4) {
-    uint16 v2 = *(uint16 *)((uint8 *)&g_word_A49BC5 + i);
+    uint16 v2 = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC5 + i);
     if (v2 == 0xFFFF)
       break;
     v6 = i;
-    uint16 v3 = *(uint16 *)((uint8 *)&g_word_A49BC7 + i);
+    uint16 v3 = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC7 + i);
     int n = g_word_7E068E;
     do {
       *(uint16 *)&g_ram[v3] = GET_WORD(RomPtrWithBank(bank, v2));
@@ -1063,17 +1063,17 @@ void Crocomire_Func_62(void) {  // 0xA494B6
 
   uint16 v0 = g_word_7E068A;
   uint16 v1 = vram_write_queue_tail;
-  if (*(uint16 *)((uint8 *)&g_word_A49BC5 + g_word_7E068A) == 0xFFFF) {
+  if (*(unaligned_uint16 *)((uint8 *)&g_word_A49BC5 + g_word_7E068A) == 0xFFFF) {
     Enemy_Crocomire *E = Get_Crocomire(cur_enemy_index);
     ++E->crocom_var_A;
     ++E->crocom_var_A;
     g_word_7E068A = 0;
   } else {
     v2 = gVramWriteEntry(vram_write_queue_tail);
-    v2->size = *(uint16 *)((uint8 *)&g_word_A49BC5 + g_word_7E068A);
-    v2->src.addr = *(uint16 *)((uint8 *)&g_word_A49BCB + v0);
-    *(uint16 *)&v2->src.bank = *(uint16 *)((uint8 *)&g_word_A49BC9 + v0);
-    v2->vram_dst = *(uint16 *)((uint8 *)&g_word_A49BC7 + v0);
+    v2->size = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC5 + g_word_7E068A);
+    v2->src.addr = *(unaligned_uint16 *)((uint8 *)&g_word_A49BCB + v0);
+    *(unaligned_uint16 *)&v2->src.bank = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC9 + v0);
+    v2->vram_dst = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC7 + v0);
     g_word_7E068A = v0 + 8;
     vram_write_queue_tail = v1 + 7;
   }
@@ -1232,15 +1232,15 @@ uint16 Crocomire_Func_67(void) {  // 0xA496C8
   while (1) {
     v7 = g_word_7E068A + croco_word_7E069A;
     v8 = vram_write_queue_tail;
-    if (*(uint16 *)((uint8 *)&g_word_A49BC5 + v7) != 0xFFFF)
+    if (*(unaligned_uint16 *)((uint8 *)&g_word_A49BC5 + v7) != 0xFFFF)
       break;
     g_word_7E068A = 0;
   }
   VramWriteEntry *v9 = gVramWriteEntry(vram_write_queue_tail);
-  v9->size = *(uint16 *)((uint8 *)&g_word_A49BC5 + v7);
-  v9->src.addr = *(uint16 *)((uint8 *)&g_word_A49BCB + v7);
-  *(uint16 *)&v9->src.bank = *(uint16 *)((uint8 *)&g_word_A49BC9 + v7);
-  v9->vram_dst = *(uint16 *)((uint8 *)&g_word_A49BC7 + v7);
+  v9->size = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC5 + v7);
+  v9->src.addr = *(unaligned_uint16 *)((uint8 *)&g_word_A49BCB + v7);
+  *(unaligned_uint16 *)&v9->src.bank = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC9 + v7);
+  v9->vram_dst = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC7 + v7);
   vram_write_queue_tail = v8 + 7;
   g_word_7E068A += 8;
   return 1;

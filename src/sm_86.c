@@ -2933,9 +2933,9 @@ static void EprojInit_MotherBrainRoomTurretBullets(uint16 j) {  // 0x86BF59
 void EprojPreInstr_MotherBrainRoomTurrets(uint16 k) {  // 0x86BFDF
   if (Eproj_MotherBrainRoomTurretBullets_CheckIfTurretOnScreen(k) & 1) {
     if (gRam7800_Default(0)->var_1D)
-      *(uint16 *)((uint8 *)eproj_id + k) = 0;
+      *(unaligned_uint16 *)((uint8 *)eproj_id + k) = 0;
   } else if (gRam7800_Default(0)->var_1D) {
-    *(uint16 *)((uint8 *)eproj_id + k) = 0;
+    *(unaligned_uint16 *)((uint8 *)eproj_id + k) = 0;
     int v5 = k >> 1;
     eproj_spawn_pt = (Point16U){ eproj_x_pos[v5], eproj_y_pos[v5] };
     SpawnEprojWithRoomGfx(addr_kEproj_DustCloudExplosion, 0xC);

@@ -1579,10 +1579,10 @@ void SpcPlayer_Upload(SpcPlayer *p, const uint8_t *data) {
   Dsp_Write(p, KOF, 0xff);
 
   for (;;) {
-    int numbytes = *(uint16 *)(data);
+    int numbytes = *(unaligned_uint16 *)(data);
     if (numbytes == 0)
       break;
-    int target = *(uint16 *)(data + 2);
+    int target = *(unaligned_uint16 *)(data + 2);
     data += 4;
     do {
       p->ram[target++ & 0xffff] = *data++;

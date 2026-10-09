@@ -1611,12 +1611,12 @@ void PauseHook_Kraid(void) {  // 0xA7C325
 
   uint16 v0 = vram_read_queue_tail;
   v1 = vram_read_queue_tail;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].vram_target + vram_read_queue_tail) = ((reg_BG12NBA & 0xFC) << 8) + 15872;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v1) = 129;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + vram_read_queue_tail) = ((reg_BG12NBA & 0xFC) << 8) + 15872;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v1) = 129;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
-  *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = 20480;
-  *(uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
-  *(uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 1024;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].src.addr + v0) = 20480;
+  *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
+  *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 1024;
   vram_read_queue_tail = v0 + 9;
 }
 
@@ -1904,11 +1904,11 @@ void Kraid_FadeInBg_FadeInBp6(void) {  // 0xA7C815
 
   if (AdvancePaletteFade_BgPalette6() & 1) {
     QueueMusic_Delayed8(3);
-    v0 = *(uint16 *)&boss_bits_for_area[area_index];
+    v0 = *(unaligned_uint16 *)&boss_bits_for_area[area_index];
     if ((v0 & 1) != 0) {
       Get_Kraid(0)->kraid_var_A = FUNC16(Kraid_FadeInBg_SetEnemyDead_KraidWasDead);
     } else {
-      *(uint16 *)&boss_bits_for_area[area_index] = v0 | 1;
+      *(unaligned_uint16 *)&boss_bits_for_area[area_index] = v0 | 1;
       Get_Kraid(0)->kraid_var_A = FUNC16(Kraid_FadeInBg_SetEnemyDead_KraidWasAlive);
     }
   }
@@ -3027,7 +3027,7 @@ void Phantoon_Dead(uint16 k) {  // 0xA7DB3D
       E1->base.properties = v4;
       Get_Phantoon(0x80)->base.properties = v4;
       Get_Phantoon(0xC0)->base.properties = v4;
-      *(uint16 *)&boss_bits_for_area[area_index] |= 1;
+      *(unaligned_uint16 *)&boss_bits_for_area[area_index] |= 1;
       SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x00, 0x06, 0xb78b });
       QueueMusic_Delayed8(3);
     }

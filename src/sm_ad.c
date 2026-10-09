@@ -42,15 +42,15 @@ void MotherBrain_CalcHdma(void) {  // 0xADDE00
 void MotherBrain_CalcHdma_BeamAimedRight2(void) {  // 0xADDE7F
   Enemy_MotherBrain *E = Get_MotherBrain(0);
   MotherBrain_CalcHdma_BeamAimedRight(E->mbn_var_3C, E->mbn_var_3E);
-  *(uint16 *)mother_brain_indirect_hdma = 16;
-  *(uint16 *)&mother_brain_indirect_hdma[1] = -25600;
-  *(uint16 *)&mother_brain_indirect_hdma[3] = 16;
-  *(uint16 *)&mother_brain_indirect_hdma[4] = -25597;
-  *(uint16 *)&mother_brain_indirect_hdma[6] = 240;
-  *(uint16 *)&mother_brain_indirect_hdma[7] = -25340;
-  *(uint16 *)&mother_brain_indirect_hdma[9] = 244;
-  *(uint16 *)&mother_brain_indirect_hdma[10] = -25108;
-  *(uint16 *)&mother_brain_indirect_hdma[12] = 0;
+  *(unaligned_uint16 *)mother_brain_indirect_hdma = 16;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[1] = -25600;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[3] = 16;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[4] = -25597;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[6] = 240;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[7] = -25340;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[9] = 244;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[10] = -25108;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[12] = 0;
 }
 
 void MotherBrain_CalcHdma_BeamAimedRight(uint16 r22, uint16 r24) {  // 0xADDECE
@@ -104,27 +104,27 @@ static Func_CalcHdma *const off_ADE024[4] = {  // 0xADDF6E
 void MotherBrain_CalcHdma_BeamAimedUp(void) {
   Enemy_MotherBrain *E = Get_MotherBrain(0);
   off_ADE024[(E->mbn_var_3A >> 6) & 2 | (E->mbn_var_3B >> 7) & 1](E->mbn_var_3C, E->mbn_var_3E);
-  *(uint16 *)mother_brain_indirect_hdma = 16;
-  *(uint16 *)&mother_brain_indirect_hdma[1] = -25344;
-  *(uint16 *)&mother_brain_indirect_hdma[3] = 16;
-  *(uint16 *)&mother_brain_indirect_hdma[4] = -25342;
+  *(unaligned_uint16 *)mother_brain_indirect_hdma = 16;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[1] = -25344;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[3] = 16;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[4] = -25342;
 
   uint16 v2 = E->mbn_var_3D - 32;
   printf("Carry crap!\n");
   if (v2 >= 0x80) {
-    *(uint16 *)&mother_brain_indirect_hdma[6] = (v2 - 127) | 0x80;
-    *(uint16 *)&mother_brain_indirect_hdma[7] = -25340;
-    *(uint16 *)&mother_brain_indirect_hdma[9] = 255;
-    *(uint16 *)&mother_brain_indirect_hdma[10] = 2 * (v2 - 127) - 25340;
-    *(uint16 *)&mother_brain_indirect_hdma[12] = 127;
-    *(uint16 *)&mother_brain_indirect_hdma[13] = 2 * (v2 - 127) - 25340 + 254;
-    *(uint16 *)&mother_brain_indirect_hdma[15] = 0;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[6] = (v2 - 127) | 0x80;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[7] = -25340;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[9] = 255;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[10] = 2 * (v2 - 127) - 25340;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[12] = 127;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[13] = 2 * (v2 - 127) - 25340 + 254;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[15] = 0;
   } else {
-    *(uint16 *)&mother_brain_indirect_hdma[6] = v2 | 0x80;
-    *(uint16 *)&mother_brain_indirect_hdma[7] = -25340;
-    *(uint16 *)&mother_brain_indirect_hdma[9] = 127;
-    *(uint16 *)&mother_brain_indirect_hdma[10] = 2 * v2 - 25340;
-    *(uint16 *)&mother_brain_indirect_hdma[12] = 0;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[6] = v2 | 0x80;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[7] = -25340;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[9] = 127;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[10] = 2 * v2 - 25340;
+    *(unaligned_uint16 *)&mother_brain_indirect_hdma[12] = 0;
   }
 }
 
@@ -216,15 +216,15 @@ static Func_CalcHdma *const g_off_ADE20E[4] = { MotherBrain_CalcHdma_Down_DownRi
 void MotherBrain_CalcHdma_Down(void) {  // 0xADE1A6
   Enemy_MotherBrain *E = Get_MotherBrain(0);
   g_off_ADE20E[(E->mbn_var_3A >> 6) & 2 | (E->mbn_var_3B >> 7) & 1](E->mbn_var_3C, E->mbn_var_3E);
-  *(uint16 *)mother_brain_indirect_hdma = 16;
-  *(uint16 *)&mother_brain_indirect_hdma[1] = -25600;
-  *(uint16 *)&mother_brain_indirect_hdma[3] = 16;
-  *(uint16 *)&mother_brain_indirect_hdma[4] = -25597;
-  *(uint16 *)&mother_brain_indirect_hdma[6] = 240;
-  *(uint16 *)&mother_brain_indirect_hdma[7] = -25340;
-  *(uint16 *)&mother_brain_indirect_hdma[9] = 244;
-  *(uint16 *)&mother_brain_indirect_hdma[10] = -25114;
-  *(uint16 *)&mother_brain_indirect_hdma[12] = 0;
+  *(unaligned_uint16 *)mother_brain_indirect_hdma = 16;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[1] = -25600;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[3] = 16;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[4] = -25597;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[6] = 240;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[7] = -25340;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[9] = 244;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[10] = -25114;
+  *(unaligned_uint16 *)&mother_brain_indirect_hdma[12] = 0;
 }
 
 void MotherBrain_CalcHdma_Down_DownRight(uint16 r22, uint16 r24) {  // 0xADE216
