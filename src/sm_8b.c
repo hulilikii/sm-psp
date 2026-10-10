@@ -546,7 +546,8 @@ void ProcessCinematicBgObject_DrawChar(uint16 k, uint16 j, uint16 r18) {  // 0x8
   cinematicbg_var1 = cinematicbg_var1 == 0;
   SpawnTextGlowObject(j, r18);
   const uint8 *v2 = RomPtr_8C(cinematicbg_instr_ptr[k >> 1]);
-  if (*((int16 *)v2 + 3) < 0) {
+  int16 v2_word6 = (int16)(v2[6] | ((uint16)v2[7] << 8));
+  if (v2_word6 < 0) {
     cinematicbg_arr7[15] = 8;
     v3 = 8 * (v2[3] + 2);
   } else {
