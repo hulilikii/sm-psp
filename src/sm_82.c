@@ -691,6 +691,10 @@ RESUME_AT_SWITCH:
     PspDebugMarker(0xC2000000u | ((uint32)game_state & 0xFFFFu));
     last_logged_game_state = game_state;
   }
+  // Diagnostic: record the dispatch index and current game state
+  // on every call, not only when game_state changes.
+  PspDebugMarker(84000000u + ((uint32)st & 0xFFFFu));
+  PspDebugMarker(85000000u + ((uint32)game_state & 0xFFFFu));
   PspDebugMarker(8301);  // Immediately before game-state dispatch
   COROUTINE_AWAIT_ONLY(kGameStateFuncs[st - 10]());
   PspDebugMarker(8302);  // Game-state dispatch returned
