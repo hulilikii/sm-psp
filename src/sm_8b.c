@@ -2114,18 +2114,41 @@ uint16 CinematicSetPal4(uint16 k, uint16 j) {  // 0x8BA2A6
 }
 
 CoroutineRet GameState_37_CeresGoesBoomWithSamus_(void) {  // 0x8BA35B
+PspDebugMarker(8330);  // Enter cinematic dispatch
+PspDebugMarker(83600u + (cinematic_function & 0xFF));  // Low byte
+PspDebugMarker(83900u + ((cinematic_function >> 8) & 0xFF));  // High byte
   CallCinematicFunction(cinematic_function | 0x8B0000);
+  PspDebugMarker(8331);  // Cinematic dispatch returned
+  
   if ((cinematic_var11 & 0x8000) == 0)
     ++cinematic_var11;
   ++cinematic_var12;
+  
+  PspDebugMarker(8332);  // Counters updated
   HandleSamusDuringIntro();
+  PspDebugMarker(8341);  // HandleSamusDuringIntro returned
+  
   HandleCinematicSprites();
+  PspDebugMarker(8343);  // HandleCinematicSprites returned
+  
   HandleMode7Objects();
+  PspDebugMarker(8345);  // HandleMode7Objects returned
+  
   HandleCinematicBgObjects();
+  PspDebugMarker(8347);  // HandleCinematicBgObjects returned
+  
   HandleTextGlowObjects();
+  PspDebugMarker(8349);  // HandleTextGlowObjects returned
+  
   PaletteFxHandler();
+  PspDebugMarker(8351);  // PaletteFxHandler returned
+  
   DrawIntroSprites();
+  PspDebugMarker(8353);  // DrawIntroSprites returned
+  
   HandleMode7TransformationMatrix();
+   PspDebugMarker(8355);  // HandleMode7TransformationMatrix returned
+   PspDebugMarker(8356);  // Handler completed
   return kCoroutineNone;
 }
 
