@@ -8,7 +8,7 @@
 #include "util.h"
 #ifdef __PSP__
 #include "platform/psp/psp_debug_log.h"
-#define PSP_RTL_MARKER(m) do { if (game_state == 1) PspDebugMarker(m); } while (0)
+#define PSP_RTL_MARKER(m) PspDebugMarker(m)
 #else
 #define PSP_RTL_MARKER(m) ((void)0)
 #endif

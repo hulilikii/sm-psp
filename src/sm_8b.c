@@ -4,6 +4,7 @@
 #include "funcs.h"
 #include "variables.h"
 #include "platform/psp/psp_debug_log.h"
+#include <stdbool.h>
 
 
 #define kPalettes_Intro ((unaligned_uint16*)RomFixedPtr(0x8ce3e9))
@@ -1594,10 +1595,16 @@ uint16 IntroObject_SetTimer(uint16 k, uint16 j) {  // 0x8B9A17
 
 CoroutineRet GameState_1_OpeningCinematic_(void) {  // 0x8B9A22
 static uint16 last_logged_cinematic_function = 0xFFFF;
+static bool have_logged_cinematic_function;
 
-  if (cinematic_function != last_logged_cinematic_function) {
+  if (!PspDebugLog_IsEnabled())
+   have_logged_cinematic_function = false;
+
+  if (!have_logged_cinematic_function ||
+      cinematic_function != last_logged_cinematic_function) {
     PspDebugMarker(0xC1000000u | ((uint32)cinematic_function & 0xFFFFu));
     last_logged_cinematic_function = cinematic_function;
+    have_logged_cinematic_function = true;
   }
 
   PspDebugMarker(8201);

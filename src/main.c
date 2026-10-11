@@ -164,7 +164,7 @@ int main(int argc, char **argv) {
   SetupFilesystem();
   PspInput_Init();
   g_debug_circle_prev_down = false;
-  PspDebugLog_Init(false);
+  PspDebugLog_Init(true);
  
   ParseConfigFile(NULL);
 

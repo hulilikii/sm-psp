@@ -16,6 +16,8 @@ build/embedded_rom.o: sm.smc
 
 CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
+PSP_DEBUG_BUILD_ID := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)-$(shell date +%Y%m%d_%H%M%S)
+CFLAGS += -DPSP_DEBUG_BUILD_ID=\"$(PSP_DEBUG_BUILD_ID)\"
 
 # PSP-only build. PSPSDK supplies its standard libraries through build.mak.
 LIBS := -lpspaudiolib \

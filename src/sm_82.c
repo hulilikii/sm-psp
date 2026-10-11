@@ -685,7 +685,9 @@ static int last_logged_game_state = -1;
 
   coroutine_state_0 = st = game_state + 10;
 RESUME_AT_SWITCH:
- if (game_state != last_logged_game_state) {
+  if (!PspDebugLog_IsEnabled())
+    last_logged_game_state = -1;
+  if (game_state != last_logged_game_state) {
     PspDebugMarker(0xC2000000u | ((uint32)game_state & 0xFFFFu));
     last_logged_game_state = game_state;
   }
