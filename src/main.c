@@ -163,22 +163,18 @@ int main(int argc, char **argv) {
 
   SetupFilesystem();
   PspInput_Init();
-   {
-    SceCtrlData initial_pad;
-    sceCtrlPeekBufferPositive(&initial_pad, 1);
-    g_debug_circle_prev_down =
-        (initial_pad.Buttons & PSP_CTRL_CIRCLE) != 0;
-   }
-  
-   /*
-    * Hold Circle while launching to capture startup markers.
-    * Circle can also toggle logging during execution.
-    */
-   SceCtrlData debug_pad;
-   sceCtrlPeekBufferPositive(&debug_pad, 1);
-   g_debug_circle_was_down = (debug_pad.Buttons & PSP_CTRL_CIRCLE) != 0;
-   PspDebugLog_Init(false);
-   PspDebugMarker(10); /* Main initialization reached */
+    SceCtrlData debug_pad;
+  sceCtrlPeekBufferPositive(&debug_pad, 1);
+  g_debug_circle_was_down =
+      (debug_pad.Buttons & PSP_CTRL_CIRCLE) != 0;
+  g_debug_circle_prev_down = g_debug_circle_was_down;
+
+  /*
+   * Hold Circle while launching to capture startup markers.
+   * Circle can also toggle logging during execution.
+   */
+  PspDebugLog_Init(g_debug_circle_was_down);
+  PspDebugMarker(10); /* Main initialization reached */
  
   ParseConfigFile(NULL);
 

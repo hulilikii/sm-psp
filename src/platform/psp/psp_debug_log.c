@@ -43,7 +43,13 @@ static void PspDebugLog_WriteLine(uint32_t marker) {
                  PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
 
   if (fd >= 0) {
-    sceIoWrite(fd, line, len);
+   int written = 0;
+    while (written < len) {
+      int n = sceIoWrite(fd, line + written, len - written);
+      if (n <= 0)
+        break;
+      written += n;
+    }
     sceIoClose(fd);
   }
 }
