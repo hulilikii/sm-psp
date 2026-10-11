@@ -4,6 +4,7 @@
 #include "variables.h"
 #include "funcs.h"
 #include "enemy_types.h"
+#include "platform/psp/psp_debug_log.h"
 
 #define kDemoRoomData ((unaligned_uint16*)RomFixedPtr(0x82876c))
 #define kPauseScreenSpriteAnimationData_0 (*(PauseScreenSpriteAnimationData*)RomFixedPtr(0x82c0b2))
@@ -655,6 +656,7 @@ static Func_V_Coroutine *const kGameStateFuncs[45] = {
 };
 
 CoroutineRet RunOneFrameOfGameInner(void) {
+static int last_logged_game_state = -1;
   int st = coroutine_state_0;
   // This uses manual coroutine handling because of the 
   // kGameStateFuncs[game_state]() thing, we need to make
@@ -683,7 +685,13 @@ CoroutineRet RunOneFrameOfGameInner(void) {
 
   coroutine_state_0 = st = game_state + 10;
 RESUME_AT_SWITCH:
+ if (game_state != last_logged_game_state) {
+    PspDebugMarker(0xC2000000u | ((uint32)game_state & 0xFFFFu));
+    last_logged_game_state = game_state;
+  }
+  PspDebugMarker(8301);  // Immediately before game-state dispatch
   COROUTINE_AWAIT_ONLY(kGameStateFuncs[st - 10]());
+  PspDebugMarker(8302);  // Game-state dispatch returned
 
   HandleSoundEffects();
   ClearUnusedOam();

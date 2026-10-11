@@ -6,6 +6,12 @@
 #include "funcs.h"
 #include "spc_player.h"
 #include "util.h"
+#ifdef __PSP__
+#include "platform/psp/psp_debug_log.h"
+#define PSP_RTL_MARKER(m) do { if (game_state == 1) PspDebugMarker(m); } while (0)
+#else
+#define PSP_RTL_MARKER(m) ((void)0)
+#endif
 
 struct StateRecorder;
 
@@ -423,12 +429,16 @@ bool RtlRunFrame(int inputs) {
   if (bug_fix_counter != currently_installed_bug_fix_counter)
     RtlUpdateSnesPatchForBugfix();
 
+  PSP_RTL_MARKER(830001);
   g_rtl_runframe(inputs, 0);
+  PSP_RTL_MARKER(830002);
 
   snes_frame_counter++;
 
   #if PSP_AUDIO_ENABLED
+  PSP_RTL_MARKER(830003);
   RtlPushApuState();
+  PSP_RTL_MARKER(830004);
   #endif
   return is_replay;
 }

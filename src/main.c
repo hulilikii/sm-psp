@@ -22,6 +22,7 @@
 #include "spc_player.h"
 #include "platform/psp/psp_renderer.h"
 #include "platform/psp/psp_input.h"
+#include "platform/psp/psp_debug_log.h"
 
 PSP_MODULE_INFO("SuperMetroidPSP", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
@@ -44,12 +45,14 @@ static struct RendererFuncs g_renderer_funcs;
 static SceUID g_audio_sema = -1;
 #endif
 static bool g_running = true;
+static bool g_debug_circle_prev_down;
 static bool g_turbo;
 static uint8 g_replay_turbo = true;
 static int g_ppu_render_flags;
 static int g_snes_width = 256;
 static int g_snes_height = 240;
 static uint32_t g_frame_ctr;
+static bool g_debug_circle_was_down;
 
 void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
@@ -160,6 +163,23 @@ int main(int argc, char **argv) {
 
   SetupFilesystem();
   PspInput_Init();
+   {
+    SceCtrlData initial_pad;
+    sceCtrlPeekBufferPositive(&initial_pad, 1);
+    g_debug_circle_prev_down =
+        (initial_pad.Buttons & PSP_CTRL_CIRCLE) != 0;
+   }
+  
+   /*
+    * Hold Circle while launching to capture startup markers.
+    * Circle can also toggle logging during execution.
+    */
+   SceCtrlData debug_pad;
+   sceCtrlPeekBufferPositive(&debug_pad, 1);
+   g_debug_circle_was_down = (debug_pad.Buttons & PSP_CTRL_CIRCLE) != 0;
+   PspDebugLog_Init(false);
+   PspDebugMarker(10); /* Main initialization reached */
+ 
   ParseConfigFile(NULL);
 
   /* The PSP renderer is fixed at the native 256x240 software-PPU size. */
@@ -171,9 +191,11 @@ int main(int argc, char **argv) {
   if (!g_renderer_funcs.Initialize())
     return 1;
 
+  PspDebugMarker(20); /* Before SnesInit */
   g_snes = SnesInit("sm.smc");
   if (g_snes == NULL)
     Die("Unable to load sm.smc");
+    PspDebugMarker(21); /* SnesInit completed */
 
   PpuBeginDrawing(g_snes->snes_ppu, g_pixels, 256 * 4, 0);
   PpuBeginDrawing(g_snes->my_ppu, g_my_pixels, 256 * 4, 0);
@@ -184,19 +206,32 @@ int main(int argc, char **argv) {
   Audio_Init();
   #endif
 
+  PspDebugMarker(30); /* Before SRAM read */
   RtlReadSram();
+  PspDebugMarker(31); /* SRAM read completed */
   if (g_config.autosave)
     HandleCommand(kKeys_Load, true);
 
   while (g_running) {
     SceCtrlData pad;
     sceCtrlPeekBufferPositive(&pad, 1);
+    
+    bool circle_down = (pad.Buttons & PSP_CTRL_CIRCLE) != 0;
+    if (circle_down && !g_debug_circle_prev_down) {
+      PspDebugLog_SetEnabled(!PspDebugLog_IsEnabled());
+    }
+    g_debug_circle_prev_down = circle_down;
+
     if (pad.Buttons & PSP_CTRL_HOME) {
       g_running = false;
       break;
     }
-
+ 
     uint16 inputs = PspInput_Read();
+    /* Circle is the diagnostic toggle while held, not an in-game A press. */
+     if (circle_down)
+       inputs &= (uint16)~(1u << 8);
+ 
     uint8 is_replay = RtlRunFrame(inputs);
     ++g_frame_ctr;
 

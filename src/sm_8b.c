@@ -3,6 +3,7 @@
 #include "ida_types.h"
 #include "funcs.h"
 #include "variables.h"
+#include "platform/psp/psp_debug_log.h"
 
 
 #define kPalettes_Intro ((unaligned_uint16*)RomFixedPtr(0x8ce3e9))
@@ -537,7 +538,12 @@ void CallProcessCinematicBgObject(uint32 ea, uint16 k, uint16 j, uint16 r18) {
 
 void ProcessCinematicBgObject(uint16 v0, uint16 r18) {  // 0x8B8839
   uint16 j = cinematicbg_arr1[v0 >> 1];
-  CallProcessCinematicBgObject(*(unaligned_uint16 *)RomPtr_8C(j) | 0x8B0000, v0, j, r18);
+  uint32 ea = *(unaligned_uint16 *)RomPtr_8C(j) | 0x8B0000;
+  if (ea == fnProcessCinematicBgObject_DrawChar)
+    PspDebugMarker(8110);  // Before DrawChar dispatch
+  CallProcessCinematicBgObject(ea, v0, j, r18);
+  if (ea == fnProcessCinematicBgObject_DrawChar)
+    PspDebugMarker(8111);  // DrawChar dispatch returned
 }
 
 void ProcessCinematicBgObject_DrawChar(uint16 k, uint16 j, uint16 r18) {  // 0x8B884D
@@ -557,7 +563,9 @@ void ProcessCinematicBgObject_DrawChar(uint16 k, uint16 j, uint16 r18) {  // 0x8
   cinematicbg_arr8[15] = v3 - 8;
   if (GET_WORD(v2 + 4) != 0xD67D && cinematicbg_var1)
     QueueSfx3_Max6(0xD);
+    PspDebugMarker(8100);  // Before drawing the text tilemap
   ProcessCinematicBgObject_DrawToTextTilemap(0x1E, j, r18);
+  PspDebugMarker(8101);  // Text tilemap operation returned
 }
 
 void ProcessCinematicBgObject_DrawToTextTilemap(uint16 k, uint16 j, uint16 r18) {  // 0x8B88B7
@@ -1585,14 +1593,45 @@ uint16 IntroObject_SetTimer(uint16 k, uint16 j) {  // 0x8B9A17
 }
 
 CoroutineRet GameState_1_OpeningCinematic_(void) {  // 0x8B9A22
+static uint16 last_logged_cinematic_function = 0xFFFF;
+
+  if (cinematic_function != last_logged_cinematic_function) {
+    PspDebugMarker(0xC1000000u | ((uint32)cinematic_function & 0xFFFFu));
+    last_logged_cinematic_function = cinematic_function;
+  }
+
+  PspDebugMarker(8201);
   CallCinematicFunction(cinematic_function | 0x8b0000);
+   PspDebugMarker(8202);
+   
+   PspDebugMarker(8211);
   HandleCinematicSprites();
+  PspDebugMarker(8212);
+  
+  PspDebugMarker(8221);
   HandleMode7Objects();
+  PspDebugMarker(8222);
+  
+  PspDebugMarker(8231);
   PaletteFxHandler();
+  PspDebugMarker(8232);
+  
+  PspDebugMarker(8241);
   DrawCinematicSpriteObjects_Intro();
+  PspDebugMarker(8242);
+  
+  PspDebugMarker(8251);
   MaybeSkipCinematics();
+  PspDebugMarker(8252);
+  
+  PspDebugMarker(8261);
   HandleCinematicsTransitions();
+  PspDebugMarker(8262);
+  
+  PspDebugMarker(8271);
   HandleMode7TransformationNoRotation();
+  PspDebugMarker(8272);
+  
   return kCoroutineNone;
 }
 
