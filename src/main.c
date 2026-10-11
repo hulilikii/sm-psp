@@ -183,9 +183,11 @@ int main(int argc, char **argv) {
   g_snes_height = 240;
   g_ppu_render_flags = kPpuRenderFlags_NewRenderer | kPpuRenderFlags_Height240;
 
+  PspDebugMarker(12); /* Before renderer initialization */
   PspRenderer_Create(&g_renderer_funcs);
   if (!g_renderer_funcs.Initialize())
     return 1;
+  PspDebugMarker(13); /* Renderer initialization completed */
 
   PspDebugMarker(20); /* Before SnesInit */
   g_snes = SnesInit("sm.smc");
@@ -228,13 +230,22 @@ int main(int argc, char **argv) {
      if (circle_down)
        inputs &= (uint16)~(1u << 8);
  
+    if (g_frame_ctr < 120)
+      PspDebugMarker(40); /* Before RtlRunFrame */
     uint8 is_replay = RtlRunFrame(inputs);
+    if (g_frame_ctr < 120)
+      PspDebugMarker(41); /* RtlRunFrame returned */
     ++g_frame_ctr;
 
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
                              (g_frame_ctr & (g_turbo ? 0xf : 0x7f)) != 0;
-    if (!g_snes->disableRender)
+    if (!g_snes->disableRender) {
+      if (g_frame_ctr <= 120)
+        PspDebugMarker(42); /* Before DrawPpuFrame */
       DrawPpuFrame();
+      if (g_frame_ctr <= 120)
+        PspDebugMarker(43); /* DrawPpuFrame returned */
+      }
   }
 
   if (g_config.autosave)
