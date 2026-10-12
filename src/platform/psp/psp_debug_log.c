@@ -117,3 +117,12 @@ bool PspDebugLog_IsEnabled(void) {
 void PspDebugMarker(uint32_t marker) {
   PspDebugLog_WriteLine(marker);
 }
+ 
+void PspDebugValue(uint32_t tag, uint32_t value) {
+  char line[48];
+  int len = snprintf(line, sizeof(line), "%u=%u\n",
+                     (unsigned int)tag, (unsigned int)value);
+  if (len <= 0 || len >= (int)sizeof(line))
+    return;
+  PspDebugLog_WriteText(line);
+}

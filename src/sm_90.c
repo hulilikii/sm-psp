@@ -4,6 +4,7 @@
 #include "variables.h"
 #include "sm_rtl.h"
 #include "funcs.h"
+#include "platform/psp/psp_debug_log.h"
 
 #define kSamusFramesForUnderwaterSfx ((uint8*)RomFixedPtr(0x90a514))
 #define kPauseMenuMapData ((unaligned_uint16*)RomFixedPtr(0x829717))
@@ -2551,18 +2552,33 @@ static Func_Y_V *const kKillProjectileFuncs[10] = {  // 0x90AE06
 };
 
 void KillProjectile(uint16 k) {
-
   int v1 = k >> 1;
+    PspDebugMarker(837170);  // KILL_ENTRY
+  PspDebugValue(837171, k);
+  PspDebugValue(837172, projectile_type[v1]);
+  PspDebugValue(837173, projectile_dir[v1]);
+
   if ((projectile_type[v1] & 0xF00) != 0) {
+  PspDebugMarker(837174);  // KILL_NON_BEAM_BRANCH
     if (!sign16((HIBYTE(projectile_type[v1]) & 0xF) - 3)) {
+    PspDebugMarker(837175);  // KILL_BEFORE_CLEAR
       ClearProjectile(k);
+      PspDebugMarker(837176);  // KILL_AFTER_CLEAR
       return;
     }
   } else {
-    kKillProjectileFuncs[projectile_dir[v1] & 0xF](k);
+     uint16 dir = projectile_dir[v1] & 0xF;
+    PspDebugMarker(837177);  // KILL_DIRECTION_TABLE_BRANCH
+    PspDebugValue(837178, dir);
+    kKillProjectileFuncs[dir](k);
+    PspDebugMarker(837179);  // KILL_AFTER_DIRECTION_FUNCTION
   }
+   PspDebugMarker(837180);  // KILL_BEFORE_INNER
   KillProjectileInner(k);
+  PspDebugMarker(837181);  // KILL_AFTER_INNER
+  PspDebugMarker(837182);  // KILL_BEFORE_PREINSTR
   projectile_bomb_pre_instructions[k >> 1] = FUNC16(ProjPreInstr_Empty);
+   PspDebugMarker(837183);  // KILL_AFTER_PREINSTR
 }
 
 void KillProjectileFunc_0(uint16 j) {  // 0x90AE4E

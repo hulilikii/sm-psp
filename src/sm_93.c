@@ -2,6 +2,7 @@
 #include "ida_types.h"
 #include "variables.h"
 #include "funcs.h"
+#include "platform/psp/psp_debug_log.h"
 
 
 #define kProjectileData_UnchargedBeams ((unaligned_uint16*)RomFixedPtr(0x9383c1))
@@ -61,11 +62,18 @@ void InitializeInstrForMissile(uint16 v0) {  // 0x9380A0
 
 void KillProjectileInner(uint16 k) {  // 0x9380CF
   int v1 = k >> 1;
+  PspDebugMarker(837190);  // INNER_ENTRY
+  PspDebugValue(837191, k);
+  PspDebugValue(837192, projectile_type[v1]);
+  PspDebugValue(837193, cinematic_function);
+
   if ((projectile_type[v1] & 0xF00) != 0) {
     if (!cinematic_function)
       QueueSfx2_Max6(7);
+      PspDebugMarker(837194);  // INNER_BEFORE_TYPE_UPDATE
     uint16 v2 = projectile_type[v1];
     projectile_type[v1] = v2 & 0xF0FF | 0x800;
+     PspDebugValue(837195, projectile_type[v1]);
     if ((v2 & 0x200) != 0) {
       projectile_bomb_instruction_ptr[v1] = HIWORD(g_stru_938691.damages);
       earthquake_type = 20;
@@ -73,6 +81,7 @@ void KillProjectileInner(uint16 k) {  // 0x9380CF
     } else {
       projectile_bomb_instruction_ptr[v1] = *(&g_stru_938679.instr_ptr + 1);
     }
+     PspDebugValue(837196, projectile_bomb_instruction_ptr[v1]);
     if (!sign16(cooldown_timer - 21))
       cooldown_timer = 20;
   } else {
@@ -80,8 +89,11 @@ void KillProjectileInner(uint16 k) {  // 0x9380CF
     projectile_bomb_instruction_ptr[v1] = HIWORD(g_stru_938679.damages);
     QueueSfx2_Max6(0xC);
   }
-  projectile_bomb_instruction_timers[v1] = 1;
+   PspDebugMarker(837197);  // INNER_BEFORE_TIMER
+   projectile_bomb_instruction_timers[v1] = 1;
+   PspDebugMarker(837198);  // INNER_AFTER_TIMER
   projectile_damage[v1] = 8;
+  PspDebugMarker(837199);  // INNER_EXIT
 }
 
 void InitializeBombExplosion(uint16 k) {  // 0x93814E
