@@ -1121,27 +1121,38 @@ void ClearCinematicSprites(void) {  // 0x8B93DA
 }
 
 void HandleCinematicSprites(void) {  // 0x8B93EF
+PspDebugMarker(83430);  // Enter HandleCinematicSprites
   for (int i = 30; i >= 0; i -= 2) {
     cinematic_obj_index = i;
     if (cinematicspr_instr_ptr[i >> 1]) {
+     PspDebugMarker(83450 + i);  // Active sprite slot
       ProcessCinematicSpriteInstructionList(i);
+       PspDebugMarker(83490 + i);  // Sprite processing returned
       i = cinematic_obj_index;
     }
   }
+  PspDebugMarker(83530);  // All sprite slots processed
 }
 
 void ProcessCinematicSpriteInstructionList(uint16 k) {  // 0x8B9409
+ PspDebugMarker(836000 + k);  // Enter sprite instruction processing
   CallCinematicSprPreInstr(cinematicspr_preinstr_func[k >> 1] | 0x8B0000, k);
+   PspDebugMarker(836100 + k);  // Pre-instruction callback returned
   uint16 v1 = cinematic_obj_index;
   int v2 = cinematic_obj_index >> 1;
   if (cinematicspr_instr_timer[v2]-- == 1) {
+  PspDebugMarker(836200 + k);  // Instruction timer reached dispatch
     uint16 v4 = cinematicspr_instr_ptr[v2], v6;
     while (1) {
+    PspDebugMarker(836300 + k);  // About to read ROM instruction
       const unaligned_uint16 *v5 = (const unaligned_uint16 *)RomPtr_8B(v4);
       v6 = *v5;
+       PspDebugMarker(836400 + k);  // ROM instruction read completed
       if ((*v5 & 0x8000) == 0)
         break;
+        PspDebugMarker(836500 + k);  // About to dispatch instruction
       v4 = CallCinematicSprInstr(v6 | 0x8B0000, v1, v4 + 2);
+       PspDebugMarker(836600 + k);  // Instruction dispatch returned
       if (!v4)
         return;
     }
@@ -1150,6 +1161,7 @@ void ProcessCinematicSpriteInstructionList(uint16 k) {  // 0x8B9409
     cinematicspr_whattodraw[v7] = *((unaligned_uint16*)RomPtr_8B(v4) + 1);
     cinematicspr_instr_ptr[v7] = v4 + 4;
   }
+  PspDebugMarker(836700 + k);  // Sprite instruction processing completed
 }
 
 uint16 CinematicSprInstr_Delete(uint16 k, uint16 j) {  // 0x8B9438
