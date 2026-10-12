@@ -3292,32 +3292,61 @@ void CinematicFunction_Intro_Func35(uint16 j) {  // 0x8BB773
 }
 
 void CinematicFunction_Intro_Func36(uint16 k) {  // 0x8BB786
+  PspDebugMarker(837100);  // FUNC36_ENTRY
+  PspDebugMarker(837101);  // FUNC36_BEFORE_FUNC37
   CinematicFunction_Intro_Func37(k);
+    PspDebugMarker(837102);  // FUNC36_AFTER_FUNC37
   uint16 v1 = 8;
-  while ((projectile_type[v1 >> 1] & 0xFFF) != 256) {
+   while (1) {
+    PspDebugMarker(837110 + v1);  // Before projectile_type read; identifies slot
+    uint16 type = projectile_type[v1 >> 1];
+    PspDebugMarker(837120 + v1);  // After projectile_type read
+    if ((type & 0xFFF) == 256)
+      break;
     v1 -= 2;
-    if ((v1 & 0x8000) != 0)
+        if ((v1 & 0x8000) != 0) {
+      PspDebugMarker(837130);  // FUNC36_NO_MATCHING_PROJECTILE
+       return;
+    }
       return;
   }
-  if (sign16(projectile_x_pos[v1 >> 1] - 84)) {
+    PspDebugMarker(837140);  // FUNC36_PROJECTILE_FOUND
+  PspDebugMarker(837141);  // Before projectile_x_pos read
+  uint16 projectile_x = projectile_x_pos[v1 >> 1];
+  PspDebugMarker(837142);  // After projectile_x_pos read
+    if (sign16(projectile_x - 84)) {
+    PspDebugMarker(837150);  // Before KillProjectile
     KillProjectile(v1);
+        PspDebugMarker(837151);  // After KillProjectile
     int v2 = k >> 1;
+        PspDebugMarker(837152);  // Before cinematic sprite state update
     cinematicspr_arr6[v2] = 8;
     uint16 v3 = cinematicspr_goto_timer[v2] + 1;
     cinematicspr_goto_timer[v2] = v3;
+        PspDebugMarker(837153);  // After cinematic sprite state update
     if (v3 == 4) {
+          PspDebugMarker(837160);  // Before spawn sequence
       cinematicspr_goto_timer[v2] = 0;
       cinematicspr_preinstr_func[v2] = FUNC16(CinematicFunction_Intro_Func39);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF1B, 0);
+            PspDebugMarker(837161);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF1B, 1);
+            PspDebugMarker(837162);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF1B, 2);
+            PspDebugMarker(837163);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF15, 0);
+            PspDebugMarker(837164);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF15, 1);
+            PspDebugMarker(837165);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF15, 2);
+            PspDebugMarker(837166);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF15, 3);
+            PspDebugMarker(837167);
       SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF15, 4);
+            PspDebugMarker(837168);  // FUNC36_SPAWN_SEQUENCE_COMPLETE
     }
   }
+    PspDebugMarker(837199);  // FUNC36_EXIT
 }
 
 void CinematicFunction_Intro_Func39(uint16 k) {  // 0x8BB80F
@@ -3343,20 +3372,30 @@ void CinematicSprPreInstr_B82E(uint16 k) {  // 0x8BB82E
 }
 
 void CinematicFunction_Intro_Func37(uint16 k) {  // 0x8BB846
+  PspDebugMarker(837200);  // FUNC37_ENTRY
   uint16 j, v3;
+    PspDebugMarker(837201);  // Before cinematicspr_arr6 read
   uint16 v1 = cinematicspr_arr6[k >> 1];
+    PspDebugMarker(837202);  // After cinematicspr_arr6 read
   if (v1) {
     if ((v1 & 1) != 0) {
+          PspDebugMarker(837210);  // Before intro palette copy loop
       for (int i = 30; i >= 0; i -= 2)
         palette_buffer[(i >> 1) + 240] = kPalettes_Intro[(i >> 1) + 240];
+              PspDebugMarker(837211);  // After intro palette copy loop
       v3 = k;
     } else {
+          PspDebugMarker(837220);  // Before white palette loop
       for (j = 30; (j & 0x8000) == 0; j -= 2)
         palette_buffer[(j >> 1) + 240] = 0x7FFF;
+              PspDebugMarker(837221);  // After white palette loop
       v3 = k;
     }
+        PspDebugMarker(837230);  // Before cinematicspr_arr6 decrement
     --cinematicspr_arr6[v3 >> 1];
+        PspDebugMarker(837231);  // After cinematicspr_arr6 decrement
   }
+    PspDebugMarker(837299);  // FUNC37_EXIT
 }
 
 void CinematicFunction_Intro_Func40(void) {  // 0x8BB877
