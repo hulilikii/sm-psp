@@ -3308,7 +3308,6 @@ void CinematicFunction_Intro_Func36(uint16 k) {  // 0x8BB786
       PspDebugMarker(837130);  // FUNC36_NO_MATCHING_PROJECTILE
        return;
     }
-      return;
   }
     PspDebugMarker(837140);  // FUNC36_PROJECTILE_FOUND
   PspDebugMarker(837141);  // Before projectile_x_pos read
