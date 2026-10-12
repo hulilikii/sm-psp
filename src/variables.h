@@ -7,13 +7,17 @@ extern uint8 g_ram[0x20000];
 #define INT16_SHL8(x) ((int16)(x) << 8)
 #define INT16_SHL16(x) ((int16)(x) << 16)
 
-static inline void AddToHiLo(uint16 *hi, uint16 *lo, uint32 v) {
+static inline void AddToHiLo(void *hi_ptr, void *lo_ptr, uint32 v) {
+  unaligned_uint16 *hi = hi_ptr;
+  unaligned_uint16 *lo = lo_ptr;
   uint32 t = *lo + (*hi << 16) + v;
   *lo = t;
   *hi = t >> 16;
 }
 
-static inline void SetHiLo(uint16 *hi, uint16 *lo, uint32 t) {
+static inline void SetHiLo(void *hi_ptr, void *lo_ptr, uint32 t) {
+  unaligned_uint16 *hi = hi_ptr;
+  unaligned_uint16 *lo = lo_ptr;
   *lo = t;
   *hi = t >> 16;
 }
