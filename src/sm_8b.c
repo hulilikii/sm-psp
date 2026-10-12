@@ -1135,9 +1135,14 @@ PspDebugMarker(83430);  // Enter HandleCinematicSprites
 }
 
 void ProcessCinematicSpriteInstructionList(uint16 k) {  // 0x8B9409
- PspDebugMarker(836000 + k);  // Enter sprite instruction processing
-  CallCinematicSprPreInstr(cinematicspr_preinstr_func[k >> 1] | 0x8B0000, k);
-   PspDebugMarker(836100 + k);  // Pre-instruction callback returned
+  PspDebugMarker(836000 + k);  // Enter sprite instruction processing
+  uint16 preinstr_offset = cinematicspr_preinstr_func[k >> 1];
+  uint32 preinstr_ea = (uint32)preinstr_offset | 0x8B0000;
+  PspDebugMarker(837000 + k);  // Callback address logging begins
+  PspDebugMarker(900000 + preinstr_offset);  // Raw callback offset: marker - 900000
+  PspDebugMarker(preinstr_ea);  // Resolved callback address
+  CallCinematicSprPreInstr(preinstr_ea, k);
+  PspDebugMarker(836100 + k);  // Pre-instruction callback returned
   uint16 v1 = cinematic_obj_index;
   int v2 = cinematic_obj_index >> 1;
   if (cinematicspr_instr_timer[v2]-- == 1) {
