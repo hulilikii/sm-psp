@@ -4,6 +4,7 @@
 #include "sm_rtl.h"
 #include "funcs.h"
 #include "enemy_types.h"
+#include "platform/psp/psp_debug_log.h"
 
 #define g_byte_A6E269 ((uint8*)RomFixedPtr(0xa6e269))
 #define g_word_A6E2AA ((unaligned_uint16*)RomFixedPtr(0xa6e2aa))
@@ -1223,8 +1224,17 @@ void CallRidleyFunc(uint32 ea) {
   }
 }
 void CeresRidley_Main(void) {  // 0xA6A288
+  static uint16 last_logged_cry_var_A = 0xFFFF;
   Enemy_CeresRidley *E = Get_CeresRidley(0);
   E->base.health = 0x7FFF;
+  if (E->cry_var_A != last_logged_cry_var_A) {
+    last_logged_cry_var_A = E->cry_var_A;
+    PspDebugMarker(8600);  // Ridley update routine changed
+    PspDebugValue(8601, E->cry_var_A);  // Routine offset; bank is 0xA6
+    PspDebugValue(8602, E->base.x_pos);
+    PspDebugValue(8603, E->base.y_pos);
+    PspDebugValue(8604, E->cry_var_F);
+  }
   CallRidleyFunc(E->cry_var_A | 0xA60000);
   if (!ceres_status) {
     if (Get_CeresRidley(0)->cry_var_02) {
