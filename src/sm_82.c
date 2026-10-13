@@ -1567,7 +1567,7 @@ void LoadPauseMenuMapTilemap(void) {  // 0x82943D
   const unaligned_uint16 *r0 = (const unaligned_uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[v0]));
   uint16 *r3 = (uint16 *)&ram4000;
   const unaligned_uint16 *r6 = (const unaligned_uint16 *)RomPtr_82(kPauseMenuMapData[v0]);
-  const uint16 *r9 = (const uint16 *)map_tiles_explored;
+  const unaligned_uint16 *r9 = (const unaligned_uint16 *)map_tiles_explored;
   if (map_station_byte_array[area_index]) {
     uint16 r38 = swap16(*r6++);
     uint16 r40 = swap16(*r9++);
@@ -1628,7 +1628,7 @@ void DrawRoomSelectMap(void) {  // 0x829517
   const unaligned_uint16 *r0 = (const unaligned_uint16 *)RomPtr(Load24(&kPauseMenuMapTilemaps[v0]));
   uint16 *r3 = (uint16 *)&ram3000;
   const unaligned_uint16 *r6 = (const unaligned_uint16 *)RomPtr_82(kPauseMenuMapData[v0]);
-  const uint16 *r9 = (const uint16 *)map_tiles_explored;
+  const unaligned_uint16 *r9 = (const unaligned_uint16 *)map_tiles_explored;
 
   if (map_station_byte_array[area_index]) {
     uint16 r38 = swap16(*r6++);
