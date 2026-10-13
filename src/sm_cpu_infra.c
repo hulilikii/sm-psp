@@ -10,6 +10,9 @@
 #include "util.h"
 #include "enemy_types.h"
 #include <time.h>
+#ifdef PSP_DEBUG_LOGGING
+#include "platform/psp/psp_debug_log.h"
+#endif
 
 extern const uint8_t _binary_sm_smc_start[];
 extern const uint8_t _binary_sm_smc_end[];
@@ -921,6 +924,19 @@ void DebugGameOverMenu(void) {
 }
 
 uint32 RunCpuUntilPC(uint32 pc1, uint32 pc2) {
+#ifdef PSP_DEBUG_LOGGING
+  static uint32_t debug_call_count;
+  uint32_t call_id = ++debug_call_count;
+  bool trace_call = call_id <= 10 || (call_id % 60) == 0;
+  uint32_t opcode_count = 0;
+  if (trace_call) {
+    PspDebugMarker(400); /* RUN_CPU_UNTIL_PC_BEGIN */
+    PspDebugValue(401, call_id);
+    PspDebugValue(402, (g_snes->cpu->k << 16) | g_snes->cpu->pc);
+    PspDebugValue(403, pc1);
+    PspDebugValue(404, pc2);
+  }
+#endif
   for(;;) {
     if (g_snes->debug_cycles) {
       char line[80];
@@ -930,8 +946,24 @@ uint32 RunCpuUntilPC(uint32 pc1, uint32 pc2) {
     cpu_runOpcode(g_cpu);
 
     uint32 addr = g_snes->cpu->k << 16 | g_snes->cpu->pc;
+  #ifdef PSP_DEBUG_LOGGING
+    if (trace_call && ((++opcode_count & 0x3ff) == 0)) {
+      PspDebugValue(410, opcode_count);
+      PspDebugValue(411, addr);
+    }
+#endif
     if (addr == pc1 || addr == pc2)
+    #ifdef PSP_DEBUG_LOGGING
+    {
+      if (trace_call) {
+        PspDebugValue(412, addr);
+        PspDebugMarker(413); /* RUN_CPU_UNTIL_PC_END */
+      }
       return addr;
+    }
+#else
+      return addr;
+   #endif
   }
 }
 

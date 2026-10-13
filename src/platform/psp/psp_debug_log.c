@@ -102,10 +102,10 @@ void PspDebugLog_SetEnabled(bool enabled) {
     }
     g_psp_debug_log_enabled = true;
      PspDebugLog_WriteBuildInfo();
-    PspDebugLog_WriteLine(9001); /* CIRCLE_START */
-    PspDebugLog_WriteLine(700001u); /* LOGGING_STARTED_AT_CIRCLE */
+    PspDebugLog_WriteLine(9001); /* L_TRIGGER_START */
+    PspDebugLog_WriteLine(700001u); /* LOGGING_STARTED_AT_L_TRIGGER */
   } else {
-    PspDebugLog_WriteLine(9000); /* CIRCLE_STOP */
+    PspDebugLog_WriteLine(9000); /* L_TRIGGER_STOP */
     g_psp_debug_log_enabled = false;
   }
 }

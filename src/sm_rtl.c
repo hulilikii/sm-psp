@@ -6,6 +6,9 @@
 #include "funcs.h"
 #include "spc_player.h"
 #include "util.h"
+#ifdef PSP_DEBUG_LOGGING
+#include "platform/psp/psp_debug_log.h"
+#endif
 
 struct StateRecorder;
 
@@ -392,6 +395,15 @@ enum {
 };
 
 bool RtlRunFrame(int inputs) {
+#ifdef PSP_DEBUG_LOGGING
+  bool trace_frame = (snes_frame_counter % 60) == 0;
+  if (trace_frame) {
+    PspDebugMarker(300); /* RTL_RUN_FRAME_BEGIN */
+    PspDebugValue(301, snes_frame_counter);
+    PspDebugValue(302, (uint32)inputs);
+  }
+#endif
+
   // Avoid up/down and left/right from being pressed at the same time
   if ((inputs & 0x30) == 0x30) inputs ^= 0x30;
   if ((inputs & 0xc0) == 0xc0) inputs ^= 0xc0;
@@ -423,12 +435,24 @@ bool RtlRunFrame(int inputs) {
   if (bug_fix_counter != currently_installed_bug_fix_counter)
     RtlUpdateSnesPatchForBugfix();
 
+#ifdef PSP_DEBUG_LOGGING
+  if (trace_frame)
+    PspDebugMarker(303); /* BEFORE_RUNFRAME_CALLBACK */
+#endif
   g_rtl_runframe(inputs, 0);
+#ifdef PSP_DEBUG_LOGGING
+  if (trace_frame)
+    PspDebugMarker(304); /* AFTER_RUNFRAME_CALLBACK */
+#endif
   snes_frame_counter++;
 
   #if PSP_AUDIO_ENABLED
   RtlPushApuState();
   #endif
+#ifdef PSP_DEBUG_LOGGING
+  if (trace_frame)
+    PspDebugMarker(305); /* RTL_RUN_FRAME_COMPLETE */
+#endif
   return is_replay;
 }
 

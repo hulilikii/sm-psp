@@ -13,6 +13,7 @@
 #include <pspaudiolib.h>
 #include <pspthreadman.h>
 #include <pspdebug.h>
+#include <pspexception.h>
 
 #include "snes/ppu.h"
 #include "types.h"
@@ -23,7 +24,9 @@
 #include "spc_player.h"
 #include "platform/psp/psp_renderer.h"
 #include "platform/psp/psp_input.h"
-//#include "platform/psp/psp_debug_log.h"
+#ifdef PSP_DEBUG_LOGGING
+#include "platform/psp/psp_debug_log.h"
+#endif
 
 PSP_MODULE_INFO("SuperMetroidPSP", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
@@ -160,12 +163,21 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
 
-  pspDebugInstallErrorHandler(PspExceptionHandler);
-
   SetupFilesystem();
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugLog_Init(true);
+  PspDebugMarker(100); /* MAIN_STARTED */
+#endif
+
   PspInput_Init();
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(110); /* INPUT_INITIALIZED */
+#endif
  
   ParseConfigFile(NULL);
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(120); /* CONFIG_PARSED */
+#endif
 
   /* The PSP renderer is fixed at the native 256x240 software-PPU size. */
   g_snes_width = 256;
@@ -173,47 +185,63 @@ int main(int argc, char **argv) {
   g_ppu_render_flags = kPpuRenderFlags_NewRenderer | kPpuRenderFlags_Height240;
 
   PspRenderer_Create(&g_renderer_funcs);
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(130); /* RENDERER_CREATED */
+#endif
   if (!g_renderer_funcs.Initialize())
     return 1;
 
-  static void PspExceptionHandler(PspDebugRegBlock *regs) {
-  pspDebugScreenInit();
-  pspDebugDumpException(regs);
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(131); /* RENDERER_INITIALIZED */
+  PspDebugMarker(140); /* SNES_INIT_BEGIN */
+#endif
 
-  /* Print these explicitly so the three key values are easy to photograph. */
-  pspDebugScreenPrintf(
-      "\n\nCrash registers:\n"
-      "EPC:      0x%08X\n"
-      "BadVAddr: 0x%08X\n"
-      "Cause:    0x%08X\n",
-      (unsigned int)regs->epc,
-      (unsigned int)regs->badvaddr,
-      (unsigned int)regs->cause);
-
-  /* Keep the exception screen visible instead of returning to the game. */
-  for (;;)
-    sceKernelDelayThread(1000000);
-}
   g_snes = SnesInit("sm.smc");
   if (g_snes == NULL)
     Die("Unable to load sm.smc");
 
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(141); /* SNES_INIT_COMPLETE */
+#endif
+
   PpuBeginDrawing(g_snes->snes_ppu, g_pixels, 256 * 4, 0);
   PpuBeginDrawing(g_snes->my_ppu, g_my_pixels, 256 * 4, 0);
+  
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(150); /* PPU_DRAWING_INITIALIZED */
+#endif
 
   g_spc_player = SpcPlayer_Create();
   SpcPlayer_Initialize(g_spc_player);
   #if PSP_AUDIO_ENABLED
   Audio_Init();
   #endif
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(160); /* AUDIO_INITIALIZED */
+#endif
 
   RtlReadSram();
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(170); /* SRAM_READ */
+#endif
   if (g_config.autosave)
     HandleCommand(kKeys_Load, true);
 
+#ifdef PSP_DEBUG_LOGGING
+  PspDebugMarker(180); /* MAIN_LOOP_ENTERED */
+#endif
+  bool debug_l_was_down = false;
   while (g_running) {
     SceCtrlData pad;
     sceCtrlPeekBufferPositive(&pad, 1);
+    
+#ifdef PSP_DEBUG_LOGGING
+    bool debug_l_is_down = (pad.Buttons & PSP_CTRL_LTRIGGER) != 0;
+    if (debug_l_is_down && !debug_l_was_down)
+      PspDebugLog_SetEnabled(!PspDebugLog_IsEnabled());
+    debug_l_was_down = debug_l_is_down;
+#endif
+
 
     if (pad.Buttons & PSP_CTRL_HOME) {
       g_running = false;
@@ -221,7 +249,18 @@ int main(int argc, char **argv) {
     }
  
     uint16 inputs = PspInput_Read();
+#ifdef PSP_DEBUG_LOGGING
+    if ((g_frame_ctr % 60) == 0) {
+      PspDebugValue(200, g_frame_ctr); /* FRAME_NUMBER */
+      PspDebugValue(201, inputs);      /* FRAME_INPUTS */
+      PspDebugMarker(202);             /* FRAME_BEGIN */
+    }
+#endif
     uint8 is_replay = RtlRunFrame(inputs);
+    #ifdef PSP_DEBUG_LOGGING
+    if ((g_frame_ctr % 60) == 0)
+      PspDebugMarker(203);             /* FRAME_END */
+#endif
     ++g_frame_ctr;
 
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
