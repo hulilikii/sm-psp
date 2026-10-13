@@ -71,7 +71,10 @@ void KillProjectileInner(uint16 k) {  // 0x9380CF
       earthquake_type = 20;
       earthquake_timer = 30;
     } else {
-      projectile_bomb_instruction_ptr[v1] = *(&g_stru_938679.instr_ptr + 1);
+      const uint8 *instr_ptr_bytes =
+          (const uint8 *)(&g_stru_938679.instr_ptr + 1);
+      projectile_bomb_instruction_ptr[v1] =
+          (uint16)(instr_ptr_bytes[0] | ((uint16)instr_ptr_bytes[1] << 8));
     }
     if (!sign16(cooldown_timer - 21))
       cooldown_timer = 20;
