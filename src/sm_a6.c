@@ -4051,10 +4051,11 @@ void Ridley_Func_118(void) {  // 0xA6DA0C
   E->ridley_var_06 = v1;
   if (!v1) {
     int i;
-    uint16 v3, *v4;
+    uint16 v3;
+    const unaligned_uint16 *v4;
     for (i = E->ridley_var_05; ; E->ridley_var_05 = i) {
       v3 = i;
-      v4 = (unaligned_uint16 *)RomPtr_A6(i);
+      v4 = (const unaligned_uint16 *)RomPtr_A6(i);
       i = *v4;
       if ((*v4 & 0x8000) == 0)
         break;
