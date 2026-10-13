@@ -10,12 +10,6 @@
 #include "util.h"
 #include "enemy_types.h"
 #include <time.h>
-#ifdef __PSP__
-#include "platform/psp/psp_debug_log.h"
-#define PSP_COMPARE_MARKER(m) PspDebugMarker(m)
-#else
-#define PSP_COMPARE_MARKER(m) ((void)0)
-#endif
 
 extern const uint8_t _binary_sm_smc_start[];
 extern const uint8_t _binary_sm_smc_end[];
@@ -1045,28 +1039,18 @@ void RtlRunFrameCompare(uint16 input, int run_what) {
   g_snes->input1->currentState = input;
 
   if (g_runmode == RM_THEIRS) {
-    PSP_COMPARE_MARKER(820010);
     RunOneFrameOfGame_Emulated();
-    PSP_COMPARE_MARKER(820011);
-    PSP_COMPARE_MARKER(820012);
     DrawFrameToPpu();
-    PSP_COMPARE_MARKER(820013);
-
+    
   } else if (g_runmode == RM_MINE) {
     g_use_my_apu_code = true;
 
     g_snes->runningWhichVersion = 0xff;
-    PSP_COMPARE_MARKER(820001);
     RunOneFrameOfGame();
-    PSP_COMPARE_MARKER(820002);
-    PSP_COMPARE_MARKER(820003); /* Before DrawFrameToPpu */
     DrawFrameToPpu();
-    PSP_COMPARE_MARKER(820004);
     g_snes->runningWhichVersion = 0;
   } else {
     g_use_my_apu_code = true;
-    PSP_COMPARE_MARKER(820020);
     RunOneFrameOfGame_Both();
-    PSP_COMPARE_MARKER(820021);
   }
 }
