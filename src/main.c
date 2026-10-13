@@ -266,6 +266,7 @@ int main(int argc, char **argv) {
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
                              (g_frame_ctr & (g_turbo ? 0xf : 0x7f)) != 0;
     if (!g_snes->disableRender) {
+     DrawPpuFrame();
       }
   }
 
