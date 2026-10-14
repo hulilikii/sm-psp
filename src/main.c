@@ -51,6 +51,34 @@ static int g_snes_width = 256;
 static int g_snes_height = 240;
 static uint32_t g_frame_ctr;
 
+#ifdef PSP_PROFILE
+static char g_profile_log_path[64];
+
+void PspProfileLog(const char *message) {
+  SceUID fd = sceIoOpen(g_profile_log_path,
+                        PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND,
+                        0777);
+  if (fd >= 0) {
+    sceIoWrite(fd, message, strlen(message));
+    sceIoWrite(fd, "\n", 1);
+    sceIoClose(fd);
+  }
+}
+
+static void PspProfileInit(void) {
+  snprintf(g_profile_log_path, sizeof(g_profile_log_path),
+           "profiling_%s_%s.txt", __DATE__, __TIME__);
+
+  /* Replace characters that are unsuitable for a Memory Stick filename. */
+  for (char *p = g_profile_log_path; *p; ++p) {
+    if (*p == ' ' || *p == ':' || *p == '/')
+      *p = '_';
+  }
+
+  PspProfileLog("Super Metroid PSP profiling started");
+}
+#endif
+
 void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
   sceKernelExitGame();
@@ -216,6 +244,25 @@ int main(int argc, char **argv) {
 
     uint16 inputs = PspInput_Read();
     uint8 is_replay = RtlRunFrame(inputs);
+    #ifdef PSP_PROFILE
+    uint32_t profile_frame_us =
+        sceKernelGetSystemTimeLow() - profile_start_us;
+    profile_frame_total_us += profile_frame_us;
+    if (profile_frame_us > profile_frame_max_us)
+      profile_frame_max_us = profile_frame_us;
+    if (++profile_frame_count == 60) {
+      char profile_line[128];
+      snprintf(profile_line, sizeof(profile_line),
+               "game_frames=%u rtl_avg_us=%u rtl_max_us=%u",
+               (unsigned int)g_frame_ctr,
+               (unsigned int)(profile_frame_total_us / profile_frame_count),
+               (unsigned int)profile_frame_max_us);
+      PspProfileLog(profile_line);
+      profile_frame_total_us = 0;
+      profile_frame_max_us = 0;
+      profile_frame_count = 0;
+    }
+#endif
     ++g_frame_ctr;
 
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&

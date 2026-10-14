@@ -1,10 +1,12 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <pspdisplay.h>
 #include <pspge.h>
 #include <pspgu.h>
+#include <pspkernel.h>
 #include <psputils.h>
 
 #include "src/types.h"
@@ -17,6 +19,16 @@
 #define TEX_WIDTH 512
 #define TEX_HEIGHT 256
 #define GU_LIST_WORDS (64 * 1024)
+
+#ifdef PSP_PROFILE
+extern void PspProfileLog(const char *message);
+
+static uint64_t g_profile_convert_total_us;
+static uint64_t g_profile_gu_total_us;
+static uint32_t g_profile_convert_max_us;
+static uint32_t g_profile_gu_max_us;
+static uint32_t g_profile_render_count;
+#endif
 
 static uint32_t g_gu_list[GU_LIST_WORDS] __attribute__((aligned(16)));
 static uint16_t g_texture[TEX_WIDTH * TEX_HEIGHT] __attribute__((aligned(16)));
@@ -88,7 +100,16 @@ typedef struct PspVertex {
 } PspVertex;
 
 static void PspRenderer_EndDraw(void) {
+#ifdef PSP_PROFILE
+  uint32_t profile_start_us = sceKernelGetSystemTimeLow();
+#endif
   PspRenderer_Convert();
+  #ifdef PSP_PROFILE
+  uint32_t profile_convert_us =
+      sceKernelGetSystemTimeLow() - profile_start_us;
+  profile_start_us = sceKernelGetSystemTimeLow();
+#endif
+
 
   sceKernelDcacheWritebackAll();
   sceGuStart(GU_DIRECT, g_gu_list);
@@ -106,7 +127,36 @@ static void PspRenderer_EndDraw(void) {
                  2, NULL, v);
   sceGuFinish();
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  #ifdef PSP_PROFILE
+  uint32_t profile_gu_us =
+      sceKernelGetSystemTimeLow() - profile_start_us;
+
+  g_profile_convert_total_us += profile_convert_us;
+  g_profile_gu_total_us += profile_gu_us;
+  if (profile_convert_us > g_profile_convert_max_us)
+    g_profile_convert_max_us = profile_convert_us;
+  if (profile_gu_us > g_profile_gu_max_us)
+    g_profile_gu_max_us = profile_gu_us;
+
+  if (++g_profile_render_count == 60) {
+    char profile_line[160];
+    snprintf(profile_line, sizeof(profile_line),
+             "render_frames=60 convert_avg_us=%u convert_max_us=%u "
+             "gu_sync_avg_us=%u gu_sync_max_us=%u vblank=disabled",
+             (unsigned int)(g_profile_convert_total_us / 60),
+             (unsigned int)g_profile_convert_max_us,
+             (unsigned int)(g_profile_gu_total_us / 60),
+             (unsigned int)g_profile_gu_max_us);
+    PspProfileLog(profile_line);
+    g_profile_convert_total_us = 0;
+    g_profile_gu_total_us = 0;
+    g_profile_convert_max_us = 0;
+    g_profile_gu_max_us = 0;
+    g_profile_render_count = 0;
+  }
+#else
   sceDisplayWaitVblankStart();
+  #endif
   sceGuSwapBuffers();
 }
 

@@ -16,6 +16,13 @@ build/embedded_rom.o: sm.smc
 CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 
+# Optional profiling build: make PSP_PROFILE=1
+PSP_PROFILE ?= 0
+ifeq ($(PSP_PROFILE),1)
+CFLAGS += -DPSP_PROFILE
+endif
+
+
 # PSP-only build. PSPSDK supplies its standard libraries through build.mak.
 LIBS := -lpspaudiolib \
         -lpspaudio \
