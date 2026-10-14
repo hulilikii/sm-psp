@@ -208,29 +208,29 @@ void BouncingGoofball_Func3(void) {  // 0xA288B2
   E->base.timer = 0;
 }
 
-const uint16 *BouncingGoofball_Instr_88C5(uint16 k, const uint16 *jp) {  // 0xA288C5
+const unaligned_uint16 *BouncingGoofball_Instr_88C5(uint16 k, const unaligned_uint16 *jp) {  // 0xA288C5
   return jp;
 }
 
-const uint16 *BouncingGoofball_Instr_88C6(uint16 k, const uint16 *jp) {  // 0xA288C6
+const unaligned_uint16 *BouncingGoofball_Instr_88C6(uint16 k, const unaligned_uint16 *jp) {  // 0xA288C6
   Get_BouncingGoofball(cur_enemy_index)->bgl_var_02 = 0;
   QueueSfx2_Max6(0xE);
   return jp;
 }
 
-const uint16 *MiniCrocomire_Instr_897E(uint16 k, const uint16 *jp) {  // 0xA2897E
+const unaligned_uint16 *MiniCrocomire_Instr_897E(uint16 k, const unaligned_uint16 *jp) {  // 0xA2897E
   SpawnEprojWithGfx(*jp, cur_enemy_index, addr_Eproj_DBF2);
   return jp + 1;
 }
 
-const uint16 *MiniCrocomire_Instr_8990(uint16 k, const uint16 *jp) {  // 0xA28990
+const unaligned_uint16 *MiniCrocomire_Instr_8990(uint16 k, const unaligned_uint16 *jp) {  // 0xA28990
   Enemy_MiniCrocomire *E = Get_MiniCrocomire(cur_enemy_index);
   E->mce_var_F = FUNC16(MiniCrocomire_PreInstr5);
   E->mce_var_E = 0;
   return jp;
 }
 
-const uint16 *MiniCrocomire_Instr_899D(uint16 k, const uint16 *jp) {  // 0xA2899D
+const unaligned_uint16 *MiniCrocomire_Instr_899D(uint16 k, const unaligned_uint16 *jp) {  // 0xA2899D
   Enemy_MiniCrocomire *E = Get_MiniCrocomire(cur_enemy_index);
   E->mce_var_F = FUNC16(MiniCrocomire_PreInstr6);
   E->mce_var_E = 1;
@@ -711,7 +711,7 @@ void MaridiaBeybladeTurtle_Func4(void) {  // 0xA29315
   }
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_9381(uint16 k, const uint16 *jp) {  // 0xA29381
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_9381(uint16 k, const unaligned_uint16 *jp) {  // 0xA29381
   uint16 R48 = 0;
   if (CheckIfEnemyTouchesSamus(cur_enemy_index)) {
     extra_samus_x_displacement += Get_MaridiaBeybladeTurtle(cur_enemy_index)->mbte_var_E;
@@ -740,7 +740,7 @@ const uint16 *MaridiaBeybladeTurtle_Instr_9381(uint16 k, const uint16 *jp) {  //
   return jp;
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_9412(uint16 k, const uint16 *jp) {  // 0xA29412
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_9412(uint16 k, const unaligned_uint16 *jp) {  // 0xA29412
   int16 v4;
 
   Enemy_MaridiaBeybladeTurtle *E = Get_MaridiaBeybladeTurtle(cur_enemy_index);
@@ -757,12 +757,12 @@ const uint16 *MaridiaBeybladeTurtle_Instr_9412(uint16 k, const uint16 *jp) {  //
   return INSTR_RETURN_ADDR(addr_kMaridiaBeybladeTurtle_Ilist_8C72);
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_9447(uint16 k, const uint16 *jp) {  // 0xA29447
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_9447(uint16 k, const unaligned_uint16 *jp) {  // 0xA29447
   Get_MaridiaBeybladeTurtle(cur_enemy_index)->mbte_var_A = FUNC16(MaridiaBeybladeTurtle_Func5);
   return jp;
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_9451(uint16 k, const uint16 *jp) {  // 0xA29451
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_9451(uint16 k, const unaligned_uint16 *jp) {  // 0xA29451
   Enemy_MaridiaTurtle *E = Get_MaridiaTurtle(cur_enemy_index);
   E->mte_var_A = FUNC16(MaridiaBeybladeTurtle_Func7);
   E->mte_var_E = -1;
@@ -770,7 +770,7 @@ const uint16 *MaridiaBeybladeTurtle_Instr_9451(uint16 k, const uint16 *jp) {  //
   return INSTR_RETURN_ADDR(addr_kMaridiaBeybladeTurtle_Ilist_8C02);
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_946B(uint16 k, const uint16 *jp) {  // 0xA2946B
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_946B(uint16 k, const unaligned_uint16 *jp) {  // 0xA2946B
   Enemy_MaridiaTurtle *E = Get_MaridiaTurtle(cur_enemy_index);
   E->mte_var_A = FUNC16(MaridiaBeybladeTurtle_Func7);
   E->mte_var_E = 1;
@@ -778,7 +778,7 @@ const uint16 *MaridiaBeybladeTurtle_Instr_946B(uint16 k, const uint16 *jp) {  //
   return INSTR_RETURN_ADDR(addr_kMaridiaBeybladeTurtle_Ilist_8C02);
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_9485(uint16 k, const uint16 *jp) {  // 0xA29485
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_9485(uint16 k, const unaligned_uint16 *jp) {  // 0xA29485
   if (CheckIfEnemyTouchesSamus(cur_enemy_index)) {
     if ((Get_MaridiaBeybladeTurtle(cur_enemy_index)->mbte_var_E & 0x8000) == 0)
       return INSTR_RETURN_ADDR(addr_kMaridiaBeybladeTurtle_Ilist_8D40);
@@ -788,7 +788,7 @@ const uint16 *MaridiaBeybladeTurtle_Instr_9485(uint16 k, const uint16 *jp) {  //
   return jp;
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_94A1(uint16 k, const uint16 *jp) {  // 0xA294A1
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_94A1(uint16 k, const unaligned_uint16 *jp) {  // 0xA294A1
   Enemy_MaridiaBeybladeTurtle *E = Get_MaridiaBeybladeTurtle(cur_enemy_index);
   if (CheckIfEnemyTouchesSamus(cur_enemy_index))
     E->mbte_var_A = FUNC16(MiniMaridiaBeybladeTurtle_Func7);
@@ -799,13 +799,13 @@ const uint16 *MaridiaBeybladeTurtle_Instr_94A1(uint16 k, const uint16 *jp) {  //
   return INSTR_RETURN_ADDR(addr_kMaridiaBeybladeTurtle_Ilist_8B80);
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_94C7(uint16 k, const uint16 *jp) {  // 0xA294C7
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_94C7(uint16 k, const unaligned_uint16 *jp) {  // 0xA294C7
   Enemy_MaridiaBeybladeTurtle *E = Get_MaridiaBeybladeTurtle(cur_enemy_index);
   E->mbte_var_A = FUNC16(MiniMaridiaBeybladeTurtle_Func6);
   return jp;
 }
 
-const uint16 *MaridiaBeybladeTurtle_Instr_94D1(uint16 k, const uint16 *jp) {  // 0xA294D1
+const unaligned_uint16 *MaridiaBeybladeTurtle_Instr_94D1(uint16 k, const unaligned_uint16 *jp) {  // 0xA294D1
   QueueSfx2_Max6(0x3A);
   return jp;
 }
@@ -1089,7 +1089,7 @@ void ThinHoppingBlobs_Func16(void) {  // 0xA29DCD
   }
 }
 
-const uint16 *SpikeShootingPlant_Instr_9F2A(uint16 k, const uint16 *jp) {  // 0xA29F2A
+const unaligned_uint16 *SpikeShootingPlant_Instr_9F2A(uint16 k, const unaligned_uint16 *jp) {  // 0xA29F2A
   QueueSfx2_Max6(0x34);
   return jp;
 }
@@ -1180,7 +1180,7 @@ void SpikeShootingPlant_8(void) {  // 0xA2A082
   E->base.timer = 0;
 }
 
-const uint16 *SpikeShootingPlant_Instr_A095(uint16 k, const uint16 *jp) {  // 0xA2A095
+const unaligned_uint16 *SpikeShootingPlant_Instr_A095(uint16 k, const unaligned_uint16 *jp) {  // 0xA2A095
   Enemy_SpikeShootingPlant *E = Get_SpikeShootingPlant(k);
   E->sspt_var_F = FUNC16(SpikeShootingPlant_2);
   if (E->sspt_var_E)
@@ -1188,7 +1188,7 @@ const uint16 *SpikeShootingPlant_Instr_A095(uint16 k, const uint16 *jp) {  // 0x
   return jp;
 }
 
-const uint16 *SpikeShootingPlant_Instr_A0A7(uint16 k, const uint16 *jp) {  // 0xA2A0A7
+const unaligned_uint16 *SpikeShootingPlant_Instr_A0A7(uint16 k, const unaligned_uint16 *jp) {  // 0xA2A0A7
   SpawnEprojWithGfx(*jp, cur_enemy_index, addr_kEproj_SpikeShootingPlantSpikes);
   return jp + 1;
 }
@@ -1290,12 +1290,12 @@ void MaridiaSpikeyShell_8(uint16 k) {  // 0xA2A553
     E->mssl_var_E = 3;
 }
 
-const uint16 *MaridiaSpikeyShell_Instr_A56D(uint16 k, const uint16 *jp) {  // 0xA2A56D
+const unaligned_uint16 *MaridiaSpikeyShell_Instr_A56D(uint16 k, const unaligned_uint16 *jp) {  // 0xA2A56D
   Get_MaridiaSpikeyShell(k)->mssl_var_E = 0;
   return jp;
 }
 
-const uint16 *MaridiaSpikeyShell_Instr_A571(uint16 k, const uint16 *jp) {  // 0xA2A571
+const unaligned_uint16 *MaridiaSpikeyShell_Instr_A571(uint16 k, const unaligned_uint16 *jp) {  // 0xA2A571
   Get_MaridiaSpikeyShell(k)->mssl_var_E = 1;
   return jp;
 }
@@ -2223,19 +2223,19 @@ uint16 Rinka_Instr_B9A2(uint16 k, uint16 j) {  // 0xA2B9A2
     return *(unaligned_uint16 *)RomPtr_A2(j);
 }
 
-const uint16 *Rinka_Instr_B9B3(uint16 k, const uint16 *jp) {  // 0xA2B9B3
+const unaligned_uint16 *Rinka_Instr_B9B3(uint16 k, const unaligned_uint16 *jp) {  // 0xA2B9B3
   Enemy_Rinka *E = Get_Rinka(k);
   E->base.properties |= kEnemyProps_Tangible | kEnemyProps_Invisible;
   return jp;
 }
 
-const uint16 *Rinka_Instr_B9BD(uint16 k, const uint16 *jp) {  // 0xA2B9BD
+const unaligned_uint16 *Rinka_Instr_B9BD(uint16 k, const unaligned_uint16 *jp) {  // 0xA2B9BD
   Enemy_Rinka *E = Get_Rinka(k);
   E->base.properties |= kEnemyProps_ProcessedOffscreen | kEnemyProps_Tangible | kEnemyProps_Invisible;
   return jp;
 }
 
-const uint16 *Rinka_Instr_B9C7(uint16 k, const uint16 *jp) {  // 0xA2B9C7
+const unaligned_uint16 *Rinka_Instr_B9C7(uint16 k, const unaligned_uint16 *jp) {  // 0xA2B9C7
   Enemy_Rinka *E = Get_Rinka(k);
   E->base.properties &= ~(kEnemyProps_Tangible | kEnemyProps_Invisible);
   E->rinka_var_A = FUNC16(Rinka_3);
@@ -2244,7 +2244,7 @@ const uint16 *Rinka_Instr_B9C7(uint16 k, const uint16 *jp) {  // 0xA2B9C7
   return jp;
 }
 
-const uint16 *EnemyInstr_Rio_Instr_1(uint16 k, const uint16 *jp) {  // 0xA2BBC3
+const unaligned_uint16 *EnemyInstr_Rio_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA2BBC3
   Get_Rio(cur_enemy_index)->rio_var_E = 1;
   return jp;
 }
@@ -2362,7 +2362,7 @@ void Rio_6(uint16 a) {  // 0xA2BD54
   }
 }
 
-const uint16 *NorfairLavajumpingEnemy_Instr_BE8E(uint16 k, const uint16 *jp) {  // 0xA2BE8E
+const unaligned_uint16 *NorfairLavajumpingEnemy_Instr_BE8E(uint16 k, const unaligned_uint16 *jp) {  // 0xA2BE8E
   Get_NorfairLavajumpingEnemy(cur_enemy_index)->nley_var_00 = 1;
   return jp;
 }
@@ -2464,57 +2464,57 @@ void NorfairLavajumpingEnemy_Func_6(uint16 a) {  // 0xA2C012
   }
 }
 
-const uint16 *NorfairRio_Instr_C1C9(uint16 k, const uint16 *jp) {  // 0xA2C1C9
+const unaligned_uint16 *NorfairRio_Instr_C1C9(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C1C9
   Get_NorfairRio(cur_enemy_index)->nro_var_01 = 1;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C1D4(uint16 k, const uint16 *jp) {  // 0xA2C1D4
+const unaligned_uint16 *NorfairRio_Instr_C1D4(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C1D4
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 8;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C1DF(uint16 k, const uint16 *jp) {  // 0xA2C1DF
+const unaligned_uint16 *NorfairRio_Instr_C1DF(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C1DF
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 8;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C1EA(uint16 k, const uint16 *jp) {  // 0xA2C1EA
+const unaligned_uint16 *NorfairRio_Instr_C1EA(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C1EA
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 12;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C1F5(uint16 k, const uint16 *jp) {  // 0xA2C1F5
+const unaligned_uint16 *NorfairRio_Instr_C1F5(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C1F5
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = -12;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C200(uint16 k, const uint16 *jp) {  // 0xA2C200
+const unaligned_uint16 *NorfairRio_Instr_C200(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C200
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 4;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C20B(uint16 k, const uint16 *jp) {  // 0xA2C20B
+const unaligned_uint16 *NorfairRio_Instr_C20B(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C20B
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 0;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C216(uint16 k, const uint16 *jp) {  // 0xA2C216
+const unaligned_uint16 *NorfairRio_Instr_C216(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C216
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = -4;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C221(uint16 k, const uint16 *jp) {  // 0xA2C221
+const unaligned_uint16 *NorfairRio_Instr_C221(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C221
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = -12;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C22C(uint16 k, const uint16 *jp) {  // 0xA2C22C
+const unaligned_uint16 *NorfairRio_Instr_C22C(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C22C
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = -16;
   return jp;
 }
 
-const uint16 *NorfairRio_Instr_C237(uint16 k, const uint16 *jp) {  // 0xA2C237
+const unaligned_uint16 *NorfairRio_Instr_C237(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C237
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 12;
   return jp;
 }
@@ -2636,17 +2636,17 @@ void NorfairRio_Func_7(uint16 a) {  // 0xA2C40D
   }
 }
 
-const uint16 *LowerNorfairRio_Instr_C6D2(uint16 k, const uint16 *jp) {  // 0xA2C6D2
+const unaligned_uint16 *LowerNorfairRio_Instr_C6D2(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C6D2
   Get_NorfairRio(cur_enemy_index)->nro_var_01 = 1;
   return jp;
 }
 
-const uint16 *LowerNorfairRio_Instr_C6DD(uint16 k, const uint16 *jp) {  // 0xA2C6DD
+const unaligned_uint16 *LowerNorfairRio_Instr_C6DD(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C6DD
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 0;
   return jp;
 }
 
-const uint16 *LowerNorfairRio_Instr_C6E8(uint16 k, const uint16 *jp) {  // 0xA2C6E8
+const unaligned_uint16 *LowerNorfairRio_Instr_C6E8(uint16 k, const unaligned_uint16 *jp) {  // 0xA2C6E8
   Get_NorfairRio(cur_enemy_index)->nro_var_02 = 1;
   return jp;
 }
@@ -2763,22 +2763,22 @@ void LowerNorfairRio_Func_7(uint16 a) {  // 0xA2C8A3
   }
 }
 
-const uint16 *MaridiaLargeSnail_Instr_CB6B(uint16 k, const uint16 *jp) {  // 0xA2CB6B
+const unaligned_uint16 *MaridiaLargeSnail_Instr_CB6B(uint16 k, const unaligned_uint16 *jp) {  // 0xA2CB6B
   QueueSfx2_Max6(0xE);
   return jp;
 }
 
-const uint16 *MaridiaLargeSnail_Instr_CCB3(uint16 k, const uint16 *jp) {  // 0xA2CCB3
+const unaligned_uint16 *MaridiaLargeSnail_Instr_CCB3(uint16 k, const unaligned_uint16 *jp) {  // 0xA2CCB3
   Get_MaridiaLargeSnail(cur_enemy_index)->mlsl_var_02 = 1;
   return jp;
 }
 
-const uint16 *MaridiaLargeSnail_Instr_CCBE(uint16 k, const uint16 *jp) {  // 0xA2CCBE
+const unaligned_uint16 *MaridiaLargeSnail_Instr_CCBE(uint16 k, const unaligned_uint16 *jp) {  // 0xA2CCBE
   Get_MaridiaLargeSnail(cur_enemy_index)->mlsl_var_03 = 1;
   return jp;
 }
 
-const uint16 *MaridiaLargeSnail_Instr_CCC9(uint16 k, const uint16 *jp) {  // 0xA2CCC9
+const unaligned_uint16 *MaridiaLargeSnail_Instr_CCC9(uint16 k, const unaligned_uint16 *jp) {  // 0xA2CCC9
   Get_MaridiaLargeSnail(cur_enemy_index)->mlsl_var_03 = 0;
   return jp;
 }
@@ -3311,7 +3311,7 @@ void Ripper_Main(void) {  // 0xA2E4DA
   }
 }
 
-const uint16 *LavaSeahorse_Instr_E5FB(uint16 k, const uint16 *jp) {  // 0xA2E5FB
+const unaligned_uint16 *LavaSeahorse_Instr_E5FB(uint16 k, const unaligned_uint16 *jp) {  // 0xA2E5FB
   Get_LavaSeahorse(cur_enemy_index)->lse_var_02 = 1;
   return jp;
 }

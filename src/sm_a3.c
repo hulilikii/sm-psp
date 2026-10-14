@@ -95,7 +95,7 @@ void Enemy_NormalFrozenAI_A3(void) {  // 0xA38041
   NormalEnemyFrozenAI();
 }
 
-const uint16 *Waver_Instr_1(uint16 k, const uint16 *jp) {  // 0xA386E3
+const unaligned_uint16 *Waver_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA386E3
   Get_Waver(cur_enemy_index)->waver_var_E = 1;
   return jp;
 }
@@ -153,7 +153,7 @@ void Waver_Func_1(void) {  // 0xA387FE
   }
 }
 
-const uint16 *Metalee_Instr_1(uint16 k, const uint16 *jp) {  // 0xA38956
+const unaligned_uint16 *Metalee_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA38956
   Get_Metalee(cur_enemy_index)->metalee_var_E = 1;
   return jp;
 }
@@ -370,17 +370,17 @@ void Fireflea_Common(void) {  // 0xA38E8D
   }
 }
 
-const uint16 *MaridiaFish_Instr_3(uint16 k, const uint16 *jp) {  // 0xA39096
+const unaligned_uint16 *MaridiaFish_Instr_3(uint16 k, const unaligned_uint16 *jp) {  // 0xA39096
   Get_MaridiaFish(cur_enemy_index)->base.layer = 6;
   return jp;
 }
 
-const uint16 *MaridiaFish_Instr_1(uint16 k, const uint16 *jp) {  // 0xA390A0
+const unaligned_uint16 *MaridiaFish_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA390A0
   Get_MaridiaFish(cur_enemy_index)->base.layer = 2;
   return jp;
 }
 
-const uint16 *MaridiaFish_Instr_2(uint16 k, const uint16 *jp) {  // 0xA390AA
+const unaligned_uint16 *MaridiaFish_Instr_2(uint16 k, const unaligned_uint16 *jp) {  // 0xA390AA
   Get_MaridiaFish(cur_enemy_index)->mfh_var_01 = 1;
   return jp;
 }
@@ -595,22 +595,22 @@ void Slug_Func_1(void) {  // 0xA39955
   ;
 }
 
-const uint16 *PlatformThatFallsWithSamus_Instr_3(uint16 k, const uint16 *jp) {  // 0xA39C6B
+const unaligned_uint16 *PlatformThatFallsWithSamus_Instr_3(uint16 k, const unaligned_uint16 *jp) {  // 0xA39C6B
   Get_PlatformThatFallsWithSamus(cur_enemy_index)->ptfwss_var_02 = 0;
   return jp;
 }
 
-const uint16 *PlatformThatFallsWithSamus_Instr_4(uint16 k, const uint16 *jp) {  // 0xA39C76
+const unaligned_uint16 *PlatformThatFallsWithSamus_Instr_4(uint16 k, const unaligned_uint16 *jp) {  // 0xA39C76
   Get_PlatformThatFallsWithSamus(cur_enemy_index)->ptfwss_var_02 = 1;
   return jp;
 }
 
-const uint16 *PlatformThatFallsWithSamus_Instr_1(uint16 k, const uint16 *jp) {  // 0xA39C81
+const unaligned_uint16 *PlatformThatFallsWithSamus_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA39C81
   Get_PlatformThatFallsWithSamus(cur_enemy_index)->ptfwss_var_02 = 0;
   return jp;
 }
 
-const uint16 *PlatformThatFallsWithSamus_Instr_2(uint16 k, const uint16 *jp) {  // 0xA39C8C
+const unaligned_uint16 *PlatformThatFallsWithSamus_Instr_2(uint16 k, const unaligned_uint16 *jp) {  // 0xA39C8C
   Get_PlatformThatFallsWithSamus(cur_enemy_index)->ptfwss_var_02 = 1;
   return jp;
 }
@@ -1214,12 +1214,12 @@ void Mochtroid_Shot(void) {  // 0xA3A9A8
   Enemy_NormalShotAI_A3();
 }
 
-const uint16 *Sidehopper_Func_1(uint16 k, const uint16 *jp) {  // 0xA3AA68
+const unaligned_uint16 *Sidehopper_Func_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3AA68
   QueueSfx2_Max3(*jp);
   return jp + 1;
 }
 
-const uint16 *Sidehopper_Instr_1(uint16 k, const uint16 *jp) {  // 0xA3AAFE
+const unaligned_uint16 *Sidehopper_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3AAFE
   Get_Sidehopper(cur_enemy_index)->sideh_var_04 = 1;
   return jp;
 }
@@ -1483,17 +1483,17 @@ void Sidehopper_Func_22(void) {  // 0xA3AE8E
   }
 }
 
-const uint16 *MaridiaRefillCandy_Instr_1(uint16 k, const uint16 *jp) {  // 0xA3B429
+const unaligned_uint16 *MaridiaRefillCandy_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3B429
   Get_MaridiaRefillCandy(cur_enemy_index)->mrcy_var_00 = 4;
   return jp;
 }
 
-const uint16 *MaridiaRefillCandy_Instr_2(uint16 k, const uint16 *jp) {  // 0xA3B434
+const unaligned_uint16 *MaridiaRefillCandy_Instr_2(uint16 k, const unaligned_uint16 *jp) {  // 0xA3B434
   Get_MaridiaRefillCandy(cur_enemy_index)->mrcy_var_00 = 8;
   return jp;
 }
 
-const uint16 *MaridiaRefillCandy_Instr_3(uint16 k, const uint16 *jp) {  // 0xA3B43F
+const unaligned_uint16 *MaridiaRefillCandy_Instr_3(uint16 k, const unaligned_uint16 *jp) {  // 0xA3B43F
   Get_MaridiaRefillCandy(cur_enemy_index)->mrcy_var_00 = 12;
   return jp;
 }
@@ -1600,12 +1600,12 @@ void NorfairSlowFireball_Func_1(void) {  // 0xA3B6F9
     Unreachable();
 }
 
-const uint16 *Bang_Instr_1(uint16 k, const uint16 *jp) {  // 0xA3BA78
+const unaligned_uint16 *Bang_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3BA78
   QueueSfx2_Max6(0x56);
   return jp;
 }
 
-const uint16 *Bang_Instr_2(uint16 k, const uint16 *jp) {  // 0xA3BAA8
+const unaligned_uint16 *Bang_Instr_2(uint16 k, const unaligned_uint16 *jp) {  // 0xA3BAA8
   Get_Bang(cur_enemy_index)->bang_var_22 = 1;
   return jp;
 }
@@ -1845,7 +1845,7 @@ void Bang_Shot(void) {  // 0xA3BEFD
   }
 }
 
-const uint16 *Skree_Instr_1(uint16 k, const uint16 *jp) {  // 0xA3C6A4
+const unaligned_uint16 *Skree_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3C6A4
   Get_Skree(cur_enemy_index)->skree_var_E = 1;
   return jp;
 }
@@ -1955,31 +1955,31 @@ void Skree_Shot(void) {  // 0xA3C7F5
   }
 }
 
-const uint16 *MaridiaSnail_Instr_1(uint16 k, const uint16 *jp) {  // 0xA3CC36
+const unaligned_uint16 *MaridiaSnail_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3CC36
   Get_MaridiaSnail(k)->msl_var_F = *jp;
   return jp + 1;
 }
 
-const uint16 *MaridiaSnail_Instr_2(uint16 k, const uint16 *jp) {  // 0xA3CC3F
+const unaligned_uint16 *MaridiaSnail_Instr_2(uint16 k, const unaligned_uint16 *jp) {  // 0xA3CC3F
   Get_MaridiaSnail(k)->msl_var_D = *jp;
   return jp + 1;
 }
 
-const uint16 *MaridiaSnail_Instr_4(uint16 k, const uint16 *jp) {  // 0xA3CC48
+const unaligned_uint16 *MaridiaSnail_Instr_4(uint16 k, const unaligned_uint16 *jp) {  // 0xA3CC48
   Enemy_MaridiaSnail *E = Get_MaridiaSnail(k);
   E->msl_var_07 = jp[0];
   E->msl_var_C = *(unaligned_uint16 *)((uint8 *)&g_stru_A3CD42[0].field_6 + 8 * E->msl_var_07);
   return jp + 1;
 }
 
-const uint16 *MaridiaSnail_Instr_3(uint16 k, const uint16 *jp) {  // 0xA3CC5F
+const unaligned_uint16 *MaridiaSnail_Instr_3(uint16 k, const unaligned_uint16 *jp) {  // 0xA3CC5F
   Enemy_MaridiaSnail *E = Get_MaridiaSnail(k);
   E->base.x_pos += jp[0];
   E->base.y_pos += jp[1];
   return jp + 2;
 }
 
-const uint16 *MaridiaSnail_Instr_5(uint16 k, const uint16 *jp) {  // 0xA3CC78
+const unaligned_uint16 *MaridiaSnail_Instr_5(uint16 k, const unaligned_uint16 *jp) {  // 0xA3CC78
   if (Get_MaridiaSnail(k)->msl_var_08 == 2 || (NextRandom() & 1) != 0)
     jp -= 3;
   return jp;
@@ -2441,7 +2441,7 @@ void Reflec_Func_1(void) {  // 0xA3DB0C
   }
 }
 
-const uint16 *Reflec_Instr_1(uint16 k, const uint16 *jp) {  // 0xA3DBC8
+const unaligned_uint16 *Reflec_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3DBC8
   Get_Reflec(k)->reflec_parameter_2 = jp[0];
   return jp + 1;
 }
@@ -2487,7 +2487,7 @@ void Reflec_Shot(void) {
   }
 }
 
-const uint16 *WreckedShipOrangeZoomer_Func_1(uint16 k, const uint16 *jp) {  // 0xA3DFC2
+const unaligned_uint16 *WreckedShipOrangeZoomer_Func_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3DFC2
   Get_WreckedShipOrangeZoomer(k)->wsozr_var_F = jp[0];
   return jp + 1;
 }
@@ -2623,7 +2623,7 @@ void FireZoomer_Init(void) {  // 0xA3E59C
   StoneZoomer_E67A(cur_enemy_index);
 }
 
-const uint16 *Zoomer_Instr_SetPreinstr(uint16 k, const uint16 *jp) {  // 0xA3E660
+const unaligned_uint16 *Zoomer_Instr_SetPreinstr(uint16 k, const unaligned_uint16 *jp) {  // 0xA3E660
   gEnemyData(k)->ai_preinstr = jp[0];
   return jp + 1;
 }
@@ -2783,12 +2783,12 @@ void Metroid_Init(void) {  // 0xA3EA4F
   E->metroid_var_02 = 0;
 }
 
-const uint16 *Metroid_Instr_2(uint16 k, const uint16 *jp) {  // 0xA3EAA5
+const unaligned_uint16 *Metroid_Instr_2(uint16 k, const unaligned_uint16 *jp) {  // 0xA3EAA5
   QueueSfx2_Max6(0x50);
   return jp;
 }
 
-const uint16 *Metroid_Instr_1(uint16 k, const uint16 *jp) {  // 0xA3EAB1
+const unaligned_uint16 *Metroid_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA3EAB1
   int v2 = NextRandom() & 7;
   QueueSfx2_Max6(g_word_A3EAD6[v2]);
   return jp;

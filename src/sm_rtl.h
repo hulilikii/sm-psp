@@ -30,8 +30,8 @@ void MemCpy(void *dst, const void *src, int size);
 void Call(uint32 addr);
 bool Unreachable();
 
-#define INSTR_RETURN_ADDR(x) ((const uint16*)(uintptr_t)(x))
-#define INSTR_INCR_BYTES(x, n) ((const uint16*)((uintptr_t)(x) + n))
+#define INSTR_RETURN_ADDR(x) ((const unaligned_uint16 *)(uintptr_t)(x))
+#define INSTR_INCR_BYTES(x, n) ((const unaligned_uint16 *)((uintptr_t)(x) + (n)))
 #define INSTR_ADDR_TO_PTR(k, jp) ((uint8*)(jp) - (RomBankBase(gEnemyData(k)->bank)))
 
 #define INSTRB_RETURN_ADDR(x) ((const uint8*)(uintptr_t)(x))
@@ -176,7 +176,7 @@ extern const int16 kSinCosTable8bit_Sext[320];
 
 void CallEnemyAi(uint32 ea);
 void CallEnemyPreInstr(uint32 ea);
-const uint16 *CallEnemyInstr(uint32 ea, uint16 k, const uint16 *jp);
+const unaligned_uint16 *CallEnemyInstr(uint32 ea, uint16 k, const unaligned_uint16 *jp);
 
 void CalculateBlockContainingPixelPos(uint16 xpos, uint16 ypos);
 

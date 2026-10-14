@@ -116,7 +116,7 @@ void WalkingSpacePirates_883E(void) {  // 0xB2883E
   QueueSfx2_Max6(0x66);
 }
 
-const uint16 *SpacePirates_Instr_MovePixelsDownAndChangeDirFaceRight(uint16 k, const uint16 *jp) {  // 0xB2EE40
+const unaligned_uint16 *SpacePirates_Instr_MovePixelsDownAndChangeDirFaceRight(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EE40
   if (!(Enemy_MoveDown(cur_enemy_index, INT16_SHL16(jp[0]))))
     return jp + 1;
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
@@ -126,7 +126,7 @@ const uint16 *SpacePirates_Instr_MovePixelsDownAndChangeDirFaceRight(uint16 k, c
   return INSTR_RETURN_ADDR(addr_kSpacePirates_Ilist_ED36);
 }
 
-const uint16 *SpacePirates_Instr_MovePixelsDownAndChangeDirFaceLeft(uint16 k, const uint16 *jp) {  // 0xB2EE72
+const unaligned_uint16 *SpacePirates_Instr_MovePixelsDownAndChangeDirFaceLeft(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EE72
   if (!(Enemy_MoveDown(cur_enemy_index, INT16_SHL16(jp[0]))))
     return jp + 1;
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
@@ -136,7 +136,7 @@ const uint16 *SpacePirates_Instr_MovePixelsDownAndChangeDirFaceLeft(uint16 k, co
   return INSTR_RETURN_ADDR(addr_off_B2EDAC);
 }
 
-const uint16 *SpacePirates_Instr_RandomNewDirFaceR(uint16 k, const uint16 *jp) {  // 0xB2EEA4
+const unaligned_uint16 *SpacePirates_Instr_RandomNewDirFaceR(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EEA4
   uint16 result = addr_kSpacePirates_Ilist_ED36;
   uint16 v4 = NextRandom() & 1;
   Get_SpacePirates(cur_enemy_index)->sps_var_C = v4;
@@ -145,7 +145,7 @@ const uint16 *SpacePirates_Instr_RandomNewDirFaceR(uint16 k, const uint16 *jp) {
   return INSTR_RETURN_ADDR(result);
 }
 
-const uint16 *SpacePirates_Instr_RandomNewDirFaceL(uint16 k, const uint16 *jp) {  // 0xB2EEBC
+const unaligned_uint16 *SpacePirates_Instr_RandomNewDirFaceL(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EEBC
   uint16 result = addr_off_B2EDAC;
   uint16 v4 = NextRandom() & 1;
   Get_SpacePirates(cur_enemy_index)->sps_var_C = v4;
@@ -154,7 +154,7 @@ const uint16 *SpacePirates_Instr_RandomNewDirFaceL(uint16 k, const uint16 *jp) {
   return INSTR_RETURN_ADDR(result);
 }
 
-const uint16 *SpacePirates_Instr_PrepareWallJumpR(uint16 k, const uint16 *jp) {  // 0xB2EED4
+const unaligned_uint16 *SpacePirates_Instr_PrepareWallJumpR(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EED4
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   E->sps_var_B = E->base.x_pos + E->sps_parameter_2;
   E->sps_var_D = E->base.x_pos + (E->sps_parameter_2 >> 1);
@@ -163,7 +163,7 @@ const uint16 *SpacePirates_Instr_PrepareWallJumpR(uint16 k, const uint16 *jp) { 
   return jp;
 }
 
-const uint16 *SpacePirates_Instr_PrepareWallJumpL(uint16 k, const uint16 *jp) {  // 0xB2EEFD
+const unaligned_uint16 *SpacePirates_Instr_PrepareWallJumpL(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EEFD
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   E->sps_var_B = E->base.x_pos - E->sps_parameter_2;
   E->sps_var_D = E->base.x_pos - (E->sps_parameter_2 >> 1);
@@ -172,7 +172,7 @@ const uint16 *SpacePirates_Instr_PrepareWallJumpL(uint16 k, const uint16 *jp) { 
   return jp;
 }
 
-const uint16 *SpacePirates_Instr_FireLaserL(uint16 k, const uint16 *jp) {  // 0xB2EF2A
+const unaligned_uint16 *SpacePirates_Instr_FireLaserL(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EF2A
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   eproj_init_param_1 = *((unaligned_uint16*)RomPtr_A0(E->base.enemy_ptr) + 3);
   eproj_spawn_pt = (Point16U){ E->base.x_pos - 24, E->base.y_pos - 16 };
@@ -181,7 +181,7 @@ const uint16 *SpacePirates_Instr_FireLaserL(uint16 k, const uint16 *jp) {  // 0x
   return jp;
 }
 
-const uint16 *SpacePirates_Instr_FireLaserR(uint16 k, const uint16 *jp) {  // 0xB2EF5D
+const unaligned_uint16 *SpacePirates_Instr_FireLaserR(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EF5D
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   eproj_spawn_pt = (Point16U){ E->base.x_pos + 24, E->base.y_pos - 16 };
   eproj_spawn_r22 = 1;
@@ -189,12 +189,12 @@ const uint16 *SpacePirates_Instr_FireLaserR(uint16 k, const uint16 *jp) {  // 0x
   return jp;
 }
 
-const uint16 *SpacePirates_Instr_SetEnemyFunc(uint16 k, const uint16 *jp) {  // 0xB2EF83
+const unaligned_uint16 *SpacePirates_Instr_SetEnemyFunc(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EF83
   Get_SpacePirates(cur_enemy_index)->sps_var_A = jp[0];
   return jp + 1;
 }
 
-const uint16 *SpacePirates_Instr_PlaySfx(uint16 k, const uint16 *jp) {  // 0xB2EF93
+const unaligned_uint16 *SpacePirates_Instr_PlaySfx(uint16 k, const unaligned_uint16 *jp) {  // 0xB2EF93
   QueueSfx2_Max6(0x66);
   return jp;
 }
@@ -311,12 +311,12 @@ void SpacePirates_Func_4(uint16 k) {  // 0xB2F0E4
   }
 }
 
-const uint16 *SpacePirates_Instr_20(uint16 k, const uint16 *jp) {  // 0xB2F536
+const unaligned_uint16 *SpacePirates_Instr_20(uint16 k, const unaligned_uint16 *jp) {  // 0xB2F536
   Get_SpacePirates(cur_enemy_index)->base.palette_index = jp[0];
   return jp + 1;
 }
 
-const uint16 *SpacePirates_Instr_16(uint16 k, const uint16 *jp) {  // 0xB2F546
+const unaligned_uint16 *SpacePirates_Instr_16(uint16 k, const unaligned_uint16 *jp) {  // 0xB2F546
   QueueSfx2_Max6(jp[0]);
   return jp + 1;
 }
@@ -325,14 +325,14 @@ void sub_B2F554(void) {  // 0xB2F554
   gEnemyData(cur_enemy_index)->instruction_timer = 1;
 }
 
-const uint16 *SpacePirates_Instr_15(uint16 k, const uint16 *jp) {  // 0xB2F564
+const unaligned_uint16 *SpacePirates_Instr_15(uint16 k, const unaligned_uint16 *jp) {  // 0xB2F564
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   eproj_spawn_rect = (Rect16U){ E->base.x_pos, E->base.y_pos, jp[1], jp[2] };
   SpawnEprojWithGfx(jp[0], cur_enemy_index, addr_kEproj_PirateClaw);
   return jp + 3;
 }
 
-const uint16 *SpacePirates_Instr_18(uint16 k, const uint16 *jp) {  // 0xB2F590
+const unaligned_uint16 *SpacePirates_Instr_18(uint16 k, const unaligned_uint16 *jp) {  // 0xB2F590
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   E->base.instruction_timer = 1;
   E->sps_var_C = (((E->base.x_pos - samus_x_pos) & 0x8000) != 0) ? addr_kSpacePirates_Ilist_F420 : addr_kSpacePirates_Ilist_F22E;
@@ -345,7 +345,7 @@ void sub_B2F5B3(void) {  // 0xB2F5B3
   v0->ai_var_C = (((v0->x_pos - samus_x_pos) & 0x8000) != 0) ? addr_kSpacePirates_Ilist_F51A : addr_kSpacePirates_Ilist_F32E;
 }
 
-const uint16 *SpacePirates_Instr_17(uint16 k, const uint16 *jp) {  // 0xB2F5D6
+const unaligned_uint16 *SpacePirates_Instr_17(uint16 k, const unaligned_uint16 *jp) {  // 0xB2F5D6
   Get_SpacePirates(k)->sps_var_00 = 0;
   return jp;
 }
@@ -543,7 +543,7 @@ void SpacePirates_Func_16(void) {  // 0xB2F917
   }
 }
 
-const uint16 *SpacePirates_Instr_19(uint16 k, const uint16 *jp) {  // 0xB2F969
+const unaligned_uint16 *SpacePirates_Instr_19(uint16 k, const unaligned_uint16 *jp) {  // 0xB2F969
   Enemy_SpacePirates *E = Get_SpacePirates(k);
   E->sps_var_00 = 1536;
   E->sps_var_03 = E->sps_var_D
@@ -594,7 +594,7 @@ void SpacePirates_FA15(uint16 k) {  // 0xB2FA15
   }
 }
 
-const uint16 *SpacePirates_Instr_21(uint16 k, const uint16 *jp) {  // 0xB2FA3D
+const unaligned_uint16 *SpacePirates_Instr_21(uint16 k, const unaligned_uint16 *jp) {  // 0xB2FA3D
   Enemy_SpacePirates *E = Get_SpacePirates(k);
   E->sps_var_00 = 1536;
   E->sps_var_03 = E->sps_var_E
@@ -651,7 +651,7 @@ void SpacePirates_FB11(uint16 k) {  // 0xB2FB11
   CreateSpriteAtPos(E->base.x_pos + 8, E->base.y_pos + 28, 10, 0);
 }
 
-const uint16 *SpacePirates_Instr_12(uint16 k, const uint16 *jp) {  // 0xB2FC68
+const unaligned_uint16 *SpacePirates_Instr_12(uint16 k, const unaligned_uint16 *jp) {  // 0xB2FC68
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   eproj_spawn_pt = (Point16U){ E->base.x_pos - 24, E->base.y_pos - jp[0] };
   eproj_spawn_r22 = 0;
@@ -659,7 +659,7 @@ const uint16 *SpacePirates_Instr_12(uint16 k, const uint16 *jp) {  // 0xB2FC68
   return jp + 1;
 }
 
-const uint16 *SpacePirates_Instr_14(uint16 k, const uint16 *jp) {  // 0xB2FC90
+const unaligned_uint16 *SpacePirates_Instr_14(uint16 k, const unaligned_uint16 *jp) {  // 0xB2FC90
   Enemy_SpacePirates *E = Get_SpacePirates(cur_enemy_index);
   eproj_spawn_pt = (Point16U){ E->base.x_pos + 24, E->base.y_pos - jp[0] };
   eproj_spawn_r22 = 1;
@@ -667,12 +667,12 @@ const uint16 *SpacePirates_Instr_14(uint16 k, const uint16 *jp) {  // 0xB2FC90
   return jp + 1;
 }
 
-const uint16 *SpacePirates_Instr_11(uint16 k, const uint16 *jp) {  // 0xB2FCB8
+const unaligned_uint16 *SpacePirates_Instr_11(uint16 k, const unaligned_uint16 *jp) {  // 0xB2FCB8
   Get_SpacePirates(cur_enemy_index)->sps_var_A = jp[0];
   return jp + 1;
 }
 
-const uint16 *SpacePirates_Instr_13(uint16 k, const uint16 *jp) {  // 0xB2FCC8
+const unaligned_uint16 *SpacePirates_Instr_13(uint16 k, const unaligned_uint16 *jp) {  // 0xB2FCC8
   if (IsSamusWithinEnemy_Y(cur_enemy_index, 0x10)) {
     if ((int16)(samus_x_pos - Get_SpacePirates(cur_enemy_index)->base.x_pos) >= 0)
       return INSTR_RETURN_ADDR(addr_kSpacePirates_Ilist_FC0E);
