@@ -3432,26 +3432,85 @@ uint8 IsEnemyLeavingScreen(uint16 k) {  // 0xA0C18E
 
 void ProcessEnemyInstructions(void) {  // 0xA0C26A
   EnemyData *E = gEnemyData(cur_enemy_index);
+    bool trace = E->bank == 0xA6;
+  if (trace) {
+    PspDebugMarker(862000u + cur_enemy_index);  // ProcessEnemyInstructions entered
+    PspDebugValue(8810, cur_enemy_index);
+    PspDebugValue(8811, E->bank);
+    PspDebugValue(8812, E->ai_handler_bits);
+    PspDebugValue(8813, E->instruction_timer);
+    PspDebugValue(8814, E->current_instruction);
+    PspDebugValue(8815, E->extra_properties);
+  }
   if ((E->ai_handler_bits & 4) == 0) {
+      if (trace)
+      PspDebugMarker(862100u + cur_enemy_index);  // AI-handler check passed
     if (E->instruction_timer-- == 1) {
+          if (trace) {
+        PspDebugMarker(862200u + cur_enemy_index);  // Timer was 1
+        PspDebugValue(8816, E->instruction_timer);
+      }
       assert(E->current_instruction & 0x8000);
+            if (trace)
+        PspDebugMarker(862300u + cur_enemy_index);  // Instruction assertion passed
       const uint8 *base_ptr = RomBankBase(E->bank);
+            if (trace)
+        PspDebugMarker(862400u + cur_enemy_index);  // ROM bank base obtained
       const uint16 *pc = (const uint16 *)(base_ptr + E->current_instruction);
+           if (trace) {
+  PspDebugMarker(862500u + cur_enemy_index);
+  PspDebugValue(8817, (uint32)(uintptr_t)pc);
+
+  PspDebugMarker(862510u + cur_enemy_index);
+}
+
+      uint16 instruction = *pc;
+
+if (trace) {
+  PspDebugMarker(862520u + cur_enemy_index);
+  PspDebugValue(8818, instruction);
+  PspDebugMarker(862600u + cur_enemy_index);
+}
       while ((*pc & 0x8000) != 0) {
+              if (trace) {
+          PspDebugMarker(862700u + cur_enemy_index);  // About to call enemy instruction
+          PspDebugValue(8819, (uint32)(uintptr_t)pc);
+          PspDebugValue(8820, *pc);
+        }
         pc = CallEnemyInstr(E->bank << 16 | *pc, cur_enemy_index, pc + 1);
+                if (trace)
+          PspDebugMarker(862800u + cur_enemy_index);  // Enemy instruction returned
         if (!pc)
           return;
         if ((uintptr_t)pc < 0x10000)
           pc = (const uint16*)(base_ptr + (uintptr_t)pc);
+                  if (trace) {
+          PspDebugMarker(862900u + cur_enemy_index);  // Instruction pointer resolved
+          PspDebugValue(8821, (uint32)(uintptr_t)pc);
+        }
       }
+            if (trace)
+        PspDebugMarker(863000u + cur_enemy_index);  // Reached instruction data
       E->instruction_timer = pc[0];
       E->spritemap_pointer = pc[1];
       E->current_instruction = (uint8 *)pc + 4 - base_ptr;
       E->extra_properties |= 0x8000;
+            if (trace) {
+        PspDebugMarker(863100u + cur_enemy_index);  // Instruction state updated
+        PspDebugValue(8813, E->instruction_timer);
+        PspDebugValue(8814, E->current_instruction);
+        PspDebugValue(8822, E->spritemap_pointer);
+      }
     } else {
+          if (trace)
+        PspDebugMarker(863200u + cur_enemy_index);  // Timer was not 1
       E->extra_properties &= ~0x8000;
+            if (trace)
+        PspDebugMarker(863300u + cur_enemy_index);  // Extra properties updated
     }
   }
+    if (trace)
+    PspDebugMarker(863400u + cur_enemy_index);  // Function about to return
 }
 
 static uint8 ClearCarry_13(EnemyBlockCollInfo *ebci) {  // 0xA0C2BC
