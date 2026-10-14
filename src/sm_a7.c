@@ -128,7 +128,7 @@ void CallEnemyInstrExtFunc(uint32 ea, uint16 k) {
   }
 }
 
-const uint16 *EnemyInstr_Call_A7(uint16 k, const uint16 *jp) {  // 0xA7808A
+const unaligned_uint16 *EnemyInstr_Call_A7(uint16 k, const unaligned_uint16 *jp) {  // 0xA7808A
   CallEnemyInstrExtFunc(jp[0] | 0xA70000, k);
   return jp + 1;
 }
@@ -154,7 +154,7 @@ void Enemy_NormalFrozenAI_A7(void) {  // 0xA78041
   NormalEnemyFrozenAI();
 }
 
-const uint16 *Kraid_Instr_9(uint16 k, const uint16 *jp) {  // 0xA78A8F
+const unaligned_uint16 *Kraid_Instr_9(uint16 k, const unaligned_uint16 *jp) {  // 0xA78A8F
   Enemy_Kraid *E = Get_Kraid(0);
   if ((int16)(E->base.health - E->kraid_healths_8ths[3]) < 0) {
     Enemy_Kraid *E1 = Get_Kraid(0x40);
@@ -872,17 +872,17 @@ void Kraid_HealthBasedPaletteHandling(void) {  // 0xA7B394
   } while ((int16)(v4 - 32) < 0);
 }
 
-const uint16 *Kraid_Instr_1(uint16 k, const uint16 *jp) {  // 0xA7B633
+const unaligned_uint16 *Kraid_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B633
   return jp;
 }
 
-const uint16 *Kraid_Instr_DecYpos(uint16 k, const uint16 *jp) {  // 0xA7B636
+const unaligned_uint16 *Kraid_Instr_DecYpos(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B636
   Enemy_Kraid *E = Get_Kraid(0);
   --E->base.y_pos;
   return jp;
 }
 
-const uint16 *Kraid_Instr_IncrYpos_Shake(uint16 k, const uint16 *jp) {  // 0xA7B63C
+const unaligned_uint16 *Kraid_Instr_IncrYpos_Shake(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B63C
   Enemy_Kraid *E = Get_Kraid(0);
   ++E->base.y_pos;
   earthquake_type = 1;
@@ -890,30 +890,30 @@ const uint16 *Kraid_Instr_IncrYpos_Shake(uint16 k, const uint16 *jp) {  // 0xA7B
   return jp;
 }
 
-const uint16 *Kraid_Instr_PlaySound_0x76(uint16 k, const uint16 *jp) {  // 0xA7B64E
+const unaligned_uint16 *Kraid_Instr_PlaySound_0x76(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B64E
   QueueSfx2_Max6(0x76);
   return jp;
 }
 
-const uint16 *Kraid_Instr_XposMinus3(uint16 k, const uint16 *jp) {  // 0xA7B65A
+const unaligned_uint16 *Kraid_Instr_XposMinus3(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B65A
   Enemy_Kraid *E = Get_Kraid(0);
   E->base.x_pos -= g_word_A7A91C;
   return jp;
 }
 
-const uint16 *Kraid_Instr_XposMinus3b(uint16 k, const uint16 *jp) {  // 0xA7B667
+const unaligned_uint16 *Kraid_Instr_XposMinus3b(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B667
   Enemy_Kraid *E = Get_Kraid(0);
   E->base.x_pos -= g_word_A7A91C;
   return jp;
 }
 
-const uint16 *Kraid_Instr_XposPlus3(uint16 k, const uint16 *jp) {  // 0xA7B674
+const unaligned_uint16 *Kraid_Instr_XposPlus3(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B674
   Enemy_Kraid *E = Get_Kraid(0);
   E->base.x_pos += g_word_A7A920;
   return jp;
 }
 
-const uint16 *Kraid_Instr_MoveHimRight(uint16 k, const uint16 *jp) {  // 0xA7B683
+const unaligned_uint16 *Kraid_Instr_MoveHimRight(uint16 k, const unaligned_uint16 *jp) {  // 0xA7B683
   uint16 v3;
 
   Enemy_Kraid *E = Get_Kraid(0);

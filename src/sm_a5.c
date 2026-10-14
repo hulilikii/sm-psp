@@ -867,7 +867,7 @@ void Draygon_Func_40(uint16 k) {  // 0xA594A9
   }
 }
 
-const uint16 *Draygon_Instr_1(uint16 k, const uint16 *jp) {  // 0xA594DD
+const unaligned_uint16 *Draygon_Instr_1(uint16 k, const unaligned_uint16 *jp) {  // 0xA594DD
   Get_Draygon(0)->base.current_instruction = jp[0];
   Get_Draygon(0x40)->base.current_instruction = jp[1];
   Get_Draygon(0x80)->base.current_instruction = jp[2];
@@ -975,7 +975,7 @@ void Draygon_Func_41(void) {  // 0xA59701
   }
 }
 
-const uint16 *Draygon_Instr_13(uint16 k, const uint16 *jp) {  // 0xA59736
+const unaligned_uint16 *Draygon_Instr_13(uint16 k, const unaligned_uint16 *jp) {  // 0xA59736
   Get_Draygon(k)->draygon_var_A = jp[0];
   return jp + 1;
 }
@@ -988,36 +988,36 @@ static Point16U Draygon_Func_47(void) {  // 0xA5978B
   return (Point16U) {r18 + E->base.x_pos, r20 + E->base.y_pos};
 }
 
-const uint16 *Draygon_Instr_8(uint16 k, const uint16 *jp) {  // 0xA5973F
+const unaligned_uint16 *Draygon_Instr_8(uint16 k, const unaligned_uint16 *jp) {  // 0xA5973F
   Point16U pt = Draygon_Func_47();
   CreateSpriteAtPos(pt.x, pt.y, 21, 0);
   return jp;
 }
 
-const uint16 *Draygon_Instr_7(uint16 k, const uint16 *jp) {  // 0xA59752
+const unaligned_uint16 *Draygon_Instr_7(uint16 k, const unaligned_uint16 *jp) {  // 0xA59752
   Point16U pt = Draygon_Func_47();
   CreateSpriteAtPos(pt.x, pt.y, 3, 0);
   return jp;
 }
 
-const uint16 *Draygon_Instr_6(uint16 k, const uint16 *jp) {  // 0xA59765
+const unaligned_uint16 *Draygon_Instr_6(uint16 k, const unaligned_uint16 *jp) {  // 0xA59765
   Point16U pt = Draygon_Func_47();
   CreateSpriteAtPos(pt.x, pt.y, 29, 0);
   return jp;
 }
 
-const uint16 *Draygon_Instr_9(uint16 k, const uint16 *jp) {  // 0xA59778
+const unaligned_uint16 *Draygon_Instr_9(uint16 k, const unaligned_uint16 *jp) {  // 0xA59778
   Point16U pt = Draygon_Func_47();
   CreateSpriteAtPos(pt.x, pt.y, 24, 0);
   return jp;
 }
 
-const uint16 *Draygon_Instr_2(uint16 k, const uint16 *jp) {  // 0xA59895
+const unaligned_uint16 *Draygon_Instr_2(uint16 k, const unaligned_uint16 *jp) {  // 0xA59895
   room_loading_irq_handler = 12;
   return jp;
 }
 
-const uint16 *Draygon_Instr_11(uint16 k, const uint16 *jp) {  // 0xA598D3
+const unaligned_uint16 *Draygon_Instr_11(uint16 k, const unaligned_uint16 *jp) {  // 0xA598D3
   Enemy_Draygon *E2 = Get_Draygon(0x80);
   E2->base.instruction_timer = 1;
   E2->base.current_instruction = addr_kDraygon_Ilist_97B9;
@@ -1028,13 +1028,13 @@ const uint16 *Draygon_Instr_11(uint16 k, const uint16 *jp) {  // 0xA598D3
   return jp;
 }
 
-const uint16 *Draygon_Instr_5(uint16 k, const uint16 *jp) {  // 0xA598EF
+const unaligned_uint16 *Draygon_Instr_5(uint16 k, const unaligned_uint16 *jp) {  // 0xA598EF
   Enemy_Draygon *E = Get_Draygon(0);
   E->base.properties |= kEnemyProps_Tangible;
   return jp;
 }
 
-const uint16 *Draygon_Instr_15(uint16 k, const uint16 *jp) {  // 0xA59B9A
+const unaligned_uint16 *Draygon_Instr_15(uint16 k, const unaligned_uint16 *jp) {  // 0xA59B9A
   Enemy_Draygon *E = Get_Draygon(0);
   E->draygon_var_0F = 24;
   const uint8 *v3 = RomPtr_A0(E->base.enemy_ptr);
@@ -1045,34 +1045,34 @@ const uint16 *Draygon_Instr_15(uint16 k, const uint16 *jp) {  // 0xA59B9A
   return jp;
 }
 
-const uint16 *Draygon_Instr_17(uint16 k, const uint16 *jp) {  // 0xA59C8A
+const unaligned_uint16 *Draygon_Instr_17(uint16 k, const unaligned_uint16 *jp) {  // 0xA59C8A
   room_loading_irq_handler = 12;
   return jp;
 }
 
-const uint16 *Draygon_Instr_14(uint16 k, const uint16 *jp) {  // 0xA59E0A
+const unaligned_uint16 *Draygon_Instr_14(uint16 k, const unaligned_uint16 *jp) {  // 0xA59E0A
   Enemy_Draygon *E = Get_Draygon(0);
   E->draygon_var_5E = jp[0];
   E->draygon_var_5F = jp[1];
   return jp + 2;
 }
 
-const uint16 *Draygon_Instr_16(uint16 k, const uint16 *jp) {  // 0xA59F57
+const unaligned_uint16 *Draygon_Instr_16(uint16 k, const unaligned_uint16 *jp) {  // 0xA59F57
   Get_Draygon(0)->draygon_var_A = jp[0];
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_10(uint16 k, const uint16 *jp) {  // 0xA59F60
+const unaligned_uint16 *Draygon_Instr_10(uint16 k, const unaligned_uint16 *jp) {  // 0xA59F60
   QueueSfx2_Max6(jp[0]);
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_4(uint16 k, const uint16 *jp) {  // 0xA59F6E
+const unaligned_uint16 *Draygon_Instr_4(uint16 k, const unaligned_uint16 *jp) {  // 0xA59F6E
   QueueSfx3_Max6(jp[0]);
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_12(uint16 k, const uint16 *jp) {  // 0xA59F7C
+const unaligned_uint16 *Draygon_Instr_12(uint16 k, const unaligned_uint16 *jp) {  // 0xA59F7C
   Enemy_Draygon *E = Get_Draygon(0);
   eproj_spawn_pt = (Point16U){ E->base.x_pos - 28, E->base.y_pos - 16 };
   eproj_unk1995 = (NextRandom() & 0x3F) + 128;
@@ -1080,7 +1080,7 @@ const uint16 *Draygon_Instr_12(uint16 k, const uint16 *jp) {  // 0xA59F7C
   return jp;
 }
 
-const uint16 *Draygon_Instr_18(uint16 k, const uint16 *jp) {  // 0xA59FAE
+const unaligned_uint16 *Draygon_Instr_18(uint16 k, const unaligned_uint16 *jp) {  // 0xA59FAE
   Enemy_Draygon *E = Get_Draygon(0);
   eproj_spawn_pt = (Point16U){ E->base.x_pos + 24, E->base.y_pos - 16 };
   eproj_unk1995 = (NextRandom() & 0x3F) + 192;
@@ -1164,7 +1164,7 @@ void DraygonsEye_Init(void) {  // 0xA5C46B
   E->draygon_var_A = FUNC16(nullsub_169_A5);
 }
 
-const uint16 *Draygon_Instr_3(uint16 k, const uint16 *jp) {  // 0xA5C47B
+const unaligned_uint16 *Draygon_Instr_3(uint16 k, const unaligned_uint16 *jp) {  // 0xA5C47B
   Get_Draygon(0x40)->draygon_var_A = jp[0];
   return jp + 1;
 }
@@ -1246,14 +1246,14 @@ void DraygonsArms_Init(void) {  // 0xA5C5AD
   v0->layer = 2;
 }
 
-const uint16 *Draygon_Instr_25(uint16 k, const uint16 *jp) {  // 0xA5E75F
+const unaligned_uint16 *Draygon_Instr_25(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E75F
   Enemy_Draygon *E = Get_Draygon(0);
   if (sign16(E->draygon_var_0B - 40))
     E->draygon_var_0B += 8;
   return jp;
 }
 
-const uint16 *Draygon_Instr_24(uint16 k, const uint16 *jp) {  // 0xA5E771
+const unaligned_uint16 *Draygon_Instr_24(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E771
   Get_Draygon(0)->draygon_var_2F = 0;
   return jp;
 }
@@ -1266,7 +1266,7 @@ void Draygon_Func_50(uint16 j) {  // 0xA5E811
   E->draygon_var_0A = GET_WORD(v1 + 4);
 }
 
-const uint16 *Draygon_Instr_21(uint16 k, const uint16 *jp) {  // 0xA5E82D
+const unaligned_uint16 *Draygon_Instr_21(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E82D
   Enemy_Draygon *E = Get_Draygon(0);
   E->draygon_var_0B = jp[0];
   E->draygon_var_0C = jp[1];
@@ -1289,12 +1289,12 @@ uint16 Draygon_Instr_53(uint16 k, uint16 j) {  // 0xA5E854
   return j + 2;
 }
 
-const uint16 *Draygon_Instr_22(uint16 k, const uint16 *jp) {  // 0xA5E872
+const unaligned_uint16 *Draygon_Instr_22(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E872
   kraid_unk9000 = jp[0];
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_27(uint16 k, const uint16 *jp) {  // 0xA5E87C
+const unaligned_uint16 *Draygon_Instr_27(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E87C
   Enemy_Draygon *E = Get_Draygon(0);
   E->base.x_pos = 128;
   E->base.y_pos = 624;
@@ -1302,22 +1302,22 @@ const uint16 *Draygon_Instr_27(uint16 k, const uint16 *jp) {  // 0xA5E87C
   return jp;
 }
 
-const uint16 *Draygon_Instr_23(uint16 k, const uint16 *jp) {  // 0xA5E895
+const unaligned_uint16 *Draygon_Instr_23(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E895
   QueueSfx2_Max6(jp[0]);
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_30(uint16 k, const uint16 *jp) {  // 0xA5E8B1
+const unaligned_uint16 *Draygon_Instr_30(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E8B1
   Enemy_ItemDrop_SporeSpawn(k);
   return jp;
 }
 
-const uint16 *Draygon_Instr_20(uint16 k, const uint16 *jp) {  // 0xA5E8BA
+const unaligned_uint16 *Draygon_Instr_20(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E8BA
   Get_Draygon(cur_enemy_index)->draygon_var_A = jp[0];
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_29(uint16 k, const uint16 *jp) {  // 0xA5E8CA
+const unaligned_uint16 *Draygon_Instr_29(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E8CA
   uint16 v2 = jp[0];
   for (int i = 0; i != 32; i += 2)
     palette_buffer[(i >> 1) + 144] = g_word_A5E3F9[(v2 + i) >> 1];
@@ -1328,7 +1328,7 @@ const uint16 *Draygon_Instr_29(uint16 k, const uint16 *jp) {  // 0xA5E8CA
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_19(uint16 k, const uint16 *jp) {  // 0xA5E91C
+const unaligned_uint16 *Draygon_Instr_19(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E91C
   uint16 v2 = jp[0];
   for (int i = 0; i != 32; i += 2)
     target_palettes[(i >> 1) + 144] = g_word_A5E3F9[(v2 + i) >> 1];
@@ -1339,7 +1339,7 @@ const uint16 *Draygon_Instr_19(uint16 k, const uint16 *jp) {  // 0xA5E91C
   return jp + 1;
 }
 
-const uint16 *Draygon_Instr_28(uint16 k, const uint16 *jp) {  // 0xA5E96E
+const unaligned_uint16 *Draygon_Instr_28(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E96E
   NextRandom();
   uint16 r18 = (random_number & 0x7F) - 64;
   Enemy_Draygon *E = Get_Draygon(0);
@@ -1352,7 +1352,7 @@ const uint16 *Draygon_Instr_28(uint16 k, const uint16 *jp) {  // 0xA5E96E
   return jp;
 }
 
-const uint16 *Draygon_Instr_26(uint16 k, const uint16 *jp) {  // 0xA5E9B1
+const unaligned_uint16 *Draygon_Instr_26(uint16 k, const unaligned_uint16 *jp) {  // 0xA5E9B1
   NextRandom();
   Enemy_Draygon *E = Get_Draygon(0);
   uint16 x = E->base.x_pos + (random_number & 0x7F) - 64;

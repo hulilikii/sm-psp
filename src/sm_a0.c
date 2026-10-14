@@ -101,12 +101,12 @@ void func_nullsub_170(void) {
   ;
 }
 
-const uint16 *EnemyInstr_SetAiPreInstr(uint16 k, const uint16 *jp) {  // 0xA0806B
+const unaligned_uint16 *EnemyInstr_SetAiPreInstr(uint16 k, const unaligned_uint16 *jp) {  // 0xA0806B
   gEnemyData(k)->ai_preinstr = jp[0];
   return jp + 1;
 }
 
-const uint16 *EnemyInstr_ClearAiPreInstr(uint16 k, const uint16 *jp) {  // 0xA08074
+const unaligned_uint16 *EnemyInstr_ClearAiPreInstr(uint16 k, const unaligned_uint16 *jp) {  // 0xA08074
   gEnemyData(k)->ai_preinstr = FUNC16(nullsub_171);
   return jp;
 }
@@ -115,21 +115,21 @@ void func_nullsub_171(void) {
   ;
 }
 
-const uint16 *EnemyInstr_StopScript(uint16 k, const uint16 *jp) {  // 0xA0807C
+const unaligned_uint16 *EnemyInstr_StopScript(uint16 k, const unaligned_uint16 *jp) {  // 0xA0807C
   EnemyData *v2 = gEnemyData(k);
   v2->properties |= kEnemyProps_Deleted;
   return 0;
 }
 
-const uint16 *EnemyInstr_Goto(uint16 k, const uint16 *jp) {  // 0xA280ED
+const unaligned_uint16 *EnemyInstr_Goto(uint16 k, const unaligned_uint16 *jp) {  // 0xA280ED
   return INSTR_RETURN_ADDR(*jp);
 }
 
-const uint16 *EnemyInstr_GotoRel(uint16 k, const uint16 *jp) {  // 0xA080F2
+const unaligned_uint16 *EnemyInstr_GotoRel(uint16 k, const unaligned_uint16 *jp) {  // 0xA080F2
   return (const uint16 * )((uint8*)jp + *(int8*)jp);
 }
 
-const uint16 *EnemyInstr_DecTimerAndGoto(uint16 k, const uint16 *jp) {  // 0xA08108
+const unaligned_uint16 *EnemyInstr_DecTimerAndGoto(uint16 k, const unaligned_uint16 *jp) {  // 0xA08108
   EnemyData *v2 = gEnemyData(k);
   if (v2->timer-- == 1)
     return jp + 1;
@@ -137,7 +137,7 @@ const uint16 *EnemyInstr_DecTimerAndGoto(uint16 k, const uint16 *jp) {  // 0xA08
     return EnemyInstr_Goto(k, jp);
 }
 
-const uint16 *EnemyInstr_DecTimerAndGotoRel(uint16 k, const uint16 *jp) {  // 0xA08118
+const unaligned_uint16 *EnemyInstr_DecTimerAndGotoRel(uint16 k, const unaligned_uint16 *jp) {  // 0xA08118
   EnemyData *v2 = gEnemyData(k);
   if (LOBYTE(v2->timer)-- == 1)
     return (const uint16 *)((uint8 *)jp + 1);
@@ -145,23 +145,23 @@ const uint16 *EnemyInstr_DecTimerAndGotoRel(uint16 k, const uint16 *jp) {  // 0x
     return EnemyInstr_GotoRel(k, jp);
 }
 
-const uint16 *EnemyInstr_SetTimer(uint16 k, const uint16 *jp) {  // 0xA08123
+const unaligned_uint16 *EnemyInstr_SetTimer(uint16 k, const unaligned_uint16 *jp) {  // 0xA08123
   gEnemyData(k)->timer = *jp;
   return jp + 1;
 }
 
-const uint16 *EnemyInstr_Skip2bytes(uint16 k, const uint16 *jp) {  // 0xA0812C
+const unaligned_uint16 *EnemyInstr_Skip2bytes(uint16 k, const unaligned_uint16 *jp) {  // 0xA0812C
   return jp + 1;
 }
 
-const uint16 *EnemyInstr_Sleep(uint16 k, const uint16 *jp) {  // 0xA2812F
+const unaligned_uint16 *EnemyInstr_Sleep(uint16 k, const unaligned_uint16 *jp) {  // 0xA2812F
   EnemyData *ED = gEnemyData(k);
   const uint8 *base_ptr = RomBankBase(ED->bank);
   ED->current_instruction = (const uint8 *)jp - 2 - base_ptr;
   return 0;
 }
 
-const uint16 *EnemyInstr_WaitNframes(uint16 k, const uint16 *jp) {  // 0xA0813A
+const unaligned_uint16 *EnemyInstr_WaitNframes(uint16 k, const unaligned_uint16 *jp) {  // 0xA0813A
   EnemyData *ED = gEnemyData(k);
   const uint8 *base_ptr = RomBankBase(ED->bank);
   ED->instruction_timer = jp[0];
@@ -169,7 +169,7 @@ const uint16 *EnemyInstr_WaitNframes(uint16 k, const uint16 *jp) {  // 0xA0813A
   return 0;
 }
 
-const uint16 *EnemyInstr_CopyToVram(uint16 k, const uint16 *jp) {  // 0xA0814B
+const unaligned_uint16 *EnemyInstr_CopyToVram(uint16 k, const unaligned_uint16 *jp) {  // 0xA0814B
   VramWriteEntry *v4;
 
   uint16 v2 = vram_write_queue_tail;
@@ -183,13 +183,13 @@ const uint16 *EnemyInstr_CopyToVram(uint16 k, const uint16 *jp) {  // 0xA0814B
   return INSTR_INCR_BYTES(jp, 7);
 }
 
-const uint16 *EnemyInstr_EnableOffScreenProcessing(uint16 k, const uint16 *jp) {  // 0xA08173
+const unaligned_uint16 *EnemyInstr_EnableOffScreenProcessing(uint16 k, const unaligned_uint16 *jp) {  // 0xA08173
   EnemyData *v2 = gEnemyData(k);
   v2->properties |= 0x800;
   return jp;
 }
 
-const uint16 *EnemyInstr_DisableOffScreenProcessing(uint16 k, const uint16 *jp) {  // 0xA0817D
+const unaligned_uint16 *EnemyInstr_DisableOffScreenProcessing(uint16 k, const unaligned_uint16 *jp) {  // 0xA0817D
   EnemyData *v2 = gEnemyData(k);
   v2->properties &= ~0x800;
   return jp;
@@ -1249,7 +1249,7 @@ void CallEnemyPreInstr(uint32 ea) {
   }
 }
 
-const uint16 *CallEnemyInstr(uint32 ea, uint16 k, const uint16 *j) {
+const unaligned_uint16 *CallEnemyInstr(uint32 ea, uint16 k, const unaligned_uint16 *j) {
   switch (ea) {
   case fnEnemyInstr_Goto_A2: return EnemyInstr_Goto(k, j);
   case fnEnemyInstr_DecTimerAndGoto2_A2: return EnemyInstr_DecTimerAndGoto(k, j);
@@ -3398,7 +3398,7 @@ void ProcessEnemyInstructions(void) {  // 0xA0C26A
     if (E->instruction_timer-- == 1) {
       assert(E->current_instruction & 0x8000);
       const uint8 *base_ptr = RomBankBase(E->bank);
-      const uint16 *pc = (const uint16 *)(base_ptr + E->current_instruction);
+      const unaligned_uint16 *pc = (const unaligned_uint16 *)(base_ptr + E->current_instruction);
       const uint8 *instruction_bytes = (const uint8 *)pc;
       uint16 instruction = (uint16)instruction_bytes[0] |
                            ((uint16)instruction_bytes[1] << 8);
@@ -3407,7 +3407,7 @@ void ProcessEnemyInstructions(void) {  // 0xA0C26A
         if (!pc)
           return;
         if ((uintptr_t)pc < 0x10000)
-          pc = (const uint16*)(base_ptr + (uintptr_t)pc);
+          pc = (const unaligned_uint16 *)(base_ptr + (uintptr_t)pc);
       }
       E->instruction_timer = pc[0];
       E->spritemap_pointer = pc[1];
