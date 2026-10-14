@@ -691,10 +691,6 @@ RESUME_AT_SWITCH:
     PspDebugMarker(0xC2000000u | ((uint32)game_state & 0xFFFFu));
     last_logged_game_state = game_state;
   }
-  // Diagnostic: record the dispatch index and current game state
-  // on every call, not only when game_state changes.
-  PspDebugMarker(84000000u + ((uint32)st & 0xFFFFu));
-  PspDebugMarker(85000000u + ((uint32)game_state & 0xFFFFu));
   PspDebugMarker(8301);  // Immediately before game-state dispatch
   COROUTINE_AWAIT_ONLY(kGameStateFuncs[st - 10]());
   PspDebugMarker(8302);  // Game-state dispatch returned
@@ -867,6 +863,8 @@ CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
     if (!debug_disable_sprite_interact)
       SamusProjectileInteractionHandler();
     EnemyMain();
+    if (game_state == kGameState_8_MainGameplay)
+       PspDebugMarker(8303);  // EnemyMain returned
 
     if (queued_message_box_index) {
       COROUTINE_AWAIT(1, DisplayMessageBox_Async(queued_message_box_index));
@@ -890,12 +888,19 @@ CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
     DrawSamusEnemiesAndProjectiles();
     QueueEnemyBG2TilemapTransfers();
   }
+   if (game_state == kGameState_8_MainGameplay)
+     PspDebugMarker(8304);  // Main gameplay processing block completed
   HandleHudTilemap();
   CalculateLayer2PosAndScrollsWhenScrolling();
   RunRoomMainCode();
+  if (game_state == kGameState_8_MainGameplay)
+    PspDebugMarker(8305);  // Room main code returned
+    
   HandleSamusOutOfHealthAndGameTile();
   HandleRoomShaking();
   DecrementSamusTimers();
+  if (game_state == kGameState_8_MainGameplay)
+    PspDebugMarker(8306);  // Gameplay frame processing completed
   COROUTINE_END(0);
 
 }

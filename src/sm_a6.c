@@ -4,7 +4,6 @@
 #include "sm_rtl.h"
 #include "funcs.h"
 #include "enemy_types.h"
-#include "platform/psp/psp_debug_log.h"
 
 #define g_byte_A6E269 ((uint8*)RomFixedPtr(0xa6e269))
 #define g_word_A6E2AA ((unaligned_uint16*)RomFixedPtr(0xa6e2aa))
@@ -1224,96 +1223,22 @@ void CallRidleyFunc(uint32 ea) {
   }
 }
 void CeresRidley_Main(void) {  // 0xA6A288
-  static uint16 last_logged_cry_var_A = 0xFFFF;
   Enemy_CeresRidley *E = Get_CeresRidley(0);
-  const bool trace_transition = E->cry_var_A == 0xA478;
   E->base.health = 0x7FFF;
-  if (E->cry_var_A != last_logged_cry_var_A) {
-    last_logged_cry_var_A = E->cry_var_A;
-    PspDebugMarker(8600);  // Ridley update routine changed
-    PspDebugValue(8601, E->cry_var_A);  // Routine offset; bank is 0xA6
-    PspDebugValue(8602, E->base.x_pos);
-    PspDebugValue(8603, E->base.y_pos);
-    PspDebugValue(8604, E->cry_var_F);
-  }
   CallRidleyFunc(E->cry_var_A | 0xA60000);
-  if (trace_transition)
-    PspDebugMarker(8620);  // CallRidleyFunc returned
-    
   if (!ceres_status) {
-    if (trace_transition)
-    PspDebugMarker(8621);  // ceres_status branch entered
-    
-    if (trace_transition)
-      PspDebugMarker(8622);  // Before checking cry_var_02
     if (Get_CeresRidley(0)->cry_var_02) {
-      if (trace_transition)
-      PspDebugMarker(8623);  // cry_var_02 branch entered
-      
-      if (trace_transition)
-        PspDebugMarker(8624);
       Ridley_Func_102();
-      if (trace_transition)
-         PspDebugMarker(8625);
-      
-      if (trace_transition)
-        PspDebugMarker(8626);
       Ridley_Func_112();
-      if (trace_transition)
-        PspDebugMarker(8627);
-        
-      if (trace_transition)
-        PspDebugMarker(8628);
       Ridley_Func_115();
-      if (trace_transition)
-        PspDebugMarker(8629);
-      
-      if (trace_transition)
-        PspDebugMarker(8630);
       CeresRidley_Func_1();
-      if (trace_transition)
-        PspDebugMarker(8631);
-      
-      if (trace_transition)
-        PspDebugMarker(8632);
       Ridley_Func_70();
-      if (trace_transition)
-        PspDebugMarker(8633);
-        
-      if (trace_transition)
-        PspDebugMarker(8634);
       Ridley_Func_101();
-      if (trace_transition)
-        PspDebugMarker(8635);
-      
-      if (trace_transition)
-        PspDebugMarker(8636);
       Ridley_Func_118();
-      if (trace_transition)
-        PspDebugMarker(8637);
-      
-      if (trace_transition)
-        PspDebugMarker(8638);
       sub_A6DB2A();
-      if (trace_transition)
-        PspDebugMarker(8639);
-        
-      if (trace_transition)
-        PspDebugMarker(8640);
       Ridley_Func_120();
-      if (trace_transition)
-        PspDebugMarker(8641);
-        } else if (trace_transition) {
-        PspDebugMarker(8642);  // cry_var_02 branch skipped
     }
-    
-    if (trace_transition)
-      PspDebugMarker(8643);
     Ridley_A2DC();
-    if (trace_transition)
-      PspDebugMarker(8644);  // Ridley_A2DC returned
-      } else if (trace_transition) {
-      PspDebugMarker(8645);  // ceres_status branch skipped
   }
 }
 
@@ -1468,19 +1393,14 @@ void CeresRidley_Func_7(void) {  // 0xA6A478
     bool v1 = (--E->cry_var_F & 0x8000) != 0;
     if (!v1)
       return;
-      PspDebugMarker(8610);  // Countdown expired; entering transition
   }
   E->cry_var_E = 0;
-  PspDebugMarker(8611);  // Before changing Ridley's instruction list
   Ridley_Func_99(addr_kRidley_Ilist_E91D);
-  PspDebugMarker(8612);  // Instruction-list update returned
   E->cry_var_08 = 8;
   E->cry_var_09 = 8;
   Ridley_Func_95();
-  PspDebugMarker(8613);  // Tilemap update returned
   tilemap_stuff[0] = 1;
   E->cry_var_A = FUNC16(CeresRidley_Func_2);
-  PspDebugMarker(8614);  // State transition completed
 }
 
 uint8 CeresRidley_Func_8(uint16 a) {  // 0xA6A4D6
