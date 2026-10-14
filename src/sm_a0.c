@@ -3399,6 +3399,9 @@ void ProcessEnemyInstructions(void) {  // 0xA0C26A
       assert(E->current_instruction & 0x8000);
       const uint8 *base_ptr = RomBankBase(E->bank);
       const uint16 *pc = (const uint16 *)(base_ptr + E->current_instruction);
+      const uint8 *instruction_bytes = (const uint8 *)pc;
+      uint16 instruction = (uint16)instruction_bytes[0] |
+                           ((uint16)instruction_bytes[1] << 8);
       while ((*pc & 0x8000) != 0) {
         pc = CallEnemyInstr(E->bank << 16 | *pc, cur_enemy_index, pc + 1);
         if (!pc)
