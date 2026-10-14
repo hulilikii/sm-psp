@@ -3467,7 +3467,9 @@ void ProcessEnemyInstructions(void) {  // 0xA0C26A
   PspDebugValue(8825, ((const uint8 *)pc)[1]);
 }
 
-      uint16 instruction = *pc;
+      const uint8 *instruction_bytes = (const uint8 *)pc;
+      uint16 instruction = (uint16)instruction_bytes[0] |
+                           ((uint16)instruction_bytes[1] << 8);
 
 if (trace) {
   PspDebugMarker(862520u + cur_enemy_index);
