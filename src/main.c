@@ -205,6 +205,9 @@ int main(int argc, char **argv) {
   (void)argc;
   
   SetupFilesystem(argv[0]);
+#ifdef PSP_PROFILE
+  PspProfileInit();
+#endif
   PspInput_Init();
   ParseConfigFile(NULL);
 
@@ -233,6 +236,13 @@ int main(int argc, char **argv) {
   RtlReadSram();
   if (g_config.autosave)
     HandleCommand(kKeys_Load, true);
+    
+#ifdef PSP_PROFILE
+  uint64_t profile_frame_total_us = 0;
+  uint32_t profile_frame_max_us = 0;
+  uint32_t profile_frame_count = 0;
+#endif
+
 
   while (g_running) {
     SceCtrlData pad;
@@ -243,8 +253,11 @@ int main(int argc, char **argv) {
     }
 
     uint16 inputs = PspInput_Read();
+#ifdef PSP_PROFILE
+    uint32_t profile_start_us = sceKernelGetSystemTimeLow();
+#endif
     uint8 is_replay = RtlRunFrame(inputs);
-    #ifdef PSP_PROFILE
+#ifdef PSP_PROFILE
     uint32_t profile_frame_us =
         sceKernelGetSystemTimeLow() - profile_start_us;
     profile_frame_total_us += profile_frame_us;
