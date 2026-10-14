@@ -1403,14 +1403,19 @@ void CeresRidley_Func_7(void) {  // 0xA6A478
     bool v1 = (--E->cry_var_F & 0x8000) != 0;
     if (!v1)
       return;
+      PspDebugMarker(8610);  // Countdown expired; entering transition
   }
   E->cry_var_E = 0;
+  PspDebugMarker(8611);  // Before changing Ridley's instruction list
   Ridley_Func_99(addr_kRidley_Ilist_E91D);
+  PspDebugMarker(8612);  // Instruction-list update returned
   E->cry_var_08 = 8;
   E->cry_var_09 = 8;
   Ridley_Func_95();
+  PspDebugMarker(8613);  // Tilemap update returned
   tilemap_stuff[0] = 1;
   E->cry_var_A = FUNC16(CeresRidley_Func_2);
+  PspDebugMarker(8614);  // State transition completed
 }
 
 uint8 CeresRidley_Func_8(uint16 a) {  // 0xA6A4D6
