@@ -1105,8 +1105,8 @@ void Crocomire_950F(void) {  // 0xA4950F
   v4 = Get_Crocomire(0);
   Get_Crocomire(0x80)->crocom_var_D = v4->base.x_pos;
   *(uint16 *)crocomire_bg2_scroll_hdma_indirect = 255;
-  *(uint16 *)&crocomire_bg2_scroll_hdma_indirect[1] = -13584;
-  *(uint16 *)&crocomire_bg2_scroll_hdma_indirect[3] = 225;
+  *(unaligned_uint16 *)&crocomire_bg2_scroll_hdma_indirect[1] = -13584;
+  *(unaligned_uint16 *)&crocomire_bg2_scroll_hdma_indirect[3] = 225;
   *(uint16 *)&crocomire_bg2_scroll_hdma_indirect[4] = -13330;
   *(uint16 *)&crocomire_bg2_scroll_hdma_indirect[6] = 0;
   v4->crocom_var_1F = SpawnHdmaObject(0xa4, &unk_A49559);
@@ -1249,7 +1249,7 @@ uint16 Crocomire_Func_67(void) {  // 0xA496C8
 void Crocomire_Func_68(void) {  // 0xA497D3
   if (sign16(samus_x_pos - 640)) {
     QueueMusic_Delayed8(5);
-    *(uint16 *)&scrolls[3] = 256;
+    *(unaligned_uint16 *)&scrolls[3] = 256;
     SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x30, 0x03, 0xb757 });
     camera_distance_index = 6;
     Enemy_Crocomire *E0 = Get_Crocomire(0);

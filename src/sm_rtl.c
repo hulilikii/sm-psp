@@ -435,6 +435,11 @@ bool RtlRunFrame(int inputs) {
 
 void RtlSaveSnapshot(const char *filename, bool saving_with_bug) {
   FILE *f = fopen(filename, "wb");
+  if (f == NULL) {
+    fprintf(stderr, "Unable to open snapshot for writing: %s\n", filename);
+    return;
+  }
+
   RtlApuLock();
   RtlSaveMusicStateToRam_Locked();
   StateRecorder_Save(&state_recorder, f, saving_with_bug);

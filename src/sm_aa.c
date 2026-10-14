@@ -1483,8 +1483,8 @@ const unaligned_uint16 *Shaktool_Instr_14(uint16 k, const unaligned_uint16 *jp) 
   CallSomeSamusCode(1);
   *(uint16 *)&scrolls[6] = 0;
   *(uint16 *)&scrolls[8] = 0;
-  *(uint16 *)&scrolls[9] = 0;
-  *(uint16 *)&scrolls[13] = 1;
+  *(unaligned_uint16 *)&scrolls[9] = 0;
+  *(unaligned_uint16 *)&scrolls[13] = 1;
   SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x17, 0x1d, 0xd6fc });
   return jp;
 }
