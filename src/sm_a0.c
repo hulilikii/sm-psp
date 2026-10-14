@@ -3462,6 +3462,9 @@ void ProcessEnemyInstructions(void) {  // 0xA0C26A
   PspDebugValue(8817, (uint32)(uintptr_t)pc);
 
   PspDebugMarker(862510u + cur_enemy_index);
+  PspDebugValue(8823, (uint32)((uintptr_t)pc & 1));
+  PspDebugValue(8824, ((const uint8 *)pc)[0]);
+  PspDebugValue(8825, ((const uint8 *)pc)[1]);
 }
 
       uint16 instruction = *pc;
