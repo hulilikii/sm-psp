@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := all
+
 TARGET := smpsp
 
 PSPSDK := $(shell psp-config --pspsdk-path)
