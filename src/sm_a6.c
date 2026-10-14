@@ -1226,6 +1226,7 @@ void CallRidleyFunc(uint32 ea) {
 void CeresRidley_Main(void) {  // 0xA6A288
   static uint16 last_logged_cry_var_A = 0xFFFF;
   Enemy_CeresRidley *E = Get_CeresRidley(0);
+  const bool trace_transition = E->cry_var_A == 0xA478;
   E->base.health = 0x7FFF;
   if (E->cry_var_A != last_logged_cry_var_A) {
     last_logged_cry_var_A = E->cry_var_A;
@@ -1236,19 +1237,83 @@ void CeresRidley_Main(void) {  // 0xA6A288
     PspDebugValue(8604, E->cry_var_F);
   }
   CallRidleyFunc(E->cry_var_A | 0xA60000);
+  if (trace_transition)
+    PspDebugMarker(8620);  // CallRidleyFunc returned
+    
   if (!ceres_status) {
+    if (trace_transition)
+    PspDebugMarker(8621);  // ceres_status branch entered
+    
+    if (trace_transition)
+      PspDebugMarker(8622);  // Before checking cry_var_02
     if (Get_CeresRidley(0)->cry_var_02) {
+      if (trace_transition)
+      PspDebugMarker(8623);  // cry_var_02 branch entered
+      
+      if (trace_transition)
+        PspDebugMarker(8624);
       Ridley_Func_102();
+      if (trace_transition)
+         PspDebugMarker(8625);
+      
+      if (trace_transition)
+        PspDebugMarker(8626);
       Ridley_Func_112();
+      if (trace_transition)
+        PspDebugMarker(8627);
+        
+      if (trace_transition)
+        PspDebugMarker(8628);
       Ridley_Func_115();
+      if (trace_transition)
+        PspDebugMarker(8629);
+      
+      if (trace_transition)
+        PspDebugMarker(8630);
       CeresRidley_Func_1();
+      if (trace_transition)
+        PspDebugMarker(8631);
+      
+      if (trace_transition)
+        PspDebugMarker(8632);
       Ridley_Func_70();
+      if (trace_transition)
+        PspDebugMarker(8633);
+        
+      if (trace_transition)
+        PspDebugMarker(8634);
       Ridley_Func_101();
+      if (trace_transition)
+        PspDebugMarker(8635);
+      
+      if (trace_transition)
+        PspDebugMarker(8636);
       Ridley_Func_118();
+      if (trace_transition)
+        PspDebugMarker(8637);
+      
+      if (trace_transition)
+        PspDebugMarker(8638);
       sub_A6DB2A();
+      if (trace_transition)
+        PspDebugMarker(8639);
+        
+      if (trace_transition)
+        PspDebugMarker(8640);
       Ridley_Func_120();
+      if (trace_transition)
+        PspDebugMarker(8641);
+        } else if (trace_transition) {
+        PspDebugMarker(8642);  // cry_var_02 branch skipped
     }
+    
+    if (trace_transition)
+      PspDebugMarker(8643);
     Ridley_A2DC();
+    if (trace_transition)
+      PspDebugMarker(8644);  // Ridley_A2DC returned
+      } else if (trace_transition) {
+      PspDebugMarker(8645);  // ceres_status branch skipped
   }
 }
 
