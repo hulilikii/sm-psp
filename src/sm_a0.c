@@ -4,6 +4,7 @@
 #include "variables.h"
 #include "funcs.h"
 #include "enemy_types.h"
+#include "platform/psp/psp_debug_log.h"
 
 #define kEnemyLayerToQueuePtr ((unaligned_uint16*)RomFixedPtr(0xa0b133))
 #define kStandardSpriteTiles ((unaligned_uint16*)RomFixedPtr(0x9ad200))
@@ -1726,6 +1727,7 @@ void EnemyMain(void) {  // 0xA08FD4
   int16 v6;
   int8 v8; // cf
 
+  PspDebugMarker(839999);  // EnemyMain entered
   if (first_free_enemy_index) {
     if (enemy_index_to_shake != 0xFFFF) {
       gEnemyData(enemy_index_to_shake)->shake_timer = 64;
@@ -1737,12 +1739,29 @@ void EnemyMain(void) {  // 0xA08FD4
         break;
       cur_enemy_index = v1;
       EnemyData *E = gEnemyData(cur_enemy_index);
+      
+       // Record the last enemy slot reached, even if it is not Ridley.
+      PspDebugMarker(840000u + cur_enemy_index);
+      if (E->bank == 0xA6) {
+        PspDebugValue(8801, cur_enemy_index);
+        PspDebugValue(8802, E->bank);
+        PspDebugValue(8803, E->enemy_ptr);
+        PspDebugValue(8804, E->ai_handler_bits);
+        PspDebugValue(8805, E->current_instruction);
+        PspDebugValue(8806, E->instruction_timer);
+        PspDebugValue(8807, E->spritemap_pointer);
+      }
+
       if ((E->properties & 0x400) == 0) {
         if (E->invincibility_timer) {
           --E->invincibility_timer;
         } else if (!debug_disable_sprite_interact) {
           if (!(debug_time_frozen_for_enemies | time_is_frozen_flag)) {
+          if (E->bank == 0xA6)
+            PspDebugMarker(843000u + cur_enemy_index);
             EnemyCollisionHandler();
+            if (E->bank == 0xA6)
+              PspDebugMarker(846000u + cur_enemy_index);
             if (!E->enemy_ptr)
               goto LABEL_32;
           }
@@ -1761,18 +1780,31 @@ void EnemyMain(void) {  // 0xA08FD4
             ai_handler_bits >>= 1;
           } while (!v8);
         }
+        if (E->bank == 0xA6)
+          PspDebugMarker(849000u + cur_enemy_index);
         CallEnemyAi(E->bank << 16 | get_EnemyDef_A2(E->enemy_ptr + 2 * v6)->main_ai);
+        if (E->bank == 0xA6)
+          PspDebugMarker(852000u + cur_enemy_index);
         goto LABEL_20;
       }
       ED = get_EnemyDef_A2(E->enemy_ptr);
       if (ED->time_is_frozen_ai) {
+        
+        if (E->bank == 0xA6)
+          PspDebugMarker(855000u + cur_enemy_index);
         CallEnemyAi(E->bank << 16 | ED->time_is_frozen_ai);
+        if (E->bank == 0xA6)
+          PspDebugMarker(858000u + cur_enemy_index);
 LABEL_20:
         if (!(debug_time_frozen_for_enemies | time_is_frozen_flag)) {
           ++E->frame_counter;
           if ((E->properties & 0x2000) != 0) {
             enemy_processing_stage = 2;
+            if (E->bank == 0xA6)
+              PspDebugMarker(861000u + cur_enemy_index);
             ProcessEnemyInstructions();
+            if (E->bank == 0xA6)
+              PspDebugMarker(864000u + cur_enemy_index);
           }
         }
       }
@@ -1784,7 +1816,11 @@ LABEL_23:;
       if (((E->extra_properties & 4) != 0 || !EnemyWithNormalSpritesIsOffScreen())
           && (E->properties & 0x300) == 0
           && (UNUSED_word_7E17A2 & 1) == 0) {
+        if (E->bank == 0xA6)
+          PspDebugMarker(867000u + cur_enemy_index);
         DrawOneEnemy();
+        if (E->bank == 0xA6)
+          PspDebugMarker(870000u + cur_enemy_index);
       }
 LABEL_32:;
       if (E->flash_timer && !(debug_time_frozen_for_enemies | time_is_frozen_flag)) {
@@ -1793,7 +1829,9 @@ LABEL_32:;
       }
     }
   }
+  PspDebugMarker(873000);  // Before HandleSpriteObjects
   HandleSpriteObjects();
+  PspDebugMarker(873001);  // HandleSpriteObjects returned
   random_enemy_counter++;
   enemy_index_colliding_dirs[0] = -1;
   enemy_index_colliding_dirs[1] = -1;
