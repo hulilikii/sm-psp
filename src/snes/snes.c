@@ -123,6 +123,7 @@ void snes_reset(Snes* snes, bool hard) {
 }
 
 void snes_handle_pos_stuff(Snes *snes) {
+#ifdef PSP_PROFILE
   /*
    * Sample every 16th event to keep timer overhead low.
    * Multiply sampled durations by 16 when accumulating estimates.
