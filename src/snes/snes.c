@@ -15,6 +15,21 @@
 #include "input.h"
 #include "../tracing.h"
 
+#ifdef PSP_PROFILE
+#include <pspkernel.h>
+
+extern void PspProfileLog(const char *message);
+
+static uint32_t g_profile_pos0_calls;
+static uint32_t g_profile_pos512_calls;
+static uint32_t g_profile_pos1024_calls;
+static uint64_t g_profile_pos0_us;
+static uint64_t g_profile_pos512_us;
+static uint64_t g_profile_pos1024_us;
+static uint32_t g_profile_frames;
+#endif
+
+
 extern bool g_is_turbo;
 int snes_frame_counter;
 static const double apuCyclesPerMaster = (32040 * 32) / (1364 * 262 * 60.0);
@@ -108,9 +123,46 @@ void snes_reset(Snes* snes, bool hard) {
 }
 
 void snes_handle_pos_stuff(Snes *snes) {
+  /*
+   * Sample every 16th event to keep timer overhead low.
+   * Multiply sampled durations by 16 when accumulating estimates.
+   */
+  if (snes->hPos == 0 && snes->vPos == 0) {
+    if (++g_profile_frames == 60) {
+      char line[192];
+      snprintf(line, sizeof(line),
+               "pos_events frames=60 "
+               "h0_calls_avg=%u h0_avg_us=%u "
+               "ppu_calls_avg=%u ppu_avg_us=%u "
+               "hdma_calls_avg=%u hdma_avg_us=%u",
+               (unsigned int)(g_profile_pos0_calls / 60),
+               (unsigned int)(g_profile_pos0_us / 60),
+               (unsigned int)(g_profile_pos512_calls / 60),
+               (unsigned int)(g_profile_pos512_us / 60),
+               (unsigned int)(g_profile_pos1024_calls / 60),
+               (unsigned int)(g_profile_pos1024_us / 60));
+      PspProfileLog(line);
+
+      g_profile_pos0_calls = 0;
+      g_profile_pos512_calls = 0;
+      g_profile_pos1024_calls = 0;
+      g_profile_pos0_us = 0;
+      g_profile_pos512_us = 0;
+      g_profile_pos1024_us = 0;
+      g_profile_frames = 0;
+    }
+  }
+#endif
+
   // handle positional stuff
   // TODO: better timing? (especially Hpos)
   if (snes->hPos == 0) {
+#ifdef PSP_PROFILE
+    uint32_t profile_start = 0;
+    bool profile_sample = ((++g_profile_pos0_calls & 15) == 0);
+    if (profile_sample)
+      profile_start = sceKernelGetSystemTimeLow();
+#endif
     // end of hblank, do most vPos-tests
     bool startingVblank = false;
     if (snes->vPos == 0) {
@@ -138,14 +190,46 @@ void snes_handle_pos_stuff(Snes *snes) {
         snes->autoJoyTimer = 0;
       }
     }
+#ifdef PSP_PROFILE
+    if (profile_sample) {
+      g_profile_pos0_us +=
+          (uint32_t)(sceKernelGetSystemTimeLow() - profile_start) * 16;
+    }
+#endif
   } else if (snes->hPos == 512) {
     // render the line halfway of the screen for better compatibility
-    if (!snes->inVblank && !snes->disableRender)
+    if (!snes->inVblank && !snes->disableRender) {
+#ifdef PSP_PROFILE
+      uint32_t profile_start = 0;
+      bool profile_sample = ((++g_profile_pos512_calls & 15) == 0);
+      if (profile_sample)
+        profile_start = sceKernelGetSystemTimeLow();
+#endif
       ppu_runLine(snes->ppu, snes->vPos);
+#ifdef PSP_PROFILE
+      if (profile_sample) {
+        g_profile_pos512_us +=
+            (uint32_t)(sceKernelGetSystemTimeLow() - profile_start) * 16;
+      }
+#endif
+    }
   } else if (snes->hPos == 1024) {
     // start of hblank
-    if (!snes->inVblank)
+    if (!snes->inVblank) {
+#ifdef PSP_PROFILE
+      uint32_t profile_start = 0;
+      bool profile_sample = ((++g_profile_pos1024_calls & 15) == 0);
+      if (profile_sample)
+        profile_start = sceKernelGetSystemTimeLow();
+#endif
       dma_doHdma(snes->dma);
+#ifdef PSP_PROFILE
+      if (profile_sample) {
+        g_profile_pos1024_us +=
+            (uint32_t)(sceKernelGetSystemTimeLow() - profile_start) * 16;
+      }
+#endif
+    }
   }
   // handle autoJoyRead-timer
   //if (snes->autoJoyTimer > 0) snes->autoJoyTimer -= 2;
