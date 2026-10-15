@@ -6,9 +6,25 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef PSP_PROFILE
+#include <pspkernel.h>
+#endif
+
+
 #include "ppu.h"
 #include "snes.h"
 #include "../types.h"
+
+#ifdef PSP_PROFILE
+extern void PspProfileLog(const char *message);
+
+static uint32_t g_ppu_profile_calls;
+static uint32_t g_ppu_profile_frames;
+static uint64_t g_ppu_profile_setup_us;
+static uint64_t g_ppu_profile_sprites_us;
+static uint64_t g_ppu_profile_render_us;
+static uint32_t g_ppu_profile_samples;
+#endif
 
 
 extern bool g_new_ppu;
@@ -245,6 +261,18 @@ static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
 }
 
 void ppu_runLine(Ppu* ppu, int line) {
+#ifdef PSP_PROFILE
+  /*
+   * Sample one in every 16 scanlines and scale the timings to estimate
+   * total work. Keep this profiling-only; do not change normal behavior.
+   */
+  bool profile_sample = ((++g_ppu_profile_calls & 15) == 0);
+  uint32_t profile_start = 0;
+  uint32_t profile_phase_start = 0;
+  if (profile_sample)
+    profile_start = sceKernelGetSystemTimeLow();
+#endif
+
   if(line == 0) {
     // pre-render line
     // TODO: this now happens halfway into the first line
@@ -264,9 +292,26 @@ void ppu_runLine(Ppu* ppu, int line) {
       memset(&ppu->brightnessMult[32], ppu->brightnessMult[31], 31);
     }
 
+#ifdef PSP_PROFILE
+    if (profile_sample) {
+      profile_phase_start = sceKernelGetSystemTimeLow();
+      g_ppu_profile_setup_us +=
+          (uint32_t)(profile_phase_start - profile_start) * 16;
+    }
+#endif
+
     // evaluate sprites
     ClearBackdrop(&ppu->objBuffer);
     ppu->lineHasSprites = !ppu->forcedBlank && ppu_evaluateSprites(ppu, line - 1);
+
+#ifdef PSP_PROFILE
+    if (profile_sample) {
+      uint32_t now = sceKernelGetSystemTimeLow();
+      g_ppu_profile_sprites_us +=
+          (uint32_t)(now - profile_phase_start) * 16;
+      profile_phase_start = now;
+    }
+#endif
 
     if (g_new_ppu) {
       PpuDrawWholeLine(ppu, line);
@@ -277,7 +322,36 @@ void ppu_runLine(Ppu* ppu, int line) {
         ppu_handlePixel(ppu, x, line);
       }
     }
+    
+#ifdef PSP_PROFILE
+    if (profile_sample) {
+      uint32_t now = sceKernelGetSystemTimeLow();
+      g_ppu_profile_render_us +=
+          (uint32_t)(now - profile_phase_start) * 16;
+      g_ppu_profile_samples++;
+    }
+#endif
   }
+  
+#ifdef PSP_PROFILE
+  if (line == 0 && ++g_ppu_profile_frames == 60) {
+    char linebuf[192];
+    uint32_t divisor = g_ppu_profile_samples ? 60 : 1;
+    snprintf(linebuf, sizeof(linebuf),
+             "ppu_detail frames=60 setup_avg_us=%u "
+             "sprites_avg_us=%u render_avg_us=%u samples=%u",
+             (unsigned int)(g_ppu_profile_setup_us / divisor),
+             (unsigned int)(g_ppu_profile_sprites_us / divisor),
+             (unsigned int)(g_ppu_profile_render_us / divisor),
+             (unsigned int)g_ppu_profile_samples);
+    PspProfileLog(linebuf);
+    g_ppu_profile_setup_us = 0;
+    g_ppu_profile_sprites_us = 0;
+    g_ppu_profile_render_us = 0;
+    g_ppu_profile_samples = 0;
+    g_ppu_profile_frames = 0;
+  }
+#endif
 }
 
 typedef struct PpuWindows {
