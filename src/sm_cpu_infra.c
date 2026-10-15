@@ -32,7 +32,6 @@ static uint64_t g_profile_draw_pos_total;
 static uint64_t g_profile_draw_irq_total;
 static uint64_t g_profile_draw_calls_total;
 static uint32_t g_profile_draw_count;
-static uint32_t g_profile_draw_sample_counter;
 
 static uint64_t g_profile_both_snapshot_total;
 static uint64_t g_profile_both_restore_total;
@@ -985,42 +984,23 @@ void DrawFrameToPpu(void) {
   uint32_t profile_draw_start = sceKernelGetSystemTimeLow();
   uint32_t profile_pos_us = 0;
   uint32_t profile_irq_us = 0;
-  uint32_t profile_pos_samples_us = 0;
   uint32_t profile_pos_calls = 0;
-  uint32_t profile_pos_samples = 0;
 #endif
 
   g_snes->hPos = g_snes->vPos = 0;
   while (!g_snes->cpu->nmiWanted) {
-    do {
 #ifdef PSP_PROFILE
-      uint16_t profile_hpos = g_snes->hPos;
-      bool profile_special_pos =
-          profile_hpos == 0 || profile_hpos == 512 ||
-          profile_hpos == 1024;
-      bool profile_sample_pos = false;
-      uint32_t profile_pos_start = 0;
-
-      if (profile_special_pos) {
-        profile_pos_start = sceKernelGetSystemTimeLow();
-      } else if ((g_profile_draw_sample_counter++ & 255) == 0) {
-        profile_sample_pos = true;
-        profile_pos_start = sceKernelGetSystemTimeLow();
-      }
+    uint32_t profile_pos_loop_start = sceKernelGetSystemTimeLow();
 #endif
+    do {
       snes_handle_pos_stuff(g_snes);
-#ifdef PSP_PROFILE
-      if (profile_special_pos) {
-        profile_pos_us +=
-            sceKernelGetSystemTimeLow() - profile_pos_start;
-      } else if (profile_sample_pos) {
-        profile_pos_samples_us +=
-            sceKernelGetSystemTimeLow() - profile_pos_start;
-        profile_pos_samples++;
-      }
       profile_pos_calls++;
 #endif
     } while (g_snes->hPos != 0);
+#ifdef PSP_PROFILE
+    profile_pos_us +=
+        sceKernelGetSystemTimeLow() - profile_pos_loop_start;
+#endif
     if (g_snes->vIrqEnabled && (g_snes->vPos - 1) == g_snes->vTimer) {
 #ifdef PSP_PROFILE
       uint32_t profile_irq_start = sceKernelGetSystemTimeLow();
@@ -1037,33 +1017,35 @@ void DrawFrameToPpu(void) {
 #ifdef PSP_PROFILE
   uint32_t profile_draw_us =
       sceKernelGetSystemTimeLow() - profile_draw_start;
-  uint32_t profile_pos_estimated_us =
-      profile_pos_us + profile_pos_samples_us * 256;
-  uint32_t profile_overhead_us =
-      profile_draw_us >= profile_pos_estimated_us + profile_irq_us
-          ? profile_draw_us - profile_pos_estimated_us - profile_irq_us
-          : 0;
 
   g_profile_draw_total += profile_draw_us;
-  g_profile_draw_pos_total += profile_pos_estimated_us;
+  g_profile_draw_pos_total += profile_pos_us;
   g_profile_draw_irq_total += profile_irq_us;
   g_profile_draw_calls_total += profile_pos_calls;
 
   if (++g_profile_draw_count == 60) {
     char profile_line[224];
+    uint32_t profile_draw_avg_us =
+        (uint32_t)(g_profile_draw_total / 60);
+    uint32_t profile_pos_avg_us =
+        (uint32_t)(g_profile_draw_pos_total / 60);
+    uint32_t profile_irq_avg_us =
+        (uint32_t)(g_profile_draw_irq_total / 60);
+    uint32_t profile_unaccounted_avg_us =
+        profile_draw_avg_us >= profile_pos_avg_us + profile_irq_avg_us
+            ? profile_draw_avg_us - profile_pos_avg_us - profile_irq_avg_us
+            : 0;
+
     snprintf(profile_line, sizeof(profile_line),
              "draw_detail frames=60 "
-             "draw_avg_us=%u pos_est_avg_us=%u "
-             "irq_avg_us=%u overhead_est_avg_us=%u "
-             "calls_avg=%u samples_last=%u",
-             (unsigned int)(g_profile_draw_total / 60),
-             (unsigned int)(g_profile_draw_pos_total / 60),
-             (unsigned int)(g_profile_draw_irq_total / 60),
-             (unsigned int)(g_profile_draw_total / 60 -
-                            g_profile_draw_pos_total / 60 -
-                            g_profile_draw_irq_total / 60),
-             (unsigned int)(g_profile_draw_calls_total / 60),
-             (unsigned int)profile_pos_samples);
+             "draw_avg_us=%u pos_loop_avg_us=%u "
+             "irq_avg_us=%u unaccounted_avg_us=%u "
+             "calls_avg=%u",
+             (unsigned int)profile_draw_avg_us,
+             (unsigned int)profile_pos_avg_us,
+             (unsigned int)profile_irq_avg_us,
+             (unsigned int)profile_unaccounted_avg_us,
+             (unsigned int)(g_profile_draw_calls_total / 60));
     PspProfileLog(profile_line);
 
     g_profile_draw_total = 0;
