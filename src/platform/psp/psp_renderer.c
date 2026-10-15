@@ -19,7 +19,7 @@
 #define GU_LIST_WORDS (64 * 1024)
 
 static uint32_t g_gu_list[GU_LIST_WORDS] __attribute__((aligned(16)));
-static uint16_t g_texture[TEX_WIDTH * TEX_HEIGHT] __attribute__((aligned(16)));
+static uint16_t *g_texture;
 static uint8_t g_framebuffer[GAME_WIDTH * GAME_HEIGHT * 4] __attribute__((aligned(16)));
 
 static inline uint16_t Rgb565(const uint8_t *p) {
@@ -38,7 +38,14 @@ static void PspRenderer_Convert(void) {
   }
 }
 
+//VRAM layout: [0, 2 * 512 * 272 * 2) display buffers, [2 * 512 * 272 * 2, ...) depth buffer, texture starts after the depth buffer
+#define PSP_TEXTURE_VRAM_OFFSET (512 * 272 * 6)
+
 static bool PspRenderer_Initialize(void) {
+  g_texture = (uint16_t *)(
+      ((uintptr_t)sceGeEdramGetAddr() | 0x40000000U) +
+      PSP_TEXTURE_VRAM_OFFSET);
+
   sceGuInit();
   sceGuStart(GU_DIRECT, g_gu_list);
 
@@ -73,6 +80,7 @@ static bool PspRenderer_Initialize(void) {
 static void PspRenderer_Destroy(void) {
   sceGuDisplay(GU_FALSE);
   sceGuTerm();
+  g_texture = NULL;
 }
 
 static void PspRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {
