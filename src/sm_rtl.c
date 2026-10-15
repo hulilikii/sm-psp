@@ -7,6 +7,19 @@
 #include "spc_player.h"
 #include "util.h"
 
+#ifdef PSP_PROFILE
+#include <pspkernel.h>
+extern void PspProfileLog(const char *message);
+
+static uint64_t g_profile_rtl_prep_total;
+static uint64_t g_profile_rtl_callback_total;
+static uint64_t g_profile_rtl_apu_total;
+static uint32_t g_profile_rtl_prep_max;
+static uint32_t g_profile_rtl_callback_max;
+static uint32_t g_profile_rtl_apu_max;
+static uint32_t g_profile_rtl_count;
+#endif
+
 struct StateRecorder;
 
 static void RtlSaveMusicStateToRam_Locked();
@@ -392,6 +405,9 @@ enum {
 };
 
 bool RtlRunFrame(int inputs) {
+#ifdef PSP_PROFILE
+  uint32_t profile_frame_start = sceKernelGetSystemTimeLow();
+#endif
   // Avoid up/down and left/right from being pressed at the same time
   if ((inputs & 0x30) == 0x30) inputs ^= 0x30;
   if ((inputs & 0xc0) == 0xc0) inputs ^= 0xc0;
@@ -423,13 +439,64 @@ bool RtlRunFrame(int inputs) {
   if (bug_fix_counter != currently_installed_bug_fix_counter)
     RtlUpdateSnesPatchForBugfix();
 
+#ifdef PSP_PROFILE
+  uint32_t profile_prep_us =
+      sceKernelGetSystemTimeLow() - profile_frame_start;
+  uint32_t profile_callback_start = sceKernelGetSystemTimeLow();
+#endif
   g_rtl_runframe(inputs, 0);
+#ifdef PSP_PROFILE
+  uint32_t profile_callback_us =
+      sceKernelGetSystemTimeLow() - profile_callback_start;
+  uint32_t profile_apu_us = 0;
+#endif
 
   snes_frame_counter++;
 
   #if PSP_AUDIO_ENABLED
+#ifdef PSP_PROFILE
+  uint32_t profile_apu_start = sceKernelGetSystemTimeLow();
+#endif
   RtlPushApuState();
+#ifdef PSP_PROFILE
+  profile_apu_us = sceKernelGetSystemTimeLow() - profile_apu_start;
+#endif
   #endif
+  
+#ifdef PSP_PROFILE
+  g_profile_rtl_prep_total += profile_prep_us;
+  g_profile_rtl_callback_total += profile_callback_us;
+  g_profile_rtl_apu_total += profile_apu_us;
+  if (profile_prep_us > g_profile_rtl_prep_max)
+    g_profile_rtl_prep_max = profile_prep_us;
+  if (profile_callback_us > g_profile_rtl_callback_max)
+    g_profile_rtl_callback_max = profile_callback_us;
+  if (profile_apu_us > g_profile_rtl_apu_max)
+    g_profile_rtl_apu_max = profile_apu_us;
+
+  if (++g_profile_rtl_count == 60) {
+    char profile_line[192];
+    snprintf(profile_line, sizeof(profile_line),
+             "rtl_detail frames=60 prep_avg_us=%u prep_max_us=%u "
+             "callback_avg_us=%u callback_max_us=%u "
+             "apu_queue_avg_us=%u apu_queue_max_us=%u",
+             (unsigned int)(g_profile_rtl_prep_total / 60),
+             (unsigned int)g_profile_rtl_prep_max,
+             (unsigned int)(g_profile_rtl_callback_total / 60),
+             (unsigned int)g_profile_rtl_callback_max,
+             (unsigned int)(g_profile_rtl_apu_total / 60),
+             (unsigned int)g_profile_rtl_apu_max);
+    PspProfileLog(profile_line);
+    g_profile_rtl_prep_total = 0;
+    g_profile_rtl_callback_total = 0;
+    g_profile_rtl_apu_total = 0;
+    g_profile_rtl_prep_max = 0;
+    g_profile_rtl_callback_max = 0;
+    g_profile_rtl_apu_max = 0;
+    g_profile_rtl_count = 0;
+  }
+#endif
+
   return is_replay;
 }
 

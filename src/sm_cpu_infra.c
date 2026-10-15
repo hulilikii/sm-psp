@@ -11,6 +11,24 @@
 #include "enemy_types.h"
 #include <time.h>
 
+#ifdef PSP_PROFILE
+#include <pspkernel.h>
+extern void PspProfileLog(const char *message);
+
+static uint64_t g_profile_compare_total;
+static uint32_t g_profile_compare_max;
+static uint32_t g_profile_compare_count;
+
+static uint64_t g_profile_both_snapshot_total;
+static uint64_t g_profile_both_restore_total;
+static uint64_t g_profile_both_emulated_total;
+static uint64_t g_profile_both_emulated_draw_total;
+static uint64_t g_profile_both_mine_total;
+static uint64_t g_profile_both_mine_draw_total;
+static uint64_t g_profile_both_verify_total;
+static uint32_t g_profile_both_count;
+#endif
+
 extern const uint8_t _binary_sm_smc_start[];
 extern const uint8_t _binary_sm_smc_end[];
 
@@ -970,30 +988,95 @@ void SaveBugSnapshot() {
 }
 
 void RunOneFrameOfGame_Both(void) {
+#ifdef PSP_PROFILE
+  uint32_t profile_stage_start;
+  uint32_t profile_snapshot_us = 0;
+  uint32_t profile_restore_us = 0;
+  uint32_t profile_emulated_us = 0;
+  uint32_t profile_emulated_draw_us = 0;
+  uint32_t profile_mine_us = 0;
+  uint32_t profile_mine_draw_us = 0;
+  uint32_t profile_verify_us = 0;
+#endif
   g_snes->ppu = g_snes->snes_ppu;
+#ifdef PSP_PROFILE
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   MakeSnapshot(&g_snapshot_before);
+#ifdef PSP_PROFILE
+  profile_snapshot_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+#endif
 
   // Run orig version then snapshot
 again_theirs:
   g_snes->runningWhichVersion = 1;
+#ifdef PSP_PROFILE
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   RunOneFrameOfGame_Emulated();
+#ifdef PSP_PROFILE
+  profile_emulated_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   DrawFrameToPpu();
+#ifdef PSP_PROFILE
+  profile_emulated_draw_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   MakeSnapshot(&g_snapshot_theirs);
+#ifdef PSP_PROFILE
+  profile_snapshot_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+#endif
 
   // Run my version and snapshot
 //again_mine:
   g_snes->ppu = g_snes->my_ppu;
+#ifdef PSP_PROFILE
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   RestoreSnapshot(&g_snapshot_before);
+#ifdef PSP_PROFILE
+  profile_restore_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+#endif
 
   g_snes->runningWhichVersion = 2;
+#ifdef PSP_PROFILE
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   RunOneFrameOfGame();
+#ifdef PSP_PROFILE
+  profile_mine_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   DrawFrameToPpu();
+#ifdef PSP_PROFILE
+  profile_mine_draw_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   MakeSnapshot(&g_snapshot_mine);
+#ifdef PSP_PROFILE
+  profile_snapshot_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+#endif
 
   g_snes->runningWhichVersion = 0xff;
 
   // Compare both snapshots
+#ifdef PSP_PROFILE
+  profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   VerifySnapshotsEq(&g_snapshot_mine, &g_snapshot_theirs, &g_snapshot_before);
+#ifdef PSP_PROFILE
+  profile_verify_us +=
+      sceKernelGetSystemTimeLow() - profile_stage_start;
+#endif
 
   if (g_fail) {
     g_fail = false;
@@ -1007,7 +1090,14 @@ again_theirs:
       goto again_theirs;
 
     SaveBugSnapshot();
+#ifdef PSP_PROFILE
+    profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
     RunOneFrameOfGame_Emulated();
+#ifdef PSP_PROFILE
+    profile_emulated_us +=
+        sceKernelGetSystemTimeLow() - profile_stage_start;
+#endif
     goto getout;
   }
 
@@ -1033,9 +1123,46 @@ getout:
 
   if (g_got_mismatch_count)
     g_got_mismatch_count--;
+    
+#ifdef PSP_PROFILE
+  g_profile_both_snapshot_total += profile_snapshot_us;
+  g_profile_both_restore_total += profile_restore_us;
+  g_profile_both_emulated_total += profile_emulated_us;
+  g_profile_both_emulated_draw_total += profile_emulated_draw_us;
+  g_profile_both_mine_total += profile_mine_us;
+  g_profile_both_mine_draw_total += profile_mine_draw_us;
+  g_profile_both_verify_total += profile_verify_us;
+
+  if (++g_profile_both_count == 60) {
+    char profile_line[256];
+    snprintf(profile_line, sizeof(profile_line),
+             "both_detail frames=60 snapshot_avg_us=%u restore_avg_us=%u "
+             "emulated_cpu_avg_us=%u emulated_draw_avg_us=%u "
+             "mine_cpu_avg_us=%u mine_draw_avg_us=%u verify_avg_us=%u",
+             (unsigned int)(g_profile_both_snapshot_total / 60),
+             (unsigned int)(g_profile_both_restore_total / 60),
+             (unsigned int)(g_profile_both_emulated_total / 60),
+             (unsigned int)(g_profile_both_emulated_draw_total / 60),
+             (unsigned int)(g_profile_both_mine_total / 60),
+             (unsigned int)(g_profile_both_mine_draw_total / 60),
+             (unsigned int)(g_profile_both_verify_total / 60));
+    PspProfileLog(profile_line);
+    g_profile_both_snapshot_total = 0;
+    g_profile_both_restore_total = 0;
+    g_profile_both_emulated_total = 0;
+    g_profile_both_emulated_draw_total = 0;
+    g_profile_both_mine_total = 0;
+    g_profile_both_mine_draw_total = 0;
+    g_profile_both_verify_total = 0;
+    g_profile_both_count = 0;
+  }
+#endif
 }
 
 void RtlRunFrameCompare(uint16 input, int run_what) {
+#ifdef PSP_PROFILE
+  uint32_t profile_callback_start = sceKernelGetSystemTimeLow();
+#endif
   g_snes->input1->currentState = input;
 
   if (g_runmode == RM_THEIRS) {
@@ -1053,4 +1180,25 @@ void RtlRunFrameCompare(uint16 input, int run_what) {
     g_use_my_apu_code = true;
     RunOneFrameOfGame_Both();
   }
+
+#ifdef PSP_PROFILE
+  uint32_t profile_callback_us =
+      sceKernelGetSystemTimeLow() - profile_callback_start;
+  g_profile_compare_total += profile_callback_us;
+  if (profile_callback_us > g_profile_compare_max)
+    g_profile_compare_max = profile_callback_us;
+
+  if (++g_profile_compare_count == 60) {
+    char profile_line[128];
+    snprintf(profile_line, sizeof(profile_line),
+             "frame_callback frames=60 avg_us=%u max_us=%u runmode=%u",
+             (unsigned int)(g_profile_compare_total / 60),
+             (unsigned int)g_profile_compare_max,
+             (unsigned int)g_runmode);
+    PspProfileLog(profile_line);
+    g_profile_compare_total = 0;
+    g_profile_compare_max = 0;
+    g_profile_compare_count = 0;
+  }
+#endif
 }
