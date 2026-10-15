@@ -952,6 +952,15 @@ void DrawFrameToPpu(void) {
   while (!g_snes->cpu->nmiWanted) {
     do {
       snes_handle_pos_stuff(g_snes);
+  //Only hPos 0, 512, and 1024 have active position events.
+  //Skip the intermediate positions while preserving the event order and the existing scanline-wrap logic.
+      if (g_snes->hPos == 2) {
+        g_snes->hPos = 512;
+      } else if (g_snes->hPos == 514) {
+        g_snes->hPos = 1024;
+      } else if (g_snes->hPos == 1026) {
+        g_snes->hPos = 1362;
+      }
     } while (g_snes->hPos != 0);
     if (g_snes->vIrqEnabled && (g_snes->vPos - 1) == g_snes->vTimer) {
       Vector_IRQ();
