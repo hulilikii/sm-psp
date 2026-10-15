@@ -24,6 +24,12 @@ static uint64_t g_ppu_profile_setup_us;
 static uint64_t g_ppu_profile_sprites_us;
 static uint64_t g_ppu_profile_render_us;
 static uint32_t g_ppu_profile_samples;
+static uint64_t g_ppu_profile_wholeline_us;
+static uint64_t g_ppu_profile_legacy_mode7_us;
+static uint64_t g_ppu_profile_legacy_pixels_us;
+static uint32_t g_ppu_profile_wholeline_samples;
+static uint32_t g_ppu_profile_legacy_samples;
+static uint32_t g_ppu_profile_mode7_samples;
 #endif
 
 
@@ -315,12 +321,39 @@ void ppu_runLine(Ppu* ppu, int line) {
 
     if (g_new_ppu) {
       PpuDrawWholeLine(ppu, line);
+#ifdef PSP_PROFILE
+      if (profile_sample) {
+        uint32_t now = sceKernelGetSystemTimeLow();
+        g_ppu_profile_wholeline_us +=
+            (uint32_t)(now - profile_phase_start) * 16;
+        g_ppu_profile_wholeline_samples++;
+      }
+#endif
     } else {
       // actual line
-      if (ppu->mode == 7) ppu_calculateMode7Starts(ppu, line);
+      if (ppu->mode == 7) {
+        ppu_calculateMode7Starts(ppu, line);
+#ifdef PSP_PROFILE
+        if (profile_sample) {
+          uint32_t now = sceKernelGetSystemTimeLow();
+          g_ppu_profile_legacy_mode7_us +=
+              (uint32_t)(now - profile_phase_start) * 16;
+          g_ppu_profile_mode7_samples++;
+          profile_phase_start = now;
+        }
+#endif
+      }
       for (int x = 0; x < 256; x++) {
         ppu_handlePixel(ppu, x, line);
       }
+#ifdef PSP_PROFILE
+      if (profile_sample) {
+        uint32_t now = sceKernelGetSystemTimeLow();
+        g_ppu_profile_legacy_pixels_us +=
+            (uint32_t)(now - profile_phase_start) * 16;
+        g_ppu_profile_legacy_samples++;
+      }
+#endif
     }
     
 #ifdef PSP_PROFILE
@@ -335,20 +368,35 @@ void ppu_runLine(Ppu* ppu, int line) {
   
 #ifdef PSP_PROFILE
   if (line == 0 && ++g_ppu_profile_frames == 60) {
-    char linebuf[192];
+    char linebuf[320];
     uint32_t divisor = g_ppu_profile_samples ? 60 : 1;
     snprintf(linebuf, sizeof(linebuf),
              "ppu_detail frames=60 setup_avg_us=%u "
-             "sprites_avg_us=%u render_avg_us=%u samples=%u",
+             "sprites_avg_us=%u render_avg_us=%u samples=%u "
+             "wholeline_avg_us=%u wholeline_samples=%u "
+             "legacy_mode7_avg_us=%u mode7_samples=%u "
+             "legacy_pixels_avg_us=%u legacy_samples=%u",
              (unsigned int)(g_ppu_profile_setup_us / divisor),
              (unsigned int)(g_ppu_profile_sprites_us / divisor),
              (unsigned int)(g_ppu_profile_render_us / divisor),
-             (unsigned int)g_ppu_profile_samples);
+             (unsigned int)g_ppu_profile_samples,
+             (unsigned int)(g_ppu_profile_wholeline_us / divisor),
+             (unsigned int)g_ppu_profile_wholeline_samples,
+             (unsigned int)(g_ppu_profile_legacy_mode7_us / divisor),
+             (unsigned int)g_ppu_profile_mode7_samples,
+             (unsigned int)(g_ppu_profile_legacy_pixels_us / divisor),
+             (unsigned int)g_ppu_profile_legacy_samples);
     PspProfileLog(linebuf);
     g_ppu_profile_setup_us = 0;
     g_ppu_profile_sprites_us = 0;
     g_ppu_profile_render_us = 0;
     g_ppu_profile_samples = 0;
+    g_ppu_profile_wholeline_us = 0;
+    g_ppu_profile_legacy_mode7_us = 0;
+    g_ppu_profile_legacy_pixels_us = 0;
+    g_ppu_profile_wholeline_samples = 0;
+    g_ppu_profile_legacy_samples = 0;
+    g_ppu_profile_mode7_samples = 0;
     g_ppu_profile_frames = 0;
   }
 #endif
