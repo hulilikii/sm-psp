@@ -844,7 +844,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 #ifdef PSP_PROFILE
   uint32_t profile_now = sceKernelGetSystemTimeLow();
   g_ppu_profile_main_layers_us +=
-      (uint32_t)(profile_now - profile_stage_start) * 16;
+      (uint32_t)(profile_now - profile_stage_start);
   profile_stage_start = profile_now;
 #endif
 
@@ -865,7 +865,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 #ifdef PSP_PROFILE
   profile_now = sceKernelGetSystemTimeLow();
   g_ppu_profile_subscreen_us +=
-      (uint32_t)(profile_now - profile_stage_start) * 16;
+      (uint32_t)(profile_now - profile_stage_start);
   profile_stage_start = profile_now;
 #endif
 
@@ -940,7 +940,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 #ifdef PSP_PROFILE
   profile_now = sceKernelGetSystemTimeLow();
   g_ppu_profile_composite_us +=
-      (uint32_t)(profile_now - profile_stage_start) * 16;
+      (uint32_t)(profile_now - profile_stage_start);
 #endif
 }
 
