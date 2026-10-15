@@ -19,6 +19,14 @@ static uint64_t g_profile_compare_total;
 static uint32_t g_profile_compare_max;
 static uint32_t g_profile_compare_count;
 
+static uint64_t g_profile_mine_cpu_total;
+static uint64_t g_profile_mine_ppu_total;
+static uint64_t g_profile_mine_other_total;
+static uint32_t g_profile_mine_cpu_max;
+static uint32_t g_profile_mine_ppu_max;
+static uint32_t g_profile_mine_other_max;
+static uint32_t g_profile_mine_count;
+
 static uint64_t g_profile_both_snapshot_total;
 static uint64_t g_profile_both_restore_total;
 static uint64_t g_profile_both_emulated_total;
@@ -1162,6 +1170,9 @@ getout:
 void RtlRunFrameCompare(uint16 input, int run_what) {
 #ifdef PSP_PROFILE
   uint32_t profile_callback_start = sceKernelGetSystemTimeLow();
+  uint32_t profile_stage_start;
+  uint32_t profile_mine_cpu_us = 0;
+  uint32_t profile_mine_ppu_us = 0;
 #endif
   g_snes->input1->currentState = input;
 
@@ -1173,8 +1184,20 @@ void RtlRunFrameCompare(uint16 input, int run_what) {
     g_use_my_apu_code = true;
 
     g_snes->runningWhichVersion = 0xff;
+#ifdef PSP_PROFILE
+    profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
     RunOneFrameOfGame();
+#ifdef PSP_PROFILE
+    profile_mine_cpu_us =
+        sceKernelGetSystemTimeLow() - profile_stage_start;
+    profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
     DrawFrameToPpu();
+#ifdef PSP_PROFILE
+    profile_mine_ppu_us =
+        sceKernelGetSystemTimeLow() - profile_stage_start;
+#endif
     g_snes->runningWhichVersion = 0;
   } else {
     g_use_my_apu_code = true;
@@ -1187,6 +1210,51 @@ void RtlRunFrameCompare(uint16 input, int run_what) {
   g_profile_compare_total += profile_callback_us;
   if (profile_callback_us > g_profile_compare_max)
     g_profile_compare_max = profile_callback_us;
+    
+  if (g_runmode == RM_MINE) {
+    uint32_t profile_mine_stages_us =
+        profile_mine_cpu_us + profile_mine_ppu_us;
+    uint32_t profile_mine_other_us =
+        profile_callback_us >= profile_mine_stages_us
+            ? profile_callback_us - profile_mine_stages_us
+            : 0;
+
+    g_profile_mine_cpu_total += profile_mine_cpu_us;
+    g_profile_mine_ppu_total += profile_mine_ppu_us;
+    g_profile_mine_other_total += profile_mine_other_us;
+
+    if (profile_mine_cpu_us > g_profile_mine_cpu_max)
+      g_profile_mine_cpu_max = profile_mine_cpu_us;
+    if (profile_mine_ppu_us > g_profile_mine_ppu_max)
+      g_profile_mine_ppu_max = profile_mine_ppu_us;
+    if (profile_mine_other_us > g_profile_mine_other_max)
+      g_profile_mine_other_max = profile_mine_other_us;
+
+    if (++g_profile_mine_count == 60) {
+      char profile_line[192];
+      snprintf(profile_line, sizeof(profile_line),
+               "mine_detail frames=60 "
+               "cpu_avg_us=%u cpu_max_us=%u "
+               "ppu_avg_us=%u ppu_max_us=%u "
+               "other_avg_us=%u other_max_us=%u",
+               (unsigned int)(g_profile_mine_cpu_total / 60),
+               (unsigned int)g_profile_mine_cpu_max,
+               (unsigned int)(g_profile_mine_ppu_total / 60),
+               (unsigned int)g_profile_mine_ppu_max,
+               (unsigned int)(g_profile_mine_other_total / 60),
+               (unsigned int)g_profile_mine_other_max);
+      PspProfileLog(profile_line);
+
+      g_profile_mine_cpu_total = 0;
+      g_profile_mine_ppu_total = 0;
+      g_profile_mine_other_total = 0;
+      g_profile_mine_cpu_max = 0;
+      g_profile_mine_ppu_max = 0;
+      g_profile_mine_other_max = 0;
+      g_profile_mine_count = 0;
+    }
+  }
+
 
   if (++g_profile_compare_count == 60) {
     char profile_line[128];
