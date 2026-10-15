@@ -994,6 +994,7 @@ void DrawFrameToPpu(void) {
 #endif
     do {
       snes_handle_pos_stuff(g_snes);
+#ifdef PSP_PROFILE
       profile_pos_calls++;
 #endif
     } while (g_snes->hPos != 0);
