@@ -30,6 +30,9 @@ static uint64_t g_ppu_profile_legacy_pixels_us;
 static uint32_t g_ppu_profile_wholeline_samples;
 static uint32_t g_ppu_profile_legacy_samples;
 static uint32_t g_ppu_profile_mode7_samples;
+static uint64_t g_ppu_profile_main_layers_us;
+static uint64_t g_ppu_profile_subscreen_us;
+static uint64_t g_ppu_profile_composite_us;
 #endif
 
 
@@ -368,14 +371,16 @@ void ppu_runLine(Ppu* ppu, int line) {
   
 #ifdef PSP_PROFILE
   if (line == 0 && ++g_ppu_profile_frames == 60) {
-    char linebuf[320];
+    char linebuf[448];
     uint32_t divisor = g_ppu_profile_samples ? 60 : 1;
     snprintf(linebuf, sizeof(linebuf),
              "ppu_detail frames=60 setup_avg_us=%u "
              "sprites_avg_us=%u render_avg_us=%u samples=%u "
              "wholeline_avg_us=%u wholeline_samples=%u "
              "legacy_mode7_avg_us=%u mode7_samples=%u "
-             "legacy_pixels_avg_us=%u legacy_samples=%u",
+             "legacy_pixels_avg_us=%u legacy_samples=%u "
+             "main_layers_avg_us=%u subscreen_avg_us=%u "
+             "composite_avg_us=%u",
              (unsigned int)(g_ppu_profile_setup_us / divisor),
              (unsigned int)(g_ppu_profile_sprites_us / divisor),
              (unsigned int)(g_ppu_profile_render_us / divisor),
@@ -385,7 +390,10 @@ void ppu_runLine(Ppu* ppu, int line) {
              (unsigned int)(g_ppu_profile_legacy_mode7_us / divisor),
              (unsigned int)g_ppu_profile_mode7_samples,
              (unsigned int)(g_ppu_profile_legacy_pixels_us / divisor),
-             (unsigned int)g_ppu_profile_legacy_samples);
+             (unsigned int)g_ppu_profile_legacy_samples,
+             (unsigned int)(g_ppu_profile_main_layers_us / divisor),
+             (unsigned int)(g_ppu_profile_subscreen_us / divisor),
+             (unsigned int)(g_ppu_profile_composite_us / divisor));
     PspProfileLog(linebuf);
     g_ppu_profile_setup_us = 0;
     g_ppu_profile_sprites_us = 0;
@@ -397,6 +405,9 @@ void ppu_runLine(Ppu* ppu, int line) {
     g_ppu_profile_wholeline_samples = 0;
     g_ppu_profile_legacy_samples = 0;
     g_ppu_profile_mode7_samples = 0;
+    g_ppu_profile_main_layers_us = 0;
+    g_ppu_profile_subscreen_us = 0;
+    g_ppu_profile_composite_us = 0;
     g_ppu_profile_frames = 0;
   }
 #endif
@@ -815,6 +826,9 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
 }
 
 static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
+#ifdef PSP_PROFILE
+  uint32_t profile_stage_start = sceKernelGetSystemTimeLow();
+#endif
   if (ppu->forcedBlank) {
     uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
     size_t n = sizeof(uint32) * (256 + ppu->extraLeftRight * 2);
@@ -827,6 +841,12 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
 
   // Render main screen
   PpuDrawBackgrounds(ppu, y, false);
+#ifdef PSP_PROFILE
+  uint32_t profile_now = sceKernelGetSystemTimeLow();
+  g_ppu_profile_main_layers_us +=
+      (uint32_t)(profile_now - profile_stage_start) * 16;
+  profile_stage_start = profile_now;
+#endif
 
   // The 6:th bit is automatically zero, math is never applied to the first half of the sprites.
   uint32 math_enabled = 0;
@@ -842,6 +862,12 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
       rendered_subscreen = true;
     }
   }
+#ifdef PSP_PROFILE
+  profile_now = sceKernelGetSystemTimeLow();
+  g_ppu_profile_subscreen_us +=
+      (uint32_t)(profile_now - profile_stage_start) * 16;
+  profile_stage_start = profile_now;
+#endif
 
   // Color window affects the drawing mode in each region
   PpuWindows cwin;
@@ -911,6 +937,11 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     }
   } while (cw_clip_math >>= 1, ++windex < cwin.nr);
 
+#ifdef PSP_PROFILE
+  profile_now = sceKernelGetSystemTimeLow();
+  g_ppu_profile_composite_us +=
+      (uint32_t)(profile_now - profile_stage_start) * 16;
+#endif
 }
 
 
