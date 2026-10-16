@@ -34,10 +34,8 @@ static uint64_t g_ppu_profile_main_layers_us;
 static uint64_t g_ppu_profile_subscreen_us;
 static uint64_t g_ppu_profile_composite_us;
 static uint32_t g_ppu_profile_composite_no_math_hits;
-static uint32_t g_ppu_profile_composite_half_hits;
 static uint32_t g_ppu_profile_composite_general_hits;
 static uint64_t g_ppu_profile_composite_no_math_us;
-static uint64_t g_ppu_profile_composite_half_us;
 static uint64_t g_ppu_profile_composite_general_us;
 #endif
 
@@ -388,7 +386,6 @@ void ppu_runLine(Ppu* ppu, int line) {
              "main_layers_avg_us=%u subscreen_avg_us=%u "
              "composite_avg_us=%u "
              "comp_no_math_hits=%u comp_no_math_avg_us=%u "
-             "comp_half_hits=%u comp_half_avg_us=%u "
              "comp_general_hits=%u comp_general_avg_us=%u",
              (unsigned int)(g_ppu_profile_setup_us / divisor),
              (unsigned int)(g_ppu_profile_sprites_us / divisor),
@@ -405,8 +402,6 @@ void ppu_runLine(Ppu* ppu, int line) {
              (unsigned int)(g_ppu_profile_composite_us / divisor),
              (unsigned int)(g_ppu_profile_composite_no_math_hits / divisor),
              (unsigned int)(g_ppu_profile_composite_no_math_us / divisor),
-             (unsigned int)(g_ppu_profile_composite_half_hits / divisor),
-             (unsigned int)(g_ppu_profile_composite_half_us / divisor),
              (unsigned int)(g_ppu_profile_composite_general_hits / divisor),
              (unsigned int)(g_ppu_profile_composite_general_us / divisor));
     PspProfileLog(linebuf);
@@ -424,10 +419,8 @@ void ppu_runLine(Ppu* ppu, int line) {
     g_ppu_profile_subscreen_us = 0;
     g_ppu_profile_composite_us = 0;
     g_ppu_profile_composite_no_math_hits = 0;
-    g_ppu_profile_composite_half_hits = 0;
     g_ppu_profile_composite_general_hits = 0;
     g_ppu_profile_composite_no_math_us = 0;
-    g_ppu_profile_composite_half_us = 0;
     g_ppu_profile_composite_general_us = 0;
     g_ppu_profile_frames = 0;
   }
@@ -914,11 +907,15 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     uint32 clip_color_mask = (cw_clip_math & 1) ? 0x1f : 0;
     uint32 math_enabled_cur = (cw_clip_math & 0x100) ? math_enabled : 0;
     uint32 fixed_color = ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
-    if (math_enabled_cur == 0 || (fixed_color == 0 && !ppu->halfColor && !rendered_subscreen)) {
+<<<<<<< HEAD
+    if (math_enabled_cur == 0 || fixed_color == 0 && !ppu->halfColor && !rendered_subscreen) {
 #ifdef PSP_PROFILE
       g_ppu_profile_composite_no_math_hits++;
       profile_composite_branch_start = sceKernelGetSystemTimeLow();
 #endif
+=======
+    if (math_enabled_cur == 0 || fixed_color == 0 && !ppu->halfColor && !rendered_subscreen) {
+>>>>>>> parent of 4c6b235 (color comp opt)
       // Math is disabled (or has no effect), so can avoid the per-pixel maths check
       uint32 i = left;
       do {
@@ -927,54 +924,12 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
           ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
           ppu->brightnessMult[(color >> 10) & clip_color_mask];
       } while (dst++, ++i < right);
+<<<<<<< HEAD
 #ifdef PSP_PROFILE
       g_ppu_profile_composite_no_math_us +=
           (uint32_t)(sceKernelGetSystemTimeLow() - profile_composite_branch_start);
 #endif
-    } else if (rendered_subscreen && ppu->addSubscreen &&
-               ppu->halfColor && !ppu->subtractColor) {
-#ifdef PSP_PROFILE
-      g_ppu_profile_composite_half_hits++;
-      profile_composite_branch_start = sceKernelGetSystemTimeLow();
-#endif
-      // Fast path for additive half-color with a rendered subscreen. Keep the backdrop/fixed-color case at normal brightness, as required by the existing composition path.
-      uint32 i = left;
-      do {
-        uint32 color = ppu->cgram[ppu->bgBuffers[0].data[i] & 0xff];
-        uint8 main_layer = (ppu->bgBuffers[0].data[i] >> 8) & 0xf;
-        uint32 r = color & clip_color_mask;
-        uint32 g = (color >> 5) & clip_color_mask;
-        uint32 b = (color >> 10) & clip_color_mask;
-
-        if (math_enabled_cur & (1u << main_layer)) {
-          uint32 sub_pixel = ppu->bgBuffers[1].data[i] & 0xff;
-          if (sub_pixel != 0) {
-            uint32 color2 = ppu->cgram[sub_pixel];
-            r += color2 & 0x1f;
-            g += (color2 >> 5) & 0x1f;
-            b += (color2 >> 10) & 0x1f;
-            dst[0] = ppu->brightnessMultHalf[b] |
-                ppu->brightnessMultHalf[g] << 8 |
-                ppu->brightnessMultHalf[r] << 16;
-          } else {
-            r += ppu->fixedColorR;
-            g += ppu->fixedColorG;
-            b += ppu->fixedColorB;
-            dst[0] = ppu->brightnessMult[b] |
-                ppu->brightnessMult[g] << 8 |
-                ppu->brightnessMult[r] << 16;
-          }
-        } else {
-          dst[0] = ppu->brightnessMult[b] |
-              ppu->brightnessMult[g] << 8 |
-              ppu->brightnessMult[r] << 16;
-        }
-      } while (dst++, ++i < right);
-#ifdef PSP_PROFILE
-      g_ppu_profile_composite_half_us +=
-          (uint32_t)(sceKernelGetSystemTimeLow() - profile_composite_branch_start);
-#endif
-    } else {
+      } else {
 #ifdef PSP_PROFILE
       g_ppu_profile_composite_general_hits++;
       profile_composite_branch_start = sceKernelGetSystemTimeLow();
