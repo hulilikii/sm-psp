@@ -839,21 +839,16 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
   }
 }
 
-static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
+// Build the main-screen and optional subscreen priority buffers. Keep this stage separate from color composition so a future PSP-native renderer can consume layer data without changing PPU register semantics.
+static bool PpuBuildLayerBuffers(Ppu *ppu, uint y, uint32 *math_enabled_out) {
 #ifdef PSP_PROFILE
   uint32_t profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
-  if (ppu->forcedBlank) {
-    uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
-    size_t n = sizeof(uint32) * (256 + ppu->extraLeftRight * 2);
-    memset(dst, 0, n);
-    return;
-  }
 
-  // Default background is backdrop
+  // Default background is backdrop.
   ClearBackdrop(&ppu->bgBuffers[0]);
 
-  // Render main screen
+  // Render main screen.
   PpuDrawBackgrounds(ppu, y, false);
 #ifdef PSP_PROFILE
   uint32_t profile_now = sceKernelGetSystemTimeLow();
@@ -862,12 +857,13 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   profile_stage_start = profile_now;
 #endif
 
-  // The 6:th bit is automatically zero, math is never applied to the first half of the sprites.
+  // The 6th bit is automatically zero: math is never applied to the first half of the sprites.
   uint32 math_enabled = 0;
-  for(int i = 0; i < 6; i++)
+  for (int i = 0; i < 6; i++)
     math_enabled |= ppu->mathEnabled[i] << i;
+  *math_enabled_out = math_enabled;
 
-  // Render also the subscreen?
+  // Render the subscreen only when color math requires it.
   bool rendered_subscreen = false;
   if (ppu->preventMathMode != 3 && ppu->addSubscreen && math_enabled) {
     ClearBackdrop(&ppu->bgBuffers[1]);
@@ -880,7 +876,26 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
   profile_now = sceKernelGetSystemTimeLow();
   g_ppu_profile_subscreen_us +=
       (uint32_t)(profile_now - profile_stage_start);
-  profile_stage_start = profile_now;
+#endif
+
+  return rendered_subscreen;
+}
+
+static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
+  if (ppu->forcedBlank) {
+    uint8 *dst = &ppu->renderBuffer[(y - 1) * ppu->renderPitch];
+    size_t n = sizeof(uint32) * (256 + ppu->extraLeftRight * 2);
+    memset(dst, 0, n);
+    return;
+  }
+
+  uint32 math_enabled;
+  bool rendered_subscreen =
+      PpuBuildLayerBuffers(ppu, y, &math_enabled);
+
+#ifdef PSP_PROFILE
+  uint32_t profile_stage_start = sceKernelGetSystemTimeLow();
+  uint32_t profile_now;
 #endif
 
   // Color window affects the drawing mode in each region
