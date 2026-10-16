@@ -39,6 +39,20 @@ static uint64_t g_ppu_profile_composite_no_math_us;
 static uint64_t g_ppu_profile_composite_general_us;
 #endif
 
+#include "ppu_tile_cache.h"
+
+static PpuTileCache tile_cache;
+
+PpuTileCacheInit(&tile_cache);
+
+const uint8_t *pixels =
+    PpuTileCacheGet4bpp(&tile_cache, ppu->vram, tile_base);
+
+// After writing a VRAM word:
+PpuTileCacheInvalidateVramWord(&tile_cache, effective_vram_address);
+
+const PpuTileCacheStats *stats =
+    PpuTileCacheGetStats(&tile_cache);
 
 extern bool g_new_ppu;
 static void PpuDrawWholeLine(Ppu *ppu, uint y);
