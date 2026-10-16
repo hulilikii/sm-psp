@@ -1,11 +1,9 @@
 #include "ppu_tile_cache.h"
 
-#include <stddef.h>
 #include <string.h>
 
 enum {
   kVramWordMask = 0x7fff,
-  kVramWordCount = 0x8000,
   kTile2bppWords = 8,
   kTile4bppWords = 16,
 };
@@ -53,6 +51,8 @@ void PpuTileCacheResetStats(PpuTileCache *cache) {
 static const uint8_t *PpuTileCacheGet(
     PpuTileCache *cache, const uint16_t *vram, uint16_t base,
     bool four_bpp) {
+  base &= kVramWordMask;
+ 
   PpuTileCacheEntry *entries =
       four_bpp ? cache->entries4bpp : cache->entries2bpp;
   PpuTileCacheEntry *entry = &entries[PpuTileCacheSlot(base)];
@@ -63,7 +63,6 @@ static const uint8_t *PpuTileCacheGet(
   uint32_t *decodes = four_bpp
       ? &cache->stats.decodes4bpp : &cache->stats.decodes2bpp;
 
-  base &= kVramWordMask;
 
   if (entry->valid && entry->base == base) {
     (*hits)++;
