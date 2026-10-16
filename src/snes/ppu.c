@@ -907,15 +907,11 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
     uint32 clip_color_mask = (cw_clip_math & 1) ? 0x1f : 0;
     uint32 math_enabled_cur = (cw_clip_math & 0x100) ? math_enabled : 0;
     uint32 fixed_color = ppu->fixedColorR | ppu->fixedColorG << 5 | ppu->fixedColorB << 10;
-<<<<<<< HEAD
     if (math_enabled_cur == 0 || fixed_color == 0 && !ppu->halfColor && !rendered_subscreen) {
 #ifdef PSP_PROFILE
       g_ppu_profile_composite_no_math_hits++;
       profile_composite_branch_start = sceKernelGetSystemTimeLow();
 #endif
-=======
-    if (math_enabled_cur == 0 || fixed_color == 0 && !ppu->halfColor && !rendered_subscreen) {
->>>>>>> parent of 4c6b235 (color comp opt)
       // Math is disabled (or has no effect), so can avoid the per-pixel maths check
       uint32 i = left;
       do {
@@ -924,12 +920,11 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
           ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
           ppu->brightnessMult[(color >> 10) & clip_color_mask];
       } while (dst++, ++i < right);
-<<<<<<< HEAD
 #ifdef PSP_PROFILE
       g_ppu_profile_composite_no_math_us +=
           (uint32_t)(sceKernelGetSystemTimeLow() - profile_composite_branch_start);
 #endif
-      } else {
+    } else {
 #ifdef PSP_PROFILE
       g_ppu_profile_composite_general_hits++;
       profile_composite_branch_start = sceKernelGetSystemTimeLow();
