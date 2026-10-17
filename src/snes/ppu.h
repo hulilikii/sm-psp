@@ -10,6 +10,7 @@
 typedef struct Ppu Ppu;
 
 #include "snes.h"
+#include "ppu_tile_cache.h"
 
 typedef struct BgLayer {
   uint16_t hScroll;
@@ -152,6 +153,9 @@ struct Ppu {
   // pixel buffer (xbgr)
   // times 2 for even and odd frame
   uint8_t pixelbuffer_placeholder;
+  
+  // Decoded background tile cache. Excluded from save-state serialization.
+  PpuTileCache tileCache;
 
   uint32_t windowsel;
   uint8_t extraLeftCur, extraRightCur, extraLeftRight;
