@@ -53,17 +53,23 @@ static int g_active_scanline = -1;
 enum {
   PSP_CAPTURE_SCANLINES = 262,
   PSP_CAPTURE_PPU_COUNT = 2,
+  PSP_PPU_WRITE_JOURNAL_CAPACITY = 8192,
 };
 
 typedef struct PspPpuCapture {
   Ppu *ppu;
   uint32_t frame;
+  int activeLine;
   uint32_t vramVersion;
   uint32_t cgramVersion;
   uint32_t oamVersion;
   uint32_t vramWrites;
   uint32_t cgramWrites;
   uint32_t oamWrites;
+  uint32_t journalCount;
+  uint8_t journalOverflow;
+  PspPpuMemorySnapshot memory;
+  PspPpuWrite journal[PSP_PPU_WRITE_JOURNAL_CAPACITY];
   PspPpuScanlineState scanlines[PSP_CAPTURE_SCANLINES];
 } PspPpuCapture;
 
@@ -229,6 +235,8 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   if (capture == NULL)
     return;
 
+    capture->activeLine = line;
+
   if (line == 0) {
     if (++capture->frame == 0)
       capture->frame = 1;
@@ -239,6 +247,19 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
     capture->vramWrites = 0;
     capture->cgramWrites = 0;
     capture->oamWrites = 0;
+
+    capture->journalCount = 0;
+    capture->journalOverflow = 0;
+
+    capture->memory.frame = capture->frame;
+    memcpy(capture->memory.vram, ppu->vram,
+           sizeof(capture->memory.vram));
+    memcpy(capture->memory.cgram, ppu->cgram,
+           sizeof(capture->memory.cgram));
+    memcpy(capture->memory.oam, ppu->oam,
+           sizeof(capture->memory.oam));
+    memcpy(capture->memory.highOam, ppu->highOam,
+           sizeof(capture->memory.highOam));
   }
 
   PspPpuScanlineState *state = &capture->scanlines[line];
@@ -345,7 +366,8 @@ const PspPpuScanlineState *PspRenderer_GetScanlineState(
   return state;
 }
 
-void PspRenderer_OnPpuMemoryWrite(Ppu *ppu, int region) {
+void PspRenderer_RecordPpuMemoryWrite(
+    Ppu *ppu, int region, uint16_t address, uint16_t value) {
   PspPpuCapture *capture = PspRenderer_FindPpuCapture(ppu, true);
   if (capture == NULL)
     return;
@@ -367,8 +389,77 @@ void PspRenderer_OnPpuMemoryWrite(Ppu *ppu, int region) {
       break;
 
     default:
-      break;
+      return;
   }
+
+  /*
+   * Writes before the first captured scanline are part of the baseline
+   * captured at line 0, so they do not need journal entries.
+   */
+  if (capture->frame == 0 ||
+      capture->activeLine < 0 ||
+      capture->activeLine >= PSP_CAPTURE_SCANLINES) {
+    return;
+  }
+
+  if (capture->journalCount >= PSP_PPU_WRITE_JOURNAL_CAPACITY) {
+    capture->journalOverflow = 1;
+    return;
+  }
+
+  PspPpuWrite *write = &capture->journal[capture->journalCount++];
+  write->line = (uint16_t)capture->activeLine;
+  write->address = address;
+  write->value = value;
+  write->region = (uint8_t)region;
+  write->reserved = 0;
+}
+
+int PspRenderer_GetPpuMemoryHistory(
+    Ppu *ppu, int line,
+    const PspPpuMemorySnapshot **snapshot,
+    const PspPpuWrite **writes,
+    uint32_t *write_count) {
+  if (snapshot != NULL)
+    *snapshot = NULL;
+  if (writes != NULL)
+    *writes = NULL;
+  if (write_count != NULL)
+    *write_count = 0;
+
+  if (line < 0 || line >= PSP_CAPTURE_SCANLINES)
+    return 0;
+
+  PspPpuCapture *capture = PspRenderer_FindPpuCapture(ppu, false);
+  if (capture == NULL || capture->frame == 0 ||
+      capture->journalOverflow) {
+    return 0;
+  }
+
+  const PspPpuScanlineState *state = &capture->scanlines[line];
+  if (state->frame != capture->frame || state->line != line ||
+      capture->memory.frame != capture->frame) {
+    return 0;
+  }
+
+  /*
+   * Journal entries are in execution order. Only include writes from
+   * scanlines strictly before the requested line.
+   */
+  uint32_t count = 0;
+  while (count < capture->journalCount &&
+         capture->journal[count].line < line) {
+    ++count;
+  }
+
+  if (snapshot != NULL)
+    *snapshot = &capture->memory;
+  if (writes != NULL)
+    *writes = capture->journal;
+  if (write_count != NULL)
+    *write_count = count;
+
+  return 1;
 }
 
 void PspRenderer_Ensure4bppTile(int physical_tile) {

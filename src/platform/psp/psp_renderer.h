@@ -17,6 +17,22 @@ enum {
   PSP_PPU_WRITE_OAM = 2,
 };
 
+typedef struct PspPpuMemorySnapshot {
+  uint32_t frame;
+  uint16_t vram[0x8000];
+  uint16_t cgram[0x100];
+  uint16_t oam[0x100];
+  uint8_t highOam[0x20];
+} PspPpuMemorySnapshot;
+
+typedef struct PspPpuWrite {
+  uint16_t line;
+  uint16_t address;
+  uint16_t value;
+  uint8_t region;
+  uint8_t reserved;
+} PspPpuWrite;
+
 typedef struct PspPpuScanlineState {
   uint32_t frame;
   int line;
@@ -83,7 +99,23 @@ typedef struct PspPpuScanlineState {
 
 const PspPpuScanlineState *PspRenderer_GetScanlineState(
     Ppu *ppu, int line);
-void PspRenderer_OnPpuMemoryWrite(Ppu *ppu, int region);
+void PspRenderer_RecordPpuMemoryWrite(
+    Ppu *ppu, int region, uint16_t address, uint16_t value);
+
+/*
+ * Returns 1 when the requested scanline has valid memory history.
+ * The returned pointers refer to renderer-owned memory and remain valid
+ * only until that PPU's next frame capture overwrites them.
+ *
+ * The snapshot represents memory at the start of scanline 0.
+ * The returned write list contains writes from earlier scanlines only.
+ * A return value of 0 means the history is unavailable or overflowed.
+ */
+int PspRenderer_GetPpuMemoryHistory(
+    Ppu *ppu, int line,
+    const PspPpuMemorySnapshot **snapshot,
+    const PspPpuWrite **writes,
+    uint32_t *write_count);
 
 void PspRenderer_Ensure4bppTile(int physical_tile);
 void PspRenderer_Ensure2bppTile(int physical_tile);
