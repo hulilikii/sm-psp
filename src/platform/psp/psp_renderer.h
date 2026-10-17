@@ -31,10 +31,32 @@ typedef struct PspPpuScanlineState {
   uint32_t windowsel;
   uint8_t window1left, window1right;
   uint8_t window2left, window2right;
+  
+  struct {
+    uint8_t flags;
+    uint8_t maskLogic;
+  } windowLayer[6];
+
+  uint8_t clipMode;
+  uint8_t preventMathMode;
+  uint8_t addSubscreen;
+  uint8_t subtractColor;
+  uint8_t halfColor;
+  uint8_t mathEnabled[6];
+  uint8_t fixedColorR;
+  uint8_t fixedColorG;
+  uint8_t fixedColorB;
 
   uint8_t mosaicSize;
   uint8_t mosaicStartLine;
   uint8_t mosaicEnabled;
+  
+  uint8_t pseudoHires;
+  uint8_t overscan;
+  uint8_t frameOverscan;
+  uint8_t interlace;
+  uint8_t frameInterlace;
+  uint8_t directColor;
 
   struct {
     uint16_t hScroll;

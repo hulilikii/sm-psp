@@ -259,10 +259,38 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   state->window1right = ppu->window1right;
   state->window2left = ppu->window2left;
   state->window2right = ppu->window2right;
+  
+  for (int i = 0; i < 6; ++i) {
+    const WindowLayer *src = &ppu->windowLayer[i];
+
+    state->windowLayer[i].flags =
+        (src->window1enabled ? 1 : 0) |
+        (src->window2enabled ? 2 : 0) |
+        (src->window1inversed ? 4 : 0) |
+        (src->window2inversed ? 8 : 0);
+    state->windowLayer[i].maskLogic = src->maskLogic;
+    state->mathEnabled[i] = ppu->mathEnabled[i];
+  }
+
+  state->clipMode = ppu->clipMode;
+  state->preventMathMode = ppu->preventMathMode;
+  state->addSubscreen = ppu->addSubscreen;
+  state->subtractColor = ppu->subtractColor;
+  state->halfColor = ppu->halfColor;
+  state->fixedColorR = ppu->fixedColorR;
+  state->fixedColorG = ppu->fixedColorG;
+  state->fixedColorB = ppu->fixedColorB;
 
   state->mosaicSize = ppu->mosaicSize;
   state->mosaicStartLine = ppu->mosaicStartLine;
   state->mosaicEnabled = ppu->mosaicEnabled;
+  
+  state->pseudoHires = ppu->pseudoHires;
+  state->overscan = ppu->overscan;
+  state->frameOverscan = ppu->frameOverscan;
+  state->interlace = ppu->interlace;
+  state->frameInterlace = ppu->frameInterlace;
+  state->directColor = ppu->directColor;
 
   for (int i = 0; i < 4; ++i) {
     const BgLayer *src = &ppu->bgLayer[i];
