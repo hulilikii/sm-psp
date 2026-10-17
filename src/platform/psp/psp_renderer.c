@@ -11,6 +11,7 @@
 
 #include "src/types.h"
 #include "src/util.h"
+#include "src/snes/ppu.h"
 
 #define PSP_WIDTH 480
 #define PSP_HEIGHT 272
@@ -19,6 +20,13 @@
 #define TEX_WIDTH 512
 #define TEX_HEIGHT 256
 #define GU_LIST_WORDS (64 * 1024)
+#define PSP_TEXTURE_VRAM_OFFSET (512 * 272 * 6)
+#define PSP_TEXTURE_VRAM_BYTES (TEX_WIDTH * TEX_HEIGHT * 2)
+#define PSP_ATLAS4_VRAM_OFFSET \
+  (PSP_TEXTURE_VRAM_OFFSET + PSP_TEXTURE_VRAM_BYTES)
+#define PSP_ATLAS4_BYTES (256 * 512 / 2)
+#define PSP_ATLAS2_VRAM_OFFSET (PSP_ATLAS4_VRAM_OFFSET + PSP_ATLAS4_BYTES)
+#define PSP_ATLAS2_BYTES (512 * 512 / 2)
 
 #ifdef PSP_PROFILE
 extern void PspProfileLog(const char *message);
@@ -32,7 +40,19 @@ static uint32_t g_profile_render_count;
 
 static uint32_t g_gu_list[GU_LIST_WORDS] __attribute__((aligned(16)));
 static uint16_t *g_texture;
+static uint8_t *g_atlas4;
+static uint8_t *g_atlas2;
 static uint8_t g_framebuffer[GAME_WIDTH * GAME_HEIGHT * 4] __attribute__((aligned(16)));
+
+//Atlas metadata is PSP-renderer-only. The software PPU does not consult it. A tile is checked at most once per native-renderer frame.
+static Ppu *g_tile_ppu;
+static uint32_t g_hash4[2048];
+static uint32_t g_hash2[4096];
+static uint16_t g_seen4[2048];
+static uint16_t g_seen2[4096];
+static uint16_t g_frame_stamp;
+static bool g_atlas4_dirty;
+static bool g_atlas2_dirty;
 
 static inline uint16_t Rgb565(const uint8_t *p) {
   const uint8_t b = p[0];
@@ -55,13 +75,28 @@ static void PspRenderer_Convert(void) {
  *   [0, 2 * 512 * 272 * 2)       display buffers
  *   [2 * 512 * 272 * 2, ...)     depth buffer
  *   texture starts after the depth buffer
+ *   tile atlases follow the presentation texture
  */
 #define PSP_TEXTURE_VRAM_OFFSET (512 * 272 * 6)
 
 static bool PspRenderer_Initialize(void) {
+  if (PSP_ATLAS2_VRAM_OFFSET + PSP_ATLAS2_BYTES > sceGeEdramGetSize())
+    Die("PSP VRAM is too small for the tile atlases");
+
+  uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
   g_texture = (uint16_t *)(
-      ((uintptr_t)sceGeEdramGetAddr() | 0x40000000U) +
-      PSP_TEXTURE_VRAM_OFFSET);
+      vram + PSP_TEXTURE_VRAM_OFFSET);
+  g_atlas4 = (uint8_t *)(vram + PSP_ATLAS4_VRAM_OFFSET);
+  g_atlas2 = (uint8_t *)(vram + PSP_ATLAS2_VRAM_OFFSET);
+
+  memset(g_hash4, 0xff, sizeof(g_hash4));
+  memset(g_hash2, 0xff, sizeof(g_hash2));
+  memset(g_seen4, 0, sizeof(g_seen4));
+  memset(g_seen2, 0, sizeof(g_seen2));
+  g_frame_stamp = 0;
+  g_tile_ppu = NULL;
+  g_atlas4_dirty = false;
+  g_atlas2_dirty = false;
 
   sceGuInit();
   sceGuStart(GU_DIRECT, g_gu_list);
@@ -97,7 +132,109 @@ static bool PspRenderer_Initialize(void) {
 static void PspRenderer_Destroy(void) {
   sceGuDisplay(GU_FALSE);
   sceGuTerm();
+  g_tile_ppu = NULL;
   g_texture = NULL;
+  g_atlas4 = NULL;
+  g_atlas2 = NULL;
+}
+
+static uint32_t PspRenderer_HashWords(const uint16_t *src, int count) {
+  uint32_t hash = 2166136261u;
+  for (int i = 0; i < count; ++i)
+    hash = (hash ^ src[i]) * 16777619u;
+  return hash;
+}
+
+void PspRenderer_BeginPpuFrame(Ppu *ppu) {
+  g_tile_ppu = ppu;
+
+  if (++g_frame_stamp == 0) {
+    memset(g_seen4, 0, sizeof(g_seen4));
+    memset(g_seen2, 0, sizeof(g_seen2));
+    g_frame_stamp = 1;
+  }
+}
+
+void PspRenderer_Ensure4bppTile(int physical_tile) {
+  if (g_tile_ppu == NULL || g_atlas4 == NULL || g_frame_stamp == 0)
+    return;
+
+  physical_tile &= 2047;
+  if (g_seen4[physical_tile] == g_frame_stamp)
+    return;
+  g_seen4[physical_tile] = g_frame_stamp;
+
+  const uint16_t *src = &g_tile_ppu->vram[physical_tile * 16];
+  uint32_t hash = PspRenderer_HashWords(src, 16);
+  if (g_hash4[physical_tile] == hash)
+    return;
+  g_hash4[physical_tile] = hash;
+
+  int tile_x = physical_tile & 31;
+  int tile_y = physical_tile >> 5;
+  uint8_t *dst = g_atlas4 + tile_y * 8 * 128 + tile_x * 4;
+
+  for (int y = 0; y < 8; ++y, dst += 128) {
+    uint32_t planes = src[y] | ((uint32_t)src[y + 8] << 16);
+    for (int x = 0; x < 8; ++x) {
+      int shift = 7 - x;
+      int pixel = ((planes >> shift) & 1) |
+                  ((planes >> (shift + 7)) & 2) |
+                  ((planes >> (shift + 14)) & 4) |
+                  ((planes >> (shift + 21)) & 8);
+
+      if (x & 1)
+        dst[x >> 1] = (dst[x >> 1] & 0x0f) | (pixel << 4);
+      else
+        dst[x >> 1] = (dst[x >> 1] & 0xf0) | pixel;
+    }
+  }
+
+  g_atlas4_dirty = true;
+}
+
+void PspRenderer_Ensure2bppTile(int physical_tile) {
+  if (g_tile_ppu == NULL || g_atlas2 == NULL || g_frame_stamp == 0)
+    return;
+
+  physical_tile &= 4095;
+  if (g_seen2[physical_tile] == g_frame_stamp)
+    return;
+  g_seen2[physical_tile] = g_frame_stamp;
+
+  const uint16_t *src = &g_tile_ppu->vram[physical_tile * 8];
+  uint32_t hash = PspRenderer_HashWords(src, 8);
+  if (g_hash2[physical_tile] == hash)
+    return;
+  g_hash2[physical_tile] = hash;
+
+  int tile_x = physical_tile & 63;
+  int tile_y = physical_tile >> 6;
+  uint8_t *dst = g_atlas2 + tile_y * 8 * 256 + tile_x * 4;
+
+  for (int y = 0; y < 8; ++y, dst += 256) {
+    uint16_t planes = src[y];
+    for (int x = 0; x < 8; ++x) {
+      int shift = 7 - x;
+      int pixel = ((planes >> shift) & 1) |
+                  ((planes >> (shift + 7)) & 2);
+
+      if (x & 1)
+        dst[x >> 1] = (dst[x >> 1] & 0x0f) | (pixel << 4);
+      else
+        dst[x >> 1] = (dst[x >> 1] & 0xf0) | pixel;
+    }
+  }
+
+  g_atlas2_dirty = true;
+}
+
+void PspRenderer_FlushTileAtlases(void) {
+  if (g_atlas4_dirty || g_atlas2_dirty) {
+    sceGuTexFlush();
+    g_atlas4_dirty = false;
+    g_atlas2_dirty = false;
+  }
 }
 
 static void PspRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {

@@ -149,6 +149,10 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 static void DrawPpuFrame(void) {
   uint8 *pixel_buffer;
   int pitch;
+  
+  PspRenderer_BeginPpuFrame(
+      g_other_image ? g_snes->my_ppu : g_snes->snes_ppu);
+
   g_renderer_funcs.BeginDraw(g_snes_width, g_snes_height, &pixel_buffer, &pitch);
   RtlDrawPpuFrame(pixel_buffer, pitch, g_ppu_render_flags);
   g_renderer_funcs.EndDraw();
