@@ -14,6 +14,7 @@
 #include "ppu.h"
 #include "snes.h"
 #include "../types.h"
+#include "../platform/psp/psp_renderer.h"
 
 #ifdef PSP_PROFILE
 extern void PspProfileLog(const char *message);
@@ -273,6 +274,8 @@ static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
 }
 
 void ppu_runLine(Ppu* ppu, int line) {
+  PspRenderer_OnPpuScanline(ppu, line);
+
 #ifdef PSP_PROFILE
   /*
    * Sample one in every 16 scanlines and scale the timings to estimate

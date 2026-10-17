@@ -46,6 +46,8 @@ static uint8_t g_framebuffer[GAME_WIDTH * GAME_HEIGHT * 4] __attribute__((aligne
 
 //Atlas metadata is PSP-renderer-only. The software PPU does not consult it. A tile is checked at most once per native-renderer frame.
 static Ppu *g_tile_ppu;
+static Ppu *g_active_scanline_ppu;
+static int g_active_scanline = -1;
 static uint32_t g_hash4[2048];
 static uint32_t g_hash2[4096];
 static uint16_t g_seen4[2048];
@@ -172,6 +174,20 @@ void PspRenderer_BeginPpuFrame(Ppu *ppu) {
 #ifdef PSP_ATLAS_VALIDATE
   PspRenderer_ValidateTileAtlases();
 #endif
+}
+
+//Called by the PPU at scanline execution time. Keep this separate from BeginPpuFrame(), which runs after emulation and selects the displayed PPU.
+void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
+  g_active_scanline_ppu = ppu;
+  g_active_scanline = line;
+}
+
+Ppu *PspRenderer_GetActiveScanlinePpu(void) {
+  return g_active_scanline_ppu;
+}
+
+int PspRenderer_GetActiveScanline(void) {
+  return g_active_scanline;
 }
 
 void PspRenderer_Ensure4bppTile(int physical_tile) {
