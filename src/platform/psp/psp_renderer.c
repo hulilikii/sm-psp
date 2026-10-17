@@ -54,6 +54,21 @@ static uint16_t g_frame_stamp;
 static bool g_atlas4_dirty;
 static bool g_atlas2_dirty;
 
+#ifdef PSP_ATLAS_VALIDATE
+extern void PspProfileLog(const char *message);
+
+static uint32_t g_atlas_validation_frames;
+static uint32_t g_atlas_validation_mismatches;
+static int g_atlas_validation_first_kind;
+static int g_atlas_validation_first_tile;
+static int g_atlas_validation_first_x;
+static int g_atlas_validation_first_y;
+static int g_atlas_validation_first_expected;
+static int g_atlas_validation_first_actual;
+
+static void PspRenderer_ValidateTileAtlases(void);
+#endif
+
 static inline uint16_t Rgb565(const uint8_t *p) {
   const uint8_t b = p[0];
   const uint8_t g = p[1];
@@ -153,6 +168,10 @@ void PspRenderer_BeginPpuFrame(Ppu *ppu) {
     memset(g_seen2, 0, sizeof(g_seen2));
     g_frame_stamp = 1;
   }
+  
+#ifdef PSP_ATLAS_VALIDATE
+  PspRenderer_ValidateTileAtlases();
+#endif
 }
 
 void PspRenderer_Ensure4bppTile(int physical_tile) {
@@ -236,6 +255,122 @@ void PspRenderer_FlushTileAtlases(void) {
     g_atlas2_dirty = false;
   }
 }
+
+#ifdef PSP_ATLAS_VALIDATE
+static void PspRenderer_RecordAtlasMismatch(
+    int kind, int tile, int x, int y, int expected, int actual) {
+  if (g_atlas_validation_mismatches == 0) {
+    g_atlas_validation_first_kind = kind;
+    g_atlas_validation_first_tile = tile;
+    g_atlas_validation_first_x = x;
+    g_atlas_validation_first_y = y;
+    g_atlas_validation_first_expected = expected;
+    g_atlas_validation_first_actual = actual;
+  }
+  ++g_atlas_validation_mismatches;
+}
+
+static int PspRenderer_ReadAtlas4Pixel(int tile, int x, int y) {
+  int tile_x = tile & 31;
+  int tile_y = tile >> 5;
+  const uint8_t *row =
+      g_atlas4 + tile_y * 8 * 128 + y * 128 + tile_x * 4;
+  uint8_t packed = row[x >> 1];
+  return (x & 1) ? (packed >> 4) : (packed & 0x0f);
+}
+
+static int PspRenderer_ReadAtlas2Pixel(int tile, int x, int y) {
+  int tile_x = tile & 63;
+  int tile_y = tile >> 6;
+  const uint8_t *row =
+      g_atlas2 + tile_y * 8 * 256 + y * 256 + tile_x * 4;
+  uint8_t packed = row[x >> 1];
+  return (x & 1) ? (packed >> 4) : (packed & 0x0f);
+}
+
+static void PspRenderer_ValidateTileAtlases(void) {
+  if (g_tile_ppu == NULL || g_atlas4 == NULL || g_atlas2 == NULL)
+    return;
+
+  /*
+   * Populate each atlas using the normal atlas decoder, then independently
+   * decode the source VRAM bitplanes and compare all 8x8 pixels.
+   * This path is compiled out of normal builds.
+   */
+  for (int tile = 0; tile < 2048; ++tile)
+    PspRenderer_Ensure4bppTile(tile);
+
+  for (int tile = 0; tile < 4096; ++tile)
+    PspRenderer_Ensure2bppTile(tile);
+
+  for (int tile = 0; tile < 2048; ++tile) {
+    const uint16_t *src = &g_tile_ppu->vram[tile * 16];
+
+    for (int y = 0; y < 8; ++y) {
+      uint16_t planes12 = src[y];
+      uint16_t planes34 = src[y + 8];
+
+      for (int x = 0; x < 8; ++x) {
+        int bit = 7 - x;
+        int expected =
+            ((planes12 >> bit) & 1) |
+            (((planes12 >> (bit + 8)) & 1) << 1) |
+            (((planes34 >> bit) & 1) << 2) |
+            (((planes34 >> (bit + 8)) & 1) << 3);
+        int actual = PspRenderer_ReadAtlas4Pixel(tile, x, y);
+
+        if (actual != expected)
+          PspRenderer_RecordAtlasMismatch(
+              4, tile, x, y, expected, actual);
+      }
+    }
+  }
+
+  for (int tile = 0; tile < 4096; ++tile) {
+    const uint16_t *src = &g_tile_ppu->vram[tile * 8];
+
+    for (int y = 0; y < 8; ++y) {
+      uint16_t planes = src[y];
+
+      for (int x = 0; x < 8; ++x) {
+        int bit = 7 - x;
+        int expected =
+            ((planes >> bit) & 1) |
+            (((planes >> (bit + 8)) & 1) << 1);
+        int actual = PspRenderer_ReadAtlas2Pixel(tile, x, y);
+
+        if (actual != expected)
+          PspRenderer_RecordAtlasMismatch(
+              2, tile, x, y, expected, actual);
+      }
+    }
+  }
+
+  if (++g_atlas_validation_frames == 60) {
+    char line[192];
+
+    if (g_atlas_validation_mismatches == 0) {
+      snprintf(line, sizeof(line),
+               "atlas_validation frames=60 mismatches=0");
+    } else {
+      snprintf(line, sizeof(line),
+               "atlas_validation frames=60 mismatches=%u "
+               "first_bpp=%d tile=%d x=%d y=%d expected=%d actual=%d",
+               (unsigned int)g_atlas_validation_mismatches,
+               g_atlas_validation_first_kind,
+               g_atlas_validation_first_tile,
+               g_atlas_validation_first_x,
+               g_atlas_validation_first_y,
+               g_atlas_validation_first_expected,
+               g_atlas_validation_first_actual);
+    }
+
+    PspProfileLog(line);
+    g_atlas_validation_frames = 0;
+    g_atlas_validation_mismatches = 0;
+  }
+}
+#endif
 
 static void PspRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {
   if (width != GAME_WIDTH || height != GAME_HEIGHT)

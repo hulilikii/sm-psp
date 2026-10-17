@@ -24,6 +24,11 @@ ifeq ($(PSP_PROFILE),1)
 CFLAGS += -DPSP_PROFILE
 endif
 
+# Debug-only tile atlas validation: make PSP_ATLAS_VALIDATE=1
+PSP_ATLAS_VALIDATE ?= 0
+ifeq ($(PSP_ATLAS_VALIDATE),1)
+CFLAGS += -DPSP_ATLAS_VALIDATE -DPSP_PROFILE
+endif
 
 # PSP-only build. PSPSDK supplies its standard libraries through build.mak.
 LIBS := -lpspaudiolib \
