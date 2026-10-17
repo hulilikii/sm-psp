@@ -1544,6 +1544,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
     case 0x04: {
       if(ppu->oamInHigh) {
         ppu->highOam[((ppu->oamAdr & 0xf) << 1) | ppu->oamSecondWrite] = val;
+        PspRenderer_OnPpuMemoryWrite(ppu, PSP_PPU_WRITE_OAM);
         if(ppu->oamSecondWrite) {
           ppu->oamAdr++;
           if(ppu->oamAdr == 0) ppu->oamInHigh = false;
@@ -1553,6 +1554,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
           ppu->oamBuffer = val;
         } else {
           ppu->oam[ppu->oamAdr++] = (val << 8) | ppu->oamBuffer;
+          PspRenderer_OnPpuMemoryWrite(ppu, PSP_PPU_WRITE_OAM);
           if(ppu->oamAdr == 0) ppu->oamInHigh = true;
         }
       }
@@ -1648,12 +1650,14 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       // TODO: vram access during rendering (also cgram and oam)
       uint16_t vramAdr = ppu_getVramRemap(ppu);
       ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0xff00) | val;
+      PspRenderer_OnPpuMemoryWrite(ppu, PSP_PPU_WRITE_VRAM);
       if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }
     case 0x19: {
       uint16_t vramAdr = ppu_getVramRemap(ppu);
       ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0x00ff) | (val << 8);
+      PspRenderer_OnPpuMemoryWrite(ppu, PSP_PPU_WRITE_VRAM);
       if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }
@@ -1688,6 +1692,7 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
         ppu->cgramBuffer = val;
       } else {
         ppu->cgram[ppu->cgramPointer++] = (val << 8) | ppu->cgramBuffer;
+        PspRenderer_OnPpuMemoryWrite(ppu, PSP_PPU_WRITE_CGRAM);
       }
       ppu->cgramSecondWrite = !ppu->cgramSecondWrite;
       break;

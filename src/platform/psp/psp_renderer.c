@@ -48,6 +48,46 @@ static uint8_t g_framebuffer[GAME_WIDTH * GAME_HEIGHT * 4] __attribute__((aligne
 static Ppu *g_tile_ppu;
 static Ppu *g_active_scanline_ppu;
 static int g_active_scanline = -1;
+
+enum {
+  PSP_CAPTURE_SCANLINES = 262,
+  PSP_CAPTURE_PPU_COUNT = 2,
+};
+
+typedef struct PspPpuCapture {
+  Ppu *ppu;
+  uint32_t frame;
+  uint32_t vramVersion;
+  uint32_t cgramVersion;
+  uint32_t oamVersion;
+  uint32_t vramWrites;
+  uint32_t cgramWrites;
+  uint32_t oamWrites;
+  PspPpuScanlineState scanlines[PSP_CAPTURE_SCANLINES];
+} PspPpuCapture;
+
+static PspPpuCapture g_ppu_capture[PSP_CAPTURE_PPU_COUNT];
+
+static PspPpuCapture *PspRenderer_FindPpuCapture(
+    Ppu *ppu, bool create) {
+  for (int i = 0; i < PSP_CAPTURE_PPU_COUNT; ++i) {
+    if (g_ppu_capture[i].ppu == ppu)
+      return &g_ppu_capture[i];
+  }
+
+  if (!create || ppu == NULL)
+    return NULL;
+
+  for (int i = 0; i < PSP_CAPTURE_PPU_COUNT; ++i) {
+    if (g_ppu_capture[i].ppu == NULL) {
+      memset(&g_ppu_capture[i], 0, sizeof(g_ppu_capture[i]));
+      g_ppu_capture[i].ppu = ppu;
+      return &g_ppu_capture[i];
+    }
+  }
+
+  return NULL;
+}
 static uint32_t g_hash4[2048];
 static uint32_t g_hash2[4096];
 static uint16_t g_seen4[2048];
@@ -180,6 +220,76 @@ void PspRenderer_BeginPpuFrame(Ppu *ppu) {
 void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   g_active_scanline_ppu = ppu;
   g_active_scanline = line;
+
+  if (line < 0 || line >= PSP_CAPTURE_SCANLINES)
+    return;
+
+  PspPpuCapture *capture = PspRenderer_FindPpuCapture(ppu, true);
+  if (capture == NULL)
+    return;
+
+  if (line == 0) {
+    if (++capture->frame == 0)
+      capture->frame = 1;
+
+    capture->vramVersion = 0;
+    capture->cgramVersion = 0;
+    capture->oamVersion = 0;
+    capture->vramWrites = 0;
+    capture->cgramWrites = 0;
+    capture->oamWrites = 0;
+  }
+
+  PspPpuScanlineState *state = &capture->scanlines[line];
+  state->frame = capture->frame;
+  state->line = line;
+
+  state->mode = ppu->mode;
+  state->brightness = ppu->brightness;
+  state->forcedBlank = ppu->forcedBlank;
+  state->bg3priority = ppu->bg3priority;
+
+  state->screenEnabled[0] = ppu->screenEnabled[0];
+  state->screenEnabled[1] = ppu->screenEnabled[1];
+  state->screenWindowed[0] = ppu->screenWindowed[0];
+  state->screenWindowed[1] = ppu->screenWindowed[1];
+  state->windowsel = ppu->windowsel;
+  state->window1left = ppu->window1left;
+  state->window1right = ppu->window1right;
+  state->window2left = ppu->window2left;
+  state->window2right = ppu->window2right;
+
+  state->mosaicSize = ppu->mosaicSize;
+  state->mosaicStartLine = ppu->mosaicStartLine;
+  state->mosaicEnabled = ppu->mosaicEnabled;
+
+  for (int i = 0; i < 4; ++i) {
+    const BgLayer *src = &ppu->bgLayer[i];
+
+    state->bg[i].hScroll = src->hScroll;
+    state->bg[i].vScroll = src->vScroll;
+    state->bg[i].tilemapAdr = src->tilemapAdr;
+    state->bg[i].tileAdr = src->tileAdr;
+    state->bg[i].flags =
+        (src->tilemapWider ? 1 : 0) |
+        (src->tilemapHigher ? 2 : 0) |
+        (src->bigTiles ? 4 : 0) |
+        (src->mosaicEnabled ? 8 : 0);
+  }
+
+  memcpy(state->m7matrix, ppu->m7matrix, sizeof(state->m7matrix));
+  state->m7largeField = ppu->m7largeField;
+  state->m7charFill = ppu->m7charFill;
+  state->m7xFlip = ppu->m7xFlip;
+  state->m7yFlip = ppu->m7yFlip;
+  state->m7extBg = ppu->m7extBg;
+
+  state->vramVersion = capture->vramVersion;
+  state->cgramVersion = capture->cgramVersion;
+  state->oamVersion = capture->oamVersion;
+  state->vramWrites = capture->vramWrites;
+  state->cgramWrites = capture->cgramWrites;
+  state->oamWrites = capture->oamWrites;
 }
 
 Ppu *PspRenderer_GetActiveScanlinePpu(void) {
@@ -188,6 +298,48 @@ Ppu *PspRenderer_GetActiveScanlinePpu(void) {
 
 int PspRenderer_GetActiveScanline(void) {
   return g_active_scanline;
+}
+
+const PspPpuScanlineState *PspRenderer_GetScanlineState(
+    Ppu *ppu, int line) {
+  if (line < 0 || line >= PSP_CAPTURE_SCANLINES)
+    return NULL;
+
+  PspPpuCapture *capture = PspRenderer_FindPpuCapture(ppu, false);
+  if (capture == NULL)
+    return NULL;
+
+  const PspPpuScanlineState *state = &capture->scanlines[line];
+  if (state->frame != capture->frame || state->line != line)
+    return NULL;
+
+  return state;
+}
+
+void PspRenderer_OnPpuMemoryWrite(Ppu *ppu, int region) {
+  PspPpuCapture *capture = PspRenderer_FindPpuCapture(ppu, true);
+  if (capture == NULL)
+    return;
+
+  switch (region) {
+    case PSP_PPU_WRITE_VRAM:
+      ++capture->vramVersion;
+      ++capture->vramWrites;
+      break;
+
+    case PSP_PPU_WRITE_CGRAM:
+      ++capture->cgramVersion;
+      ++capture->cgramWrites;
+      break;
+
+    case PSP_PPU_WRITE_OAM:
+      ++capture->oamVersion;
+      ++capture->oamWrites;
+      break;
+
+    default:
+      break;
+  }
 }
 
 void PspRenderer_Ensure4bppTile(int physical_tile) {
