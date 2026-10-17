@@ -119,42 +119,9 @@ enum {
   kWindow2Enabled = 8,
 };
 
-static uint32_t PpuGetCachedTileRowBits(
-    Ppu *ppu, int ta, uint32_t tile, uint y, bool four_bpp) {
-  unsigned row = (tile & 0x8000)
-      ? 7 - (y & 7)
-      : (y & 7);
-  unsigned words_per_tile = four_bpp ? 16 : 8;
-
-  uint16_t base = (uint16_t)(
-      ta - (int)row + (tile & 0x3ff) * words_per_tile);
-
-  const uint8_t *pixels = four_bpp
-      ? PpuTileCacheGet4bpp(&ppu->tileCache, ppu->vram, base)
-      : PpuTileCacheGet2bpp(&ppu->tileCache, ppu->vram, base);
-
-  uint32_t bits = 0;
-  const uint8_t *row_pixels = pixels + row * 8;
-
-  for (unsigned x = 0; x < 8; x++) {
-    uint32_t pixel = row_pixels[x];
-
-    bits |= (pixel & 1u) << x;
-    bits |= ((pixel >> 1) & 1u) << (x + 8);
-
-    if (four_bpp) {
-      bits |= ((pixel >> 2) & 1u) << (x + 16);
-      bits |= ((pixel >> 3) & 1u) << (x + 24);
-    }
-  }
-
-  return bits;
-}
-
 Ppu* ppu_init(Snes* snes) {
   Ppu* ppu = malloc(sizeof(Ppu));
   ppu->snes = snes;
-  PpuTileCacheInit(&ppu->tileCache);
   return ppu;
 }
 
@@ -170,7 +137,6 @@ void ppu_copy(Ppu *ppu, Ppu *ppu_src) {
   ppu->renderBuffer = renderBuffer;
   ppu->renderPitch = (uint32_t)pitch;
   ppu->snes = snes;
-  PpuTileCacheInvalidateAll(&ppu->tileCache);
 }
 
 void ppu_reset(Ppu* ppu) {
@@ -179,7 +145,6 @@ void ppu_reset(Ppu* ppu) {
     size_t pitch = ppu->renderPitch;
     uint8_t *renderBuffer = ppu->renderBuffer;
     memset(ppu, 0, sizeof(*ppu));
-    PpuTileCacheInit(&ppu->tileCache);
     ppu->renderBuffer = renderBuffer;
     ppu->renderPitch = (uint32_t)pitch;
     ppu->snes = snes;
@@ -279,7 +244,6 @@ void ppu_reset(Ppu* ppu) {
 
 void ppu_saveload(Ppu *ppu, SaveLoadFunc *func, void *ctx) {
   func(ctx, &ppu->vram, offsetof(Ppu, pixelbuffer_placeholder) - offsetof(Ppu, vram));
-  PpuTileCacheInvalidateAll(&ppu->tileCache);
 }
 
 void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_flags) {
@@ -544,8 +508,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 #define DO_PIXEL_HFLIP(i) do { \
   pixel = (bits >> (7 - i)) & 1 | (bits >> (14 - i)) & 2 | (bits >> (21 - i)) & 4 | (bits >> (28 - i)) & 8; \
   if ((bits & (0x80808080 >> i)) && z > dstz[i]) dstz[i] = z + pixel; } while (0)
-#define READ_BITS(ta, tile) \
-  PpuGetCachedTileRowBits(ppu, (ta), (tile), y, true)
+#define READ_BITS(ta, tile) (addr = &ppu->vram[((ta) + (tile) * 16) & 0x7fff], addr[0] | addr[8] << 16)
   enum { kPaletteShift = 6 };
   if (!IS_SCREEN_ENABLED(ppu, sub, layer))
     return;  // layer is completely hidden
@@ -562,6 +525,7 @@ static void PpuDrawBackground_4bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
   };
   int tileadr = ppu->bgLayer[layer].tileAdr, pixel;
   int tileadr1 = tileadr + 7 - (y & 0x7), tileadr0 = tileadr + (y & 0x7);
+  const uint16 *addr;
   for (size_t windex = 0; windex < win.nr; windex++) {
     if (win.bits & (1 << windex))
       continue;  // layer is disabled for this window part
@@ -642,8 +606,7 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 #define DO_PIXEL_HFLIP(i) do { \
   pixel = (bits >> (7 - i)) & 1 | (bits >> (14 - i)) & 2; \
   if (pixel && z > dstz[i]) dstz[i] = z + pixel; } while (0)
-#define READ_BITS(ta, tile) \
-  PpuGetCachedTileRowBits(ppu, (ta), (tile), y, false)
+#define READ_BITS(ta, tile) (addr = &ppu->vram[(ta) + (tile) * 8 & 0x7fff], addr[0])
   enum { kPaletteShift = 8 };
   if (!IS_SCREEN_ENABLED(ppu, sub, layer))
     return;  // layer is completely hidden
@@ -661,6 +624,7 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
   int tileadr = ppu->bgLayer[layer].tileAdr, pixel;
   int tileadr1 = tileadr + 7 - (y & 0x7), tileadr0 = tileadr + (y & 0x7);
 
+  const uint16 *addr;
   for (size_t windex = 0; windex < win.nr; windex++) {
     if (win.bits & (1 << windex))
       continue;  // layer is disabled for this window part
@@ -1681,16 +1645,12 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       // TODO: vram access during rendering (also cgram and oam)
       uint16_t vramAdr = ppu_getVramRemap(ppu);
       ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0xff00) | val;
-      PpuTileCacheInvalidateVramWord(
-          &ppu->tileCache, vramAdr & 0x7fff);
       if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }
     case 0x19: {
       uint16_t vramAdr = ppu_getVramRemap(ppu);
       ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0x00ff) | (val << 8);
-      PpuTileCacheInvalidateVramWord(
-          &ppu->tileCache, vramAdr & 0x7fff);
       if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }
