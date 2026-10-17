@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 typedef struct Ppu Ppu;
 struct RendererFuncs;
 void PspRenderer_Create(struct RendererFuncs *funcs);

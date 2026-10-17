@@ -12,6 +12,7 @@
 #include "src/types.h"
 #include "src/util.h"
 #include "src/snes/ppu.h"
+#include "src/platform/psp/psp_renderer.h"
 
 #define PSP_WIDTH 480
 #define PSP_HEIGHT 272
