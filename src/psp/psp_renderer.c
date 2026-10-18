@@ -60,6 +60,16 @@ typedef struct PspPpuCapture {
   Ppu *ppu;
   uint32_t frame;
   int activeLine;
+  uint32_t scanlineCallbacks;
+  uint32_t timingWriteCount;
+  uint32_t timingLineMismatchCount;
+  uint32_t timingVblankWriteCount;
+  int timingFirstActiveLine;
+  int timingFirstVPos;
+  int timingFirstHPos;
+  int timingLastActiveLine;
+  int timingLastVPos;
+  int timingLastHPos;
   uint32_t journalValidatedFrame;
   uint32_t vramVersion;
   uint32_t cgramVersion;
@@ -80,6 +90,37 @@ static PspPpuCapture g_ppu_capture[PSP_CAPTURE_PPU_COUNT];
 #ifdef PSP_PROFILE
 static uint8_t g_history_probe_logged[PSP_CAPTURE_PPU_COUNT][4];
 static void PspRenderer_LogHistoryProbe(Ppu *ppu, int line);
+static uint32_t g_capture_status_frame;
+
+static void PspRenderer_LogCaptureStatus(void) {
+  if (++g_capture_status_frame % 60 != 0)
+    return;
+
+  for (int i = 0; i < PSP_CAPTURE_PPU_COUNT; ++i) {
+    PspPpuCapture *capture = &g_ppu_capture[i];
+    if (capture->ppu == NULL)
+      continue;
+
+    char message[224];
+    snprintf(message, sizeof(message),
+             "ppu_timing ppu=%d frame=%u callbacks=%u "
+             "writes=%u line_mismatches=%u vblank_writes=%u "
+             "first=%d:%d:%d last=%d:%d:%d",
+             capture->ppu == capture->ppu->snes->my_ppu ? 1 : 0,
+             (unsigned int)capture->frame,
+             (unsigned int)capture->scanlineCallbacks,
+             (unsigned int)capture->timingWriteCount,
+             (unsigned int)capture->timingLineMismatchCount,
+             (unsigned int)capture->timingVblankWriteCount,
+             capture->timingFirstActiveLine,
+             capture->timingFirstVPos,
+             capture->timingFirstHPos,
+             capture->timingLastActiveLine,
+             capture->timingLastVPos,
+             capture->timingLastHPos);
+    PspProfileLog(message);
+  }
+}
 #endif
 
 #ifdef PSP_PPU_VALIDATE_JOURNAL
@@ -450,6 +491,10 @@ static uint32_t PspRenderer_HashWords(const uint16_t *src, int count) {
 void PspRenderer_BeginPpuFrame(Ppu *ppu) {
   g_tile_ppu = ppu;
 
+#ifdef PSP_PROFILE
+  PspRenderer_LogCaptureStatus();
+#endif
+
   if (++g_frame_stamp == 0) {
     memset(g_seen4, 0, sizeof(g_seen4));
     memset(g_seen2, 0, sizeof(g_seen2));
@@ -473,7 +518,7 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   if (capture == NULL)
     return;
 
-    capture->activeLine = line;
+  capture->activeLine = line;
 
   if (line == 0) {
 #ifdef PSP_PPU_VALIDATE_JOURNAL
@@ -497,6 +542,17 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
 
     capture->journalCount = 0;
     capture->journalOverflow = 0;
+    
+    capture->scanlineCallbacks = 0;
+    capture->timingWriteCount = 0;
+    capture->timingLineMismatchCount = 0;
+    capture->timingVblankWriteCount = 0;
+    capture->timingFirstActiveLine = -1;
+    capture->timingFirstVPos = -1;
+    capture->timingFirstHPos = -1;
+    capture->timingLastActiveLine = -1;
+    capture->timingLastVPos = -1;
+    capture->timingLastHPos = -1;
 
     capture->memory.frame = capture->frame;
     memcpy(capture->memory.vram, ppu->vram,
@@ -509,6 +565,7 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
            sizeof(capture->memory.highOam));
   }
 
+  ++capture->scanlineCallbacks;
 
   PspPpuScanlineState *state = &capture->scanlines[line];
   state->frame = capture->frame;
@@ -623,6 +680,28 @@ void PspRenderer_RecordPpuMemoryWrite(
   PspPpuCapture *capture = PspRenderer_FindPpuCapture(ppu, true);
   if (capture == NULL)
     return;
+
+#ifdef PSP_PROFILE
+  int liveVPos = ppu->snes->vPos;
+  int liveHPos = ppu->snes->hPos;
+
+  ++capture->timingWriteCount;
+  if (ppu->snes->inVblank)
+    ++capture->timingVblankWriteCount;
+
+  capture->timingLastActiveLine = capture->activeLine;
+  capture->timingLastVPos = liveVPos;
+  capture->timingLastHPos = liveHPos;
+
+  if (capture->activeLine != liveVPos) {
+    if (capture->timingLineMismatchCount == 0) {
+      capture->timingFirstActiveLine = capture->activeLine;
+      capture->timingFirstVPos = liveVPos;
+      capture->timingFirstHPos = liveHPos;
+    }
+    ++capture->timingLineMismatchCount;
+  }
+#endif
 
   switch (region) {
     case PSP_PPU_WRITE_VRAM:
