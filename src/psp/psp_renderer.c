@@ -715,6 +715,7 @@ void PspRenderer_RecordPpuMemoryWrite(
         capture->timingFirstHPos = liveHPos;
       }
       ++capture->timingLineMismatchCount;
+    }
   }
 #endif
 
