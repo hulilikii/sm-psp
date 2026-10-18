@@ -91,6 +91,88 @@ static void PspRenderer_ValidatePpuJournal(
 
   capture->journalValidatedFrame = capture->frame;
 
+  /*
+   * Diagnose journal coverage before replaying it. In particular,
+   * applied == 0 alone cannot distinguish an empty journal from
+   * entries recorded only at or after scanline 128.
+   */
+  uint32_t journalVram = 0;
+  uint32_t journalCgram = 0;
+  uint32_t journalOam = 0;
+  uint32_t journalOther = 0;
+  int journalMinLine = PSP_CAPTURE_SCANLINES;
+  int journalMaxLine = -1;
+
+  for (uint32_t i = 0; i < capture->journalCount; ++i) {
+    const PspPpuWrite *write = &capture->journal[i];
+
+    if ((int)write->line < journalMinLine)
+      journalMinLine = write->line;
+    if ((int)write->line > journalMaxLine)
+      journalMaxLine = write->line;
+
+    switch (write->region) {
+      case PSP_PPU_WRITE_VRAM:
+        ++journalVram;
+        break;
+      case PSP_PPU_WRITE_CGRAM:
+        ++journalCgram;
+        break;
+      case PSP_PPU_WRITE_OAM:
+        ++journalOam;
+        break;
+      default:
+        ++journalOther;
+        break;
+    }
+  }
+
+  if (capture->journalCount == 0) {
+    journalMinLine = -1;
+    journalMaxLine = -1;
+  }
+
+  char summary[192];
+  snprintf(summary, sizeof(summary),
+           "ppu_journal_stats frame=%u count=%u overflow=%u "
+           "lines=%d..%d vram=%u cgram=%u oam=%u other=%u",
+           (unsigned int)capture->frame,
+           (unsigned int)capture->journalCount,
+           (unsigned int)capture->journalOverflow,
+           journalMinLine, journalMaxLine,
+           (unsigned int)journalVram,
+           (unsigned int)journalCgram,
+           (unsigned int)journalOam,
+           (unsigned int)journalOther);
+  PspProfileLog(summary);
+
+  const PspPpuWrite *sample0 =
+      capture->journalCount > 0 ? &capture->journal[0] : NULL;
+  const PspPpuWrite *sample1 =
+      capture->journalCount > 1 ? &capture->journal[1] : NULL;
+  const PspPpuWrite *sample2 =
+      capture->journalCount > 2 ? &capture->journal[2] : NULL;
+
+  char samples[192];
+  snprintf(samples, sizeof(samples),
+           "ppu_journal_samples frame=%u "
+           "s0=%u:%u:%04x=%04x s1=%u:%u:%04x=%04x "
+           "s2=%u:%u:%04x=%04x",
+           (unsigned int)capture->frame,
+           sample0 ? (unsigned int)sample0->region : 99u,
+           sample0 ? (unsigned int)sample0->line : 999u,
+           sample0 ? (unsigned int)sample0->address : 0u,
+           sample0 ? (unsigned int)sample0->value : 0u,
+           sample1 ? (unsigned int)sample1->region : 99u,
+           sample1 ? (unsigned int)sample1->line : 999u,
+           sample1 ? (unsigned int)sample1->address : 0u,
+           sample1 ? (unsigned int)sample1->value : 0u,
+           sample2 ? (unsigned int)sample2->region : 99u,
+           sample2 ? (unsigned int)sample2->line : 999u,
+           sample2 ? (unsigned int)sample2->address : 0u,
+           sample2 ? (unsigned int)sample2->value : 0u);
+  PspProfileLog(samples);
+
   if (capture->journalOverflow) {
     char message[128];
     snprintf(message, sizeof(message),

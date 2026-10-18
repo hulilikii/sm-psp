@@ -23,7 +23,7 @@
 #include "psp/psp_renderer.h"
 #include "psp/psp_input.h"
 
-PSP_MODULE_INFO("SuperMetroidPSP", 0, 1, 0);
+PSP_MODULE_INFO("Super Metroid", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
 PSP_MAIN_THREAD_STACK_SIZE_KB(512);
 PSP_HEAP_SIZE_KB(-1024);

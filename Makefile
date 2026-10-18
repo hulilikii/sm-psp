@@ -24,10 +24,15 @@ ifeq ($(PSP_PROFILE),1)
 CFLAGS += -DPSP_PROFILE
 endif
 
+PSP_PPU_VALIDATE_JOURNAL ?= 0
+ifeq ($(PSP_PPU_VALIDATE_JOURNAL),1)
+CFLAGS += -DPSP_PPU_VALIDATE_JOURNAL -DPSP_PROFILE
+endif
+
 # Debug-only tile atlas validation: make PSP_ATLAS_VALIDATE=1
 PSP_ATLAS_VALIDATE ?= 0
 ifeq ($(PSP_ATLAS_VALIDATE),1)
-CFLAGS += -DPSP_ATLAS_VALIDATE -DPSP_PROFILE -DPSP_PPU_VALIDATE_JOURNAL
+CFLAGS += -DPSP_ATLAS_VALIDATE -DPSP_PROFILE
 endif
 
 # PSP-only build. PSPSDK supplies its standard libraries through build.mak.
@@ -40,7 +45,7 @@ LIBS := -lpspaudiolib \
 BUILD_PRX := 1
 
 EXTRA_TARGETS := EBOOT.PBP
-PSP_EBOOT_TITLE := Super Metroid PSP
+PSP_EBOOT_TITLE := Super Metroid
 
 include $(PSPSDK)/lib/build.mak
 
