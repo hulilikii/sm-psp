@@ -69,12 +69,18 @@ typedef struct PspPpuCapture {
   uint32_t oamWrites;
   uint32_t journalCount;
   uint8_t journalOverflow;
+  uint8_t journalValidationFailed;
   PspPpuMemorySnapshot memory;
   PspPpuWrite journal[PSP_PPU_WRITE_JOURNAL_CAPACITY];
   PspPpuScanlineState scanlines[PSP_CAPTURE_SCANLINES];
 } PspPpuCapture;
 
 static PspPpuCapture g_ppu_capture[PSP_CAPTURE_PPU_COUNT];
+
+#ifdef PSP_PROFILE
+static uint8_t g_history_probe_logged[PSP_CAPTURE_PPU_COUNT][4];
+static void PspRenderer_LogHistoryProbe(Ppu *ppu, int line);
+#endif
 
 #ifdef PSP_PPU_VALIDATE_JOURNAL
 extern void PspProfileLog(const char *message);
@@ -178,6 +184,7 @@ static void PspRenderer_ValidatePpuJournal(
   PspProfileLog(samples);
 
   if (capture->journalOverflow) {
+    capture->journalValidationFailed = 1;
     char message[128];
     snprintf(message, sizeof(message),
              "ppu_journal OVERFLOW frame=%u writes=%u",
@@ -280,6 +287,14 @@ static void PspRenderer_ValidatePpuJournal(
   }
 
 #undef PSP_JOURNAL_CHECK
+
+  capture->journalValidationFailed =
+      invalid != 0 ||
+      vramMismatch != 0 ||
+      cgramMismatch != 0 ||
+      oamMismatch != 0 ||
+      highOamMismatch != 0;
+
 
   char message[192];
   snprintf(message, sizeof(message),
@@ -573,6 +588,10 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   state->vramWrites = capture->vramWrites;
   state->cgramWrites = capture->cgramWrites;
   state->oamWrites = capture->oamWrites;
+  
+#ifdef PSP_PROFILE
+  PspRenderer_LogHistoryProbe(ppu, line);
+#endif
 }
 
 Ppu *PspRenderer_GetActiveScanlinePpu(void) {
@@ -694,6 +713,63 @@ int PspRenderer_GetPpuMemoryHistory(
 
   return 1;
 }
+
+#ifdef PSP_PROFILE
+static void PspRenderer_LogHistoryProbe(Ppu *ppu, int line) {
+  int probe_index;
+
+  switch (line) {
+    case 0:   probe_index = 0; break;
+    case 64:  probe_index = 1; break;
+    case 128: probe_index = 2; break;
+    case 223: probe_index = 3; break;
+    default: return;
+  }
+
+  int ppu_index = -1;
+  for (int i = 0; i < PSP_CAPTURE_PPU_COUNT; ++i) {
+    if (g_ppu_capture[i].ppu == ppu) {
+      ppu_index = i;
+      break;
+    }
+  }
+
+  if (ppu_index < 0 || g_history_probe_logged[ppu_index][probe_index])
+    return;
+
+  PspPpuCapture *capture = &g_ppu_capture[ppu_index];
+
+  /*
+   * Wait until frame 2 so the previous frame has passed the journal
+   * validator. The probe itself still tests the current frame's history.
+   */
+  if (capture->frame < 2)
+    return;
+
+  const PspPpuMemorySnapshot *snapshot = NULL;
+  const PspPpuWrite *writes = NULL;
+  uint32_t write_count = 0;
+  int valid = PspRenderer_GetPpuMemoryHistory(
+      ppu, line, &snapshot, &writes, &write_count);
+
+  char message[192];
+  snprintf(message, sizeof(message),
+           "history_probe ppu=%d line=%d frame=%u valid=%d "
+           "baseline=%u writes=%u overflow=%u "
+           "validated_frame=%u validation_failed=%u",
+           ppu_index, line,
+           (unsigned int)capture->frame,
+           valid,
+           snapshot ? (unsigned int)snapshot->frame : 0,
+           (unsigned int)write_count,
+           (unsigned int)capture->journalOverflow,
+           (unsigned int)capture->journalValidatedFrame,
+           (unsigned int)capture->journalValidationFailed);
+  PspProfileLog(message);
+
+  g_history_probe_logged[ppu_index][probe_index] = 1;
+}
+#endif
 
 void PspRenderer_Ensure4bppTile(int physical_tile) {
   if (g_tile_ppu == NULL || g_atlas4 == NULL || g_frame_stamp == 0)
