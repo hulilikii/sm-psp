@@ -60,6 +60,7 @@ typedef struct PspPpuCapture {
   Ppu *ppu;
   uint32_t frame;
   int activeLine;
+  uint32_t journalValidatedFrame;
   uint32_t vramVersion;
   uint32_t cgramVersion;
   uint32_t oamVersion;
@@ -74,6 +75,142 @@ typedef struct PspPpuCapture {
 } PspPpuCapture;
 
 static PspPpuCapture g_ppu_capture[PSP_CAPTURE_PPU_COUNT];
+
+#ifdef PSP_PPU_VALIDATE_JOURNAL
+extern void PspProfileLog(const char *message);
+
+static PspPpuMemorySnapshot g_journal_replay;
+
+static void PspRenderer_ValidatePpuJournal(
+    PspPpuCapture *capture) {
+  if (capture == NULL ||
+      capture->frame == 0 ||
+      capture->journalValidatedFrame == capture->frame) {
+    return;
+  }
+
+  capture->journalValidatedFrame = capture->frame;
+
+  if (capture->journalOverflow) {
+    char message[128];
+    snprintf(message, sizeof(message),
+             "ppu_journal OVERFLOW frame=%u writes=%u",
+             (unsigned int)capture->frame,
+             (unsigned int)capture->journalCount);
+    PspProfileLog(message);
+    return;
+  }
+
+  memcpy(&g_journal_replay, &capture->memory,
+         sizeof(g_journal_replay));
+
+  uint32_t invalid = 0;
+  uint32_t applied = 0;
+
+  for (uint32_t i = 0; i < capture->journalCount; ++i) {
+    const PspPpuWrite *write = &capture->journal[i];
+
+    /* At scanline 128, only earlier scanlines are eligible. */
+    if (write->line >= 128)
+      continue;
+
+    switch (write->region) {
+      case PSP_PPU_WRITE_VRAM:
+        if (write->address >= 0x8000) {
+          ++invalid;
+          continue;
+        }
+        g_journal_replay.vram[write->address] = write->value;
+        break;
+
+      case PSP_PPU_WRITE_CGRAM:
+        if (write->address >= 0x100) {
+          ++invalid;
+          continue;
+        }
+        g_journal_replay.cgram[write->address] = write->value;
+        break;
+
+      case PSP_PPU_WRITE_OAM:
+        if (write->address < 0x100) {
+          g_journal_replay.oam[write->address] = write->value;
+        } else if (write->address < 0x120) {
+          g_journal_replay.highOam[write->address - 0x100] =
+              (uint8_t)write->value;
+        } else {
+          ++invalid;
+          continue;
+        }
+        break;
+
+      default:
+        ++invalid;
+        continue;
+    }
+
+    ++applied;
+  }
+
+  uint32_t vramMismatch = 0;
+  uint32_t cgramMismatch = 0;
+  uint32_t oamMismatch = 0;
+  uint32_t highOamMismatch = 0;
+  int firstRegion = -1;
+  int firstAddress = -1;
+  unsigned int firstExpected = 0;
+  unsigned int firstActual = 0;
+
+#define PSP_JOURNAL_CHECK(regionId, countName, addressValue, expectedValue, actualValue) \
+  do { \
+    unsigned int expected_ = (unsigned int)(expectedValue); \
+    unsigned int actual_ = (unsigned int)(actualValue); \
+    if (expected_ != actual_) { \
+      ++(countName); \
+      if (firstRegion < 0) { \
+        firstRegion = (regionId); \
+        firstAddress = (addressValue); \
+        firstExpected = expected_; \
+        firstActual = actual_; \
+      } \
+    } \
+  } while (0)
+
+  for (int i = 0; i < 0x8000; ++i) {
+    PSP_JOURNAL_CHECK(PSP_PPU_WRITE_VRAM, vramMismatch, i,
+                      g_journal_replay.vram[i], capture->ppu->vram[i]);
+  }
+
+  for (int i = 0; i < 0x100; ++i) {
+    PSP_JOURNAL_CHECK(PSP_PPU_WRITE_CGRAM, cgramMismatch, i,
+                      g_journal_replay.cgram[i], capture->ppu->cgram[i]);
+    PSP_JOURNAL_CHECK(PSP_PPU_WRITE_OAM, oamMismatch, i,
+                      g_journal_replay.oam[i], capture->ppu->oam[i]);
+  }
+
+  for (int i = 0; i < 0x20; ++i) {
+    PSP_JOURNAL_CHECK(PSP_PPU_WRITE_OAM, highOamMismatch, 0x100 + i,
+                      g_journal_replay.highOam[i],
+                      capture->ppu->highOam[i]);
+  }
+
+#undef PSP_JOURNAL_CHECK
+
+  char message[192];
+  snprintf(message, sizeof(message),
+           "ppu_journal frame=%u applied=%u invalid=%u "
+           "vram=%u cgram=%u oam=%u high_oam=%u "
+           "first=%d:%d expected=%u actual=%u",
+           (unsigned int)capture->frame,
+           (unsigned int)applied,
+           (unsigned int)invalid,
+           (unsigned int)vramMismatch,
+           (unsigned int)cgramMismatch,
+           (unsigned int)oamMismatch,
+           (unsigned int)highOamMismatch,
+           firstRegion, firstAddress, firstExpected, firstActual);
+  PspProfileLog(message);
+}
+#endif
 
 static PspPpuCapture *PspRenderer_FindPpuCapture(
     Ppu *ppu, bool create) {
@@ -261,6 +398,11 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
     memcpy(capture->memory.highOam, ppu->highOam,
            sizeof(capture->memory.highOam));
   }
+
+#ifdef PSP_PPU_VALIDATE_JOURNAL
+  if (line == 128)
+    PspRenderer_ValidatePpuJournal(capture);
+#endif
 
   PspPpuScanlineState *state = &capture->scanlines[line];
   state->frame = capture->frame;

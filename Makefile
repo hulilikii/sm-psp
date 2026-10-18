@@ -27,7 +27,7 @@ endif
 # Debug-only tile atlas validation: make PSP_ATLAS_VALIDATE=1
 PSP_ATLAS_VALIDATE ?= 0
 ifeq ($(PSP_ATLAS_VALIDATE),1)
-CFLAGS += -DPSP_ATLAS_VALIDATE -DPSP_PROFILE
+CFLAGS += -DPSP_ATLAS_VALIDATE -DPSP_PROFILE -DPSP_PPU_VALIDATE_JOURNAL
 endif
 
 # PSP-only build. PSPSDK supplies its standard libraries through build.mak.
