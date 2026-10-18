@@ -5,8 +5,8 @@ TARGET := smpsp
 PSPSDK := $(shell psp-config --pspsdk-path)
 
 SRCS := $(filter-out src/opengl.c,$(wildcard src/*.c src/snes/*.c))
-SRCS += src/platform/psp/psp_renderer.c
-SRCS += src/platform/psp/psp_input.c
+SRCS += src/psp/psp_renderer.c
+SRCS += src/psp/psp_input.c
 
 OBJS := $(SRCS:%.c=%.o)
 OBJS += build/embedded_rom.o
@@ -28,7 +28,7 @@ LIBS := -lpspaudiolib \
 BUILD_PRX := 1
 
 EXTRA_TARGETS := EBOOT.PBP
-PSP_EBOOT_TITLE := Super Metroid PSP
+PSP_EBOOT_TITLE := Super Metroid
 
 include $(PSPSDK)/lib/build.mak
 
