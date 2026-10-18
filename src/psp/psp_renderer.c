@@ -135,7 +135,8 @@ static void PspRenderer_ValidatePpuJournal(
   char summary[192];
   snprintf(summary, sizeof(summary),
            "ppu_journal_stats frame=%u count=%u overflow=%u "
-           "lines=%d..%d vram=%u cgram=%u oam=%u other=%u",
+           "lines=%d..%d vram=%u cgram=%u oam=%u other=%u "
+           "recorded_vram=%u recorded_cgram=%u recorded_oam=%u",
            (unsigned int)capture->frame,
            (unsigned int)capture->journalCount,
            (unsigned int)capture->journalOverflow,
@@ -143,7 +144,10 @@ static void PspRenderer_ValidatePpuJournal(
            (unsigned int)journalVram,
            (unsigned int)journalCgram,
            (unsigned int)journalOam,
-           (unsigned int)journalOther);
+           (unsigned int)journalOther,
+           (unsigned int)capture->vramWrites,
+           (unsigned int)capture->cgramWrites,
+           (unsigned int)capture->oamWrites);
   PspProfileLog(summary);
 
   const PspPpuWrite *sample0 =
