@@ -50,7 +50,7 @@ static bool ParseBoolBit(const char *value, uint32 *data, uint32 mask) {
 
 static bool HandleIniConfig(int section, const char *key, char *value) {
   /* Keyboard and GamepadMap sections are intentionally ignored on PSP.
-   * Physical PSP controls are handled by platform/psp/psp_input.c. */
+   * Physical PSP controls are handled by psp/psp_input.c. */
   if (section == 0 || section == 5)
     return true;
 

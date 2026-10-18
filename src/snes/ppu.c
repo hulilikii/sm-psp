@@ -14,7 +14,7 @@
 #include "ppu.h"
 #include "snes.h"
 #include "../types.h"
-#include "../platform/psp/psp_renderer.h"
+#include "../psp/psp_renderer.h"
 
 #ifdef PSP_PROFILE
 extern void PspProfileLog(const char *message);

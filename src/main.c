@@ -20,8 +20,8 @@
 #include "config.h"
 #include "util.h"
 #include "spc_player.h"
-#include "platform/psp/psp_renderer.h"
-#include "platform/psp/psp_input.h"
+#include "psp/psp_renderer.h"
+#include "psp/psp_input.h"
 
 PSP_MODULE_INFO("SuperMetroidPSP", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
