@@ -8,6 +8,7 @@
 #include "funcs.h"
 #include "sm_rtl.h"
 #include "util.h"
+#include "psp/psp_renderer.h"
 #include "enemy_types.h"
 #include <time.h>
 
@@ -1129,13 +1130,16 @@ again_theirs:
 #ifdef PSP_PROFILE
   profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
+  PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_CPU);
   RunOneFrameOfGame_Emulated();
 #ifdef PSP_PROFILE
   profile_emulated_us +=
       sceKernelGetSystemTimeLow() - profile_stage_start;
   profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
+  PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_POS);
   DrawFrameToPpu();
+  PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_OTHER);
 #ifdef PSP_PROFILE
   profile_emulated_draw_us +=
       sceKernelGetSystemTimeLow() - profile_stage_start;
@@ -1163,13 +1167,16 @@ again_theirs:
 #ifdef PSP_PROFILE
   profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
+  PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_CPU);
   RunOneFrameOfGame();
 #ifdef PSP_PROFILE
   profile_mine_us +=
       sceKernelGetSystemTimeLow() - profile_stage_start;
   profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
+  PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_POS);
   DrawFrameToPpu();
+  PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_OTHER);
 #ifdef PSP_PROFILE
   profile_mine_draw_us +=
       sceKernelGetSystemTimeLow() - profile_stage_start;
@@ -1284,8 +1291,11 @@ void RtlRunFrameCompare(uint16 input, int run_what) {
   g_snes->input1->currentState = input;
 
   if (g_runmode == RM_THEIRS) {
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_CPU);
     RunOneFrameOfGame_Emulated();
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_POS);
     DrawFrameToPpu();
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_OTHER);
 
   } else if (g_runmode == RM_MINE) {
     g_use_my_apu_code = true;
@@ -1294,13 +1304,16 @@ void RtlRunFrameCompare(uint16 input, int run_what) {
 #ifdef PSP_PROFILE
     profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_CPU);
     RunOneFrameOfGame();
 #ifdef PSP_PROFILE
     profile_mine_cpu_us =
         sceKernelGetSystemTimeLow() - profile_stage_start;
     profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_POS);
     DrawFrameToPpu();
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_OTHER);
 #ifdef PSP_PROFILE
     profile_mine_ppu_us =
         sceKernelGetSystemTimeLow() - profile_stage_start;

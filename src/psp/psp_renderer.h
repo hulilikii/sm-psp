@@ -8,6 +8,13 @@ void PspRenderer_Create(struct RendererFuncs *funcs);
 
 void PspRenderer_BeginPpuFrame(Ppu *ppu);
 void PspRenderer_OnPpuScanline(Ppu *ppu, int line);
+
+enum {
+  PSP_PPU_PHASE_OTHER = 0,
+  PSP_PPU_PHASE_CPU = 1,
+  PSP_PPU_PHASE_POS = 2,
+};
+void PspRenderer_SetPpuWritePhase(int phase);
 Ppu *PspRenderer_GetActiveScanlinePpu(void);
 int PspRenderer_GetActiveScanline(void);
 

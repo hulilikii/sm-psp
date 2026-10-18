@@ -49,6 +49,7 @@ static uint8_t g_framebuffer[GAME_WIDTH * GAME_HEIGHT * 4] __attribute__((aligne
 static Ppu *g_tile_ppu;
 static Ppu *g_active_scanline_ppu;
 static int g_active_scanline = -1;
+static int g_ppu_write_phase = PSP_PPU_PHASE_OTHER;
 
 enum {
   PSP_CAPTURE_SCANLINES = 262,
@@ -80,6 +81,28 @@ typedef struct PspPpuCapture {
   uint32_t oamWrites;
   uint32_t journalCount;
   uint8_t journalOverflow;
+#ifdef PSP_PPU_VALIDATE_JOURNAL
+  uint32_t diagPhaseWrites[3];
+  uint32_t diagVblankWrites;
+  uint32_t diagVisibleWrites;
+  uint16_t diagMinVpos;
+  uint16_t diagMaxVpos;
+  uint16_t diagMinHpos;
+  uint16_t diagMaxHpos;
+  uint8_t diagHavePosition;
+  struct {
+    int phase;
+    int vpos;
+    int hpos;
+    int inVblank;
+    int activeLine;
+    int runningWhichVersion;
+    int region;
+    unsigned int address;
+    unsigned int value;
+  } diagSamples[4];
+  uint32_t diagSampleCount;
+#endif
   uint8_t journalValidationFailed;
   PspPpuMemorySnapshot memory;
   PspPpuWrite journal[PSP_PPU_WRITE_JOURNAL_CAPACITY];
@@ -498,6 +521,53 @@ void PspRenderer_BeginPpuFrame(Ppu *ppu) {
 #endif
 }
 
+void PspRenderer_SetPpuWritePhase(int phase) {
+  if (phase < PSP_PPU_PHASE_OTHER || phase > PSP_PPU_PHASE_POS)
+    phase = PSP_PPU_PHASE_OTHER;
+  g_ppu_write_phase = phase;
+}
+
+#ifdef PSP_PPU_VALIDATE_JOURNAL
+static void PspRenderer_LogPpuWriteDiagnostics(PspPpuCapture *capture) {
+  if (capture == NULL || capture->frame == 0 ||
+      (capture->frame % 60) != 0)
+    return;
+
+  char line[224];
+  snprintf(line, sizeof(line),
+           "ppu_write_phase frame=%u ppu=%u cpu=%u pos=%u other=%u "
+           "vblank=%u visible=%u vpos=%u..%u hpos=%u..%u samples=%u",
+           (unsigned int)capture->frame,
+           capture->ppu == capture->ppu->snes->my_ppu ? 1u : 0u,
+           (unsigned int)capture->diagPhaseWrites[PSP_PPU_PHASE_CPU],
+           (unsigned int)capture->diagPhaseWrites[PSP_PPU_PHASE_POS],
+           (unsigned int)capture->diagPhaseWrites[PSP_PPU_PHASE_OTHER],
+           (unsigned int)capture->diagVblankWrites,
+           (unsigned int)capture->diagVisibleWrites,
+           capture->diagHavePosition ? (unsigned int)capture->diagMinVpos : 0u,
+           capture->diagHavePosition ? (unsigned int)capture->diagMaxVpos : 0u,
+           capture->diagHavePosition ? (unsigned int)capture->diagMinHpos : 0u,
+           capture->diagHavePosition ? (unsigned int)capture->diagMaxHpos : 0u,
+           (unsigned int)capture->diagSampleCount);
+  PspProfileLog(line);
+
+  for (uint32_t i = 0; i < capture->diagSampleCount; ++i) {
+    const typeof(capture->diagSamples[0]) *sample = &capture->diagSamples[i];
+    snprintf(line, sizeof(line),
+             "ppu_write_sample frame=%u i=%u phase=%d ppu=%u "
+             "vpos=%d hpos=%d vblank=%d active=%d version=%d "
+             "region=%d addr=%04x value=%04x",
+             (unsigned int)capture->frame, (unsigned int)i,
+             sample->phase,
+             capture->ppu == capture->ppu->snes->my_ppu ? 1u : 0u,
+             sample->vpos, sample->hpos, sample->inVblank,
+             sample->activeLine, sample->runningWhichVersion,
+             sample->region, sample->address, sample->value);
+    PspProfileLog(line);
+  }
+}
+#endif
+
 //Called by the PPU at scanline execution time. Keep this separate from BeginPpuFrame(), which runs after emulation and selects the displayed PPU.
 void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   g_active_scanline_ppu = ppu;
@@ -513,6 +583,7 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   capture->activeLine = line;
 
   if (line == 0) {
+  
 #ifdef PSP_PPU_VALIDATE_JOURNAL
     /*
      * Validate the previous frame before resetting its journal or
@@ -520,6 +591,7 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
      * This includes writes from the entire frame, including late lines.
      */
     PspRenderer_ValidatePpuJournal(capture);
+    PspRenderer_LogPpuWriteDiagnostics(capture);
 #endif
 
 #ifdef PSP_PROFILE
@@ -541,7 +613,14 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
 
     capture->journalCount = 0;
     capture->journalOverflow = 0;
-    
+#ifdef PSP_PPU_VALIDATE_JOURNAL
+    memset(capture->diagPhaseWrites, 0, sizeof(capture->diagPhaseWrites));
+    capture->diagVblankWrites = 0;
+    capture->diagVisibleWrites = 0;
+    capture->diagHavePosition = 0;
+    capture->diagSampleCount = 0;
+#endif
+
     capture->scanlineCallbacks = 0;
     capture->timingWriteCount = 0;
     capture->timingVisibleWriteCount = 0;
@@ -716,6 +795,44 @@ void PspRenderer_RecordPpuMemoryWrite(
       }
       ++capture->timingLineMismatchCount;
     }
+  }
+#endif
+
+#ifdef PSP_PPU_VALIDATE_JOURNAL
+  if (g_ppu_write_phase >= PSP_PPU_PHASE_OTHER &&
+      g_ppu_write_phase <= PSP_PPU_PHASE_POS)
+    ++capture->diagPhaseWrites[g_ppu_write_phase];
+  if (ppu->snes->inVblank)
+    ++capture->diagVblankWrites;
+  else
+    ++capture->diagVisibleWrites;
+
+  if (!capture->diagHavePosition) {
+    capture->diagMinVpos = capture->diagMaxVpos = ppu->snes->vPos;
+    capture->diagMinHpos = capture->diagMaxHpos = ppu->snes->hPos;
+    capture->diagHavePosition = 1;
+  } else {
+    if (ppu->snes->vPos < capture->diagMinVpos)
+      capture->diagMinVpos = ppu->snes->vPos;
+    if (ppu->snes->vPos > capture->diagMaxVpos)
+      capture->diagMaxVpos = ppu->snes->vPos;
+    if (ppu->snes->hPos < capture->diagMinHpos)
+      capture->diagMinHpos = ppu->snes->hPos;
+    if (ppu->snes->hPos > capture->diagMaxHpos)
+      capture->diagMaxHpos = ppu->snes->hPos;
+  }
+  if (capture->diagSampleCount < 4) {
+    typeof(capture->diagSamples[0]) *sample =
+        &capture->diagSamples[capture->diagSampleCount++];
+    sample->phase = g_ppu_write_phase;
+    sample->vpos = ppu->snes->vPos;
+    sample->hpos = ppu->snes->hPos;
+    sample->inVblank = ppu->snes->inVblank;
+    sample->activeLine = capture->activeLine;
+    sample->runningWhichVersion = ppu->snes->runningWhichVersion;
+    sample->region = region;
+    sample->address = address;
+    sample->value = value;
   }
 #endif
 
