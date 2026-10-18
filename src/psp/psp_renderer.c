@@ -62,6 +62,7 @@ typedef struct PspPpuCapture {
   int activeLine;
   uint32_t scanlineCallbacks;
   uint32_t timingWriteCount;
+  uint32_t timingVisibleWriteCount;
   uint32_t timingLineMismatchCount;
   uint32_t timingVblankWriteCount;
   int timingFirstActiveLine;
@@ -97,12 +98,14 @@ static void PspRenderer_LogCaptureStatus(PspPpuCapture *capture) {
   char message[224];
   snprintf(message, sizeof(message),
            "ppu_timing ppu=%d frame=%u callbacks=%u "
-           "writes=%u line_mismatches=%u vblank_writes=%u "
+           "writes=%u visible_writes=%u active_line_mismatches=%u "
+           "vblank_writes=%u "
            "first=%d:%d:%d last=%d:%d:%d",
            capture->ppu == capture->ppu->snes->my_ppu ? 1 : 0,
            (unsigned int)capture->frame,
            (unsigned int)capture->scanlineCallbacks,
            (unsigned int)capture->timingWriteCount,
+           (unsigned int)capture->timingVisibleWriteCount,
            (unsigned int)capture->timingLineMismatchCount,
            (unsigned int)capture->timingVblankWriteCount,
            capture->timingFirstActiveLine,
@@ -541,6 +544,7 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
     
     capture->scanlineCallbacks = 0;
     capture->timingWriteCount = 0;
+    capture->timingVisibleWriteCount = 0;
     capture->timingLineMismatchCount = 0;
     capture->timingVblankWriteCount = 0;
     capture->timingFirstActiveLine = -1;
@@ -562,6 +566,18 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
   }
 
   ++capture->scanlineCallbacks;
+  
+#ifdef PSP_PROFILE
+  if (line == 0 && capture->frame % 60 == 0) {
+    char message[128];
+    snprintf(message, sizeof(message),
+             "ppu_capture_start ppu=%d frame=%u callbacks=%u",
+             ppu == ppu->snes->my_ppu ? 1 : 0,
+             (unsigned int)capture->frame,
+             (unsigned int)capture->scanlineCallbacks);
+    PspProfileLog(message);
+  }
+#endif
 
   PspPpuScanlineState *state = &capture->scanlines[line];
   state->frame = capture->frame;
@@ -680,22 +696,25 @@ void PspRenderer_RecordPpuMemoryWrite(
 #ifdef PSP_PROFILE
   int liveVPos = ppu->snes->vPos;
   int liveHPos = ppu->snes->hPos;
+  bool isVblank = ppu->snes->inVblank;
 
   ++capture->timingWriteCount;
-  if (ppu->snes->inVblank)
+  if (isVblank) {
     ++capture->timingVblankWriteCount;
+  } else {
+    ++capture->timingVisibleWriteCount;
 
-  capture->timingLastActiveLine = capture->activeLine;
-  capture->timingLastVPos = liveVPos;
-  capture->timingLastHPos = liveHPos;
+    capture->timingLastActiveLine = capture->activeLine;
+    capture->timingLastVPos = liveVPos;
+    capture->timingLastHPos = liveHPos;
 
-  if (capture->activeLine != liveVPos) {
-    if (capture->timingLineMismatchCount == 0) {
-      capture->timingFirstActiveLine = capture->activeLine;
-      capture->timingFirstVPos = liveVPos;
-      capture->timingFirstHPos = liveHPos;
-    }
-    ++capture->timingLineMismatchCount;
+    if (capture->activeLine != liveVPos) {
+      if (capture->timingLineMismatchCount == 0) {
+        capture->timingFirstActiveLine = capture->activeLine;
+        capture->timingFirstVPos = liveVPos;
+        capture->timingFirstHPos = liveHPos;
+      }
+      ++capture->timingLineMismatchCount;
   }
 #endif
 
