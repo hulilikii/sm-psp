@@ -196,8 +196,8 @@ static void PspRenderer_ValidatePpuJournal(
   for (uint32_t i = 0; i < capture->journalCount; ++i) {
     const PspPpuWrite *write = &capture->journal[i];
 
-    /* At scanline 128, only earlier scanlines are eligible. */
-    if (write->line >= 128)
+    /* Validate the complete frame before its baseline is replaced. */
+    if (write->line >= PSP_CAPTURE_SCANLINES)
       continue;
 
     switch (write->region) {
@@ -461,6 +461,15 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
     capture->activeLine = line;
 
   if (line == 0) {
+#ifdef PSP_PPU_VALIDATE_JOURNAL
+    /*
+     * Validate the previous frame before resetting its journal or
+     * replacing its baseline snapshot with the current PPU memory.
+     * This includes writes from the entire frame, including late lines.
+     */
+    PspRenderer_ValidatePpuJournal(capture);
+#endif
+
     if (++capture->frame == 0)
       capture->frame = 1;
 
@@ -485,10 +494,6 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
            sizeof(capture->memory.highOam));
   }
 
-#ifdef PSP_PPU_VALIDATE_JOURNAL
-  if (line == 128)
-    PspRenderer_ValidatePpuJournal(capture);
-#endif
 
   PspPpuScanlineState *state = &capture->scanlines[line];
   state->frame = capture->frame;

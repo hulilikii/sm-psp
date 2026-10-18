@@ -1558,10 +1558,11 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
           ppu->oamBuffer = val;
         } else {
           uint8_t oamAdr = ppu->oamAdr;
-          ppu->oam[oamAdr] = (val << 8) | ppu->oamBuffer;
+          uint16_t oamValue = (val << 8) | ppu->oamBuffer;
+          ppu->oam[oamAdr] = oamValue;
           ppu->oamAdr++;
           PspRenderer_RecordPpuMemoryWrite(
-              ppu, PSP_PPU_WRITE_OAM, oamAdr, ppu->oam[oamAdr]);
+              ppu, PSP_PPU_WRITE_OAM, oamAdr, oamValue);
           if(ppu->oamAdr == 0) ppu->oamInHigh = true;
         }
       }
