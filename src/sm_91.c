@@ -867,7 +867,7 @@ void Xray_SetupStage2_ReadBg1_2ndScreen(void) {  // 0x91CB1C
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = ((reg_BG1SC & 0xFC) << 8) + 1024;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
-  *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2800;
+  * (unaligned_uint16 *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2800;
   *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
   vram_read_queue_tail = v0 + 9;
@@ -879,7 +879,7 @@ void Xray_SetupStage3_ReadBg1_1stScreen(void) {  // 0x91CB57
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v0) = (reg_BG1SC & 0xFC) << 8;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v0) = 129;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v0  + 1) = 57;
-  *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2000;
+  * (unaligned_uint16 *)((uint8 *)&vram_read_queue[0].src.addr + v0) = ADDR16_OF_RAM(ram4000) + 0x2000;
   *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
   vram_read_queue_tail = v0 + 9;
@@ -942,7 +942,7 @@ void Xray_SetupStage4(void) {  // 0x91CB8E
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + v7) = (reg_BG2SC & 0xFC) << 8;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].dma_parameters + v7) = 129;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v7  + 1) = 57;
-  *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v7) = 0x5000;
+  * (unaligned_uint16 *)((uint8 *)&vram_read_queue[0].src.addr + v7) = 0x5000;
   *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v7) = 126;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v7) = 2048;
   vram_read_queue_tail = v7 + 9;
@@ -1193,7 +1193,7 @@ void Xray_SetupStage5(void) {  // 0x91D0D3
   v1 = vram_read_queue_tail;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].vram_target + vram_read_queue_tail) = ((reg_BG2SC & 0xFC) << 8) + 1024;
   *(unaligned_uint16 *)((uint8*)&vram_read_queue[0].dma_parameters + v1  + 1) = 57;
-  *(VoidP *)((uint8 *)&vram_read_queue[0].src.addr + v0) = 0x5800;
+  * (unaligned_uint16 *)((uint8 *)&vram_read_queue[0].src.addr + v0) = 0x5800;
   *(unaligned_uint16 *)(&vram_read_queue[0].src.bank + v0) = 126;
   *(unaligned_uint16 *)((uint8 *)&vram_read_queue[0].size + v0) = 2048;
   vram_read_queue_tail = v0 + 9;
@@ -1641,10 +1641,10 @@ uint8 Samus_HandleCrystalFlashPals(void) {  // 0x91DB93
         v0 = 0;
       special_samus_palette_frame = v0;
     }
-    bool v1 = (int16)-- * (uint16 *)&suit_pickup_color_math_B < 0;
+    bool v1 = (int16)-- * (unaligned_uint16 *)&suit_pickup_color_math_B < 0;
     if (!*(unaligned_uint16 *)&suit_pickup_color_math_B || v1) {
       *(unaligned_uint16 *)&suit_pickup_color_math_B = *(unaligned_uint16 *)((uint8 *)&stru_91DC00[0].timer + special_samus_palette_timer);
-      Samus_Copy10PalColors(*(VoidP *)((uint8 *)&stru_91DC00[0].ptr + special_samus_palette_timer));
+      Samus_Copy10PalColors(* (unaligned_uint16 *)((uint8 *)&stru_91DC00[0].ptr + special_samus_palette_timer));
       uint16 v2 = special_samus_palette_timer + 4;
       if (!sign16(special_samus_palette_timer - 36))
         v2 = 0;

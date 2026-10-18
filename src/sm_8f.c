@@ -522,7 +522,7 @@ void DoorCode_ResetElevatubeNorthExit(void) {  // 0x8FE301
 }
 
 void DoorCode_ResetElevatubeSouthExit(void) {  // 0x8FE309
-  *(uint16 *)scrolls = 514;
+  * (unaligned_uint16 *)scrolls = 514;
   CallSomeSamusCode(1);
 }
 

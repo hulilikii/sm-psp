@@ -1394,7 +1394,7 @@ void Shaktool_Init(void) {  // 0xAADE43
   E->base.properties |= g_word_AADE95[v3];
   E->shakt_var_E = cur_enemy_index - g_word_AADEA3[v3];
   E->shakt_var_F = *(unaligned_uint16 *)((uint8 *)g_off_AADEDB + shakto_parameter_2);
-  E->shakt_var_C = *(uint16 *)((uint8 *)g_word_AADEE9 + shakto_parameter_2) - g_word_AADEF7[v3];
+  E->shakt_var_C = * (unaligned_uint16 *)((uint8 *)g_word_AADEE9 + shakto_parameter_2) - g_word_AADEF7[v3];
   E->shakt_var_B = g_word_AADEB1[v3];
   E->base.current_instruction = g_word_AADEB1[v3 + 7];
   E->base.layer = g_word_AADECD[v3];
@@ -1481,8 +1481,8 @@ const unaligned_uint16 *Shaktool_Instr_7(uint16 k, const unaligned_uint16 *jp) {
 
 const unaligned_uint16 *Shaktool_Instr_14(uint16 k, const unaligned_uint16 *jp) {  // 0xAAE6F0
   CallSomeSamusCode(1);
-  *(uint16 *)&scrolls[6] = 0;
-  *(uint16 *)&scrolls[8] = 0;
+  * (unaligned_uint16 *)&scrolls[6] = 0;
+  * (unaligned_uint16 *)&scrolls[8] = 0;
   *(unaligned_uint16 *)&scrolls[9] = 0;
   *(unaligned_uint16 *)&scrolls[13] = 1;
   SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x17, 0x1d, 0xd6fc });

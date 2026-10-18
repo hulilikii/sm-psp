@@ -1982,7 +1982,7 @@ void ProcessExtendedTilemap(uint8 db, uint16 r22) {  // 0xA096CA
     uint16 v2 = *(unaligned_uint16 *)p;
     if (v2 == 0xFFFF)
       break;
-    int n = *((uint16 *)p + 1);
+    int n = *((unaligned_uint16 *)p + 1);
     p += 4;
     memcpy(g_ram + v2, p, n * 2);
     p += n * 2;

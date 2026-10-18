@@ -200,7 +200,7 @@ void sub_A7A92A(void) {  // 0xA7A92A
 }
 
 uint16 Kraid_CheckIfDead(void) {  // 0xA7A92C
-  return (*(uint16 *)&boss_bits_for_area[area_index] & 1) != 0;
+  return (* (unaligned_uint16 *)&boss_bits_for_area[area_index] & 1) != 0;
 }
 
 void Kraid_SetEnemyPropsToDead(void) {  // 0xA7A943
@@ -241,8 +241,8 @@ void Kraid_Init(void) {  // 0xA7A959
   } else {
     reg_BG2SC = 67;
     camera_distance_index = 2;
-    *(uint16 *)scrolls = 0;
-    *(uint16 *)&scrolls[2] = 1;
+    * (unaligned_uint16 *)scrolls = 0;
+    * (unaligned_uint16 *)&scrolls[2] = 1;
     Enemy_Kraid *E = Get_Kraid(0);
     E->kraid_min_y_pos_eject = 324;
     uint16 v7 = 0;
@@ -1500,7 +1500,7 @@ void Kraid_HandleFirstPhase(void) {  // 0xA7C005
       }
     }
     E0->kraid_var_B = v3 - 26918;
-    E0->kraid_var_C = *(uint16 *)((uint8 *)&g_stru_A796D2.timer + v3);
+    E0->kraid_var_C = * (unaligned_uint16 *)((uint8 *)&g_stru_A796D2.timer + v3);
     earthquake_type = 4;
     earthquake_timer = 340;
     Enemy_Kraid *E5 = Get_Kraid(0x140);
@@ -1523,8 +1523,8 @@ void Kraid_HandleFirstPhase(void) {  // 0xA7C005
 void Kraid_GetsBig_ReleaseCamera(void) {  // 0xA7C0A1
   Enemy_Kraid *E = Get_Kraid(0);
   E->kraid_var_A = FUNC16(Kraid_GetsBig_BreakCeilingPlatforms);
-  *(uint16 *)scrolls = 514;
-  *(uint16 *)&scrolls[2] = 257;
+  * (unaligned_uint16 *)scrolls = 514;
+  * (unaligned_uint16 *)&scrolls[2] = 257;
   E->kraid_min_y_pos_eject = 164;
 }
 
@@ -1827,7 +1827,7 @@ void Kraid_FadeInBg_ClearBg2TilemapTopHalf(void) {  // 0xA7C715
   v2 = gVramWriteEntry(vram_write_queue_tail);
   v2->size = 1024;
   v2->src.addr = 0x2000;
-  *(uint16 *)&v2->src.bank = 126;
+  * (unaligned_uint16 *)&v2->src.bank = 126;
   v2->vram_dst = 18432;
   vram_write_queue_tail = v1 + 7;
   Get_Kraid(0)->kraid_var_A = FUNC16(Kraid_FadeInBg_ClearBg2TilemapBottomHalf);
@@ -1840,7 +1840,7 @@ void Kraid_FadeInBg_ClearBg2TilemapBottomHalf(void) {  // 0xA7C751
   v1 = gVramWriteEntry(vram_write_queue_tail);
   v1->size = 1024;
   v1->src.addr = 0x2000;
-  *(uint16 *)&v1->src.bank = 126;
+  * (unaligned_uint16 *)&v1->src.bank = 126;
   v1->vram_dst = 18944;
   vram_write_queue_tail = v0 + 7;
   Get_Kraid(0)->kraid_var_A = FUNC16(Kraid_FadeInBg_LoadBg3Tiles1of4);
@@ -1855,7 +1855,7 @@ void Kraid_FadeInBg_LoadBg3Tiles1of4(void) {  // 0xA7C777
   v1 = gVramWriteEntry(vram_write_queue_tail);
   v1->size = 1024;
   v1->src.addr = -19968;
-  *(uint16 *)&v1->src.bank = 154;
+  * (unaligned_uint16 *)&v1->src.bank = 154;
   v1->vram_dst = 0x4000;
   vram_write_queue_tail = v0 + 7;
 }
@@ -1868,7 +1868,7 @@ void Kraid_FadeInBg_LoadBg3Tiles2of4(void) {  // 0xA7C7A3
   v1 = gVramWriteEntry(vram_write_queue_tail);
   v1->size = 1024;
   v1->src.addr = -18944;
-  *(uint16 *)&v1->src.bank = 154;
+  * (unaligned_uint16 *)&v1->src.bank = 154;
   v1->vram_dst = 16896;
   vram_write_queue_tail = v0 + 7;
 }
@@ -1881,7 +1881,7 @@ void Kraid_FadeInBg_LoadBg3Tiles3of4(void) {  // 0xA7C7C9
   v1 = gVramWriteEntry(vram_write_queue_tail);
   v1->size = 1024;
   v1->src.addr = -17920;
-  *(uint16 *)&v1->src.bank = 154;
+  * (unaligned_uint16 *)&v1->src.bank = 154;
   v1->vram_dst = 17408;
   vram_write_queue_tail = v0 + 7;
 }
@@ -1894,7 +1894,7 @@ void Kraid_FadeInBg_LoadBg3Tiles4of4(void) {  // 0xA7C7EF
   v1 = gVramWriteEntry(vram_write_queue_tail);
   v1->size = 1024;
   v1->src.addr = -16896;
-  *(uint16 *)&v1->src.bank = 154;
+  * (unaligned_uint16 *)&v1->src.bank = 154;
   v1->vram_dst = 17920;
   vram_write_queue_tail = v0 + 7;
 }
@@ -2105,7 +2105,7 @@ void Phantoon_Init(void) {  // 0xA7CDF3
   for (int i = 4094; i >= 0; i -= 2)
     tilemap_stuff[i >> 1] = 824;
   for (j = 2046; j >= 0; j -= 2)
-    *(uint16 *)((uint8 *)&kraid_unk9000 + (uint16)j) = 0;
+    * (unaligned_uint16 *)((uint8 *)&kraid_unk9000 + (uint16)j) = 0;
   for (k = 30; (k & 0x8000) == 0; k -= 2)
     target_palettes[(k >> 1) + 112] = 0;
   enemy_bg2_tilemap_size = 864;
@@ -2489,7 +2489,7 @@ void Phantoon_StartDeathSequence(uint16 k) {  // 0xA7D421
   v3 = 510;
   uint16 v4 = reg_BG2HOFS;
   do {
-    *(uint16 *)((uint8 *)&g_word_7E9100 + (uint16)v3) = v4;
+    * (unaligned_uint16 *)((uint8 *)&g_word_7E9100 + (uint16)v3) = v4;
     v3 -= 2;
   } while (v3 >= 0);
   phantom_related_layer_flag |= 0x4000;

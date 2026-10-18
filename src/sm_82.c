@@ -3006,7 +3006,7 @@ void DrawFileSelectMapIcons(void) {  // 0x82B6DD
   DrawSimpleMapIcons(0xA, 0xC7EB, 3584);
   DrawSimpleMapIcons(0x4E, 0xC7FB, 3584);
   uint16 a = UpdateSamusPositionIndicatorAnimation();
-  const unaligned_uint16 *data = (unaligned_uint16 *)RomPtr_82(*(VoidP *)((uint8 *)&kMapIconDataPointers[4].crateria + 2 * area_index)) + load_station_index * 2;
+  const unaligned_uint16 *data = (unaligned_uint16 *)RomPtr_82(* (unaligned_uint16 *)((uint8 *)&kMapIconDataPointers[4].crateria + 2 * area_index)) + load_station_index * 2;
   uint16 v1 = data[0] - reg_BG1HOFS;
   uint16 v2 = data[1] - reg_BG1VOFS;
   if ((samus_position_indicator_animation_loop_counter & 1) == 0)

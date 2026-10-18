@@ -2741,7 +2741,7 @@ void EprojPreInstr_TourianStatueSoul(uint16 k) {  // 0x86B9FD
 static void EprojPreInstr_BA42(uint16 k) {  // 0x86BA42
   int v1 = k >> 1;
   eproj_x_pos[v1] = eproj_E[v1];
-  eproj_y_pos[v1] = eproj_F[v1] + layer1_y_pos - *(uint16 *)&hdma_window_1_left_pos[0].field_0;
+  eproj_y_pos[v1] = eproj_F[v1] + layer1_y_pos - * (unaligned_uint16 *)&hdma_window_1_left_pos[0].field_0;
 }
 
 void EprojPreInstr_TourianStatueStuff(uint16 k) {  // 0x86BA37
@@ -2766,7 +2766,7 @@ static void EprojInit_NuclearWaffleBody(uint16 j) {  // 0x86BB92
   eproj_y_pos[v3] = v2->y_pos;
   eproj_y_subpos[v3] = v2->y_subpos;
   ExtraEnemyRam8000 *v4 = gExtraEnemyRam8000(cur_enemy_index);
-  gExtraEnemyRam7800(cur_enemy_index + *(uint16 *)&v4->pad[20])->kraid.kraid_next = j;
+  gExtraEnemyRam7800(cur_enemy_index + * (unaligned_uint16 *)&v4->pad[20])->kraid.kraid_next = j;
   eproj_flags[v3] = 1;
 }
 
@@ -4449,7 +4449,7 @@ void CallBotwoonEprojFunc(uint32 ea, uint16 k) {
 }
 
 void EprojPreInstr_BotwoonsBody(uint16 k) {  // 0x86EA80
-  if (*(uint16 *)&extra_enemy_ram8000[0].pad[32]) {
+  if (* (unaligned_uint16 *)&extra_enemy_ram8000[0].pad[32]) {
     int v1 = k >> 1;
     if (eproj_x_vel[v1] == FUNC16(Eproj_BotwoonsBody_Main))
       eproj_x_vel[v1] = FUNC16(Eproj_BotwonsBodyFunction_Dying);
@@ -4519,7 +4519,7 @@ void Eproj_BotwonsBodyFunction_DyingFalling(uint16 v0) {  // 0x86EB1F
     eproj_instr_timers[v1] = 1;
     QueueSmallExplosionSfx();
     if (v0 == 10)
-      *(uint16 *)&extra_enemy_ram8800[0].pad[62] = 1;
+      * (unaligned_uint16 *)&extra_enemy_ram8800[0].pad[62] = 1;
   }
 }
 
@@ -4567,8 +4567,8 @@ static void EprojInit_YappingMawsBody(uint16 j) {  // 0x86EC62
   eproj_instr_list_ptr[v3] = addr_word_86EC5C;
   if (!v2->parameter_2)
     eproj_instr_list_ptr[v3] = addr_word_86EC56;
-  *(uint16 *)&extra_enemy_ram8800[0].pad[(uint16)(cur_enemy_index
-                                                 + 2 * *(uint16 *)&extra_enemy_ram8800[0].pad[cur_enemy_index + 8])] = j;
+  * (unaligned_uint16 *)&extra_enemy_ram8800[0].pad[(uint16)(cur_enemy_index
+                                                 + 2 * * (unaligned_uint16 *)&extra_enemy_ram8800[0].pad[cur_enemy_index + 8])] = j;
 }
 
 const uint8 *EprojInstr_ECE3(uint16 k, const uint8 *epjp) {  // 0x86ECE3
@@ -4874,7 +4874,7 @@ void RespawnEnemy(uint16 v0) {  // 0x86F264
   E->y_height = Edef->y_radius;
   E->health = Edef->health;
   E->layer = Edef->layer;
-  *(uint16 *)&E->bank = *(uint16 *)&Edef->bank;
+  * (unaligned_uint16 *)&E->bank = * (unaligned_uint16 *)&Edef->bank;
   CallEnemyAi(Edef->bank << 16 | Edef->ai_init);
 }
 

@@ -3577,7 +3577,7 @@ void HandleChargingBeamGfxAudio(void) {  // 0x90BAFC
     if (flare_counter) {
       for (int i = 4; i >= 0; i -= 2) {
         bool v7 = *(unaligned_uint16 *)((uint8 *)&flare_animation_timer + i) == 1;
-        bool v8 = (-- * (uint16 *)((uint8 *)&flare_animation_timer + i) & 0x8000) != 0;
+        bool v8 = (-- * (unaligned_uint16 *)((uint8 *)&flare_animation_timer + i) & 0x8000) != 0;
         if (v7 || v8) {
           v7 = (*(unaligned_uint16 *)((uint8 *)&flare_animation_frame + i))-- == 1;
           if (v7) {

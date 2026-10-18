@@ -31,9 +31,9 @@ uint8 PlaySamusFanfare(void) {  // 0x92ED24
     return 0;
   } else {
     samus_last_different_pose = samus_prev_pose;
-    *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+    * (unaligned_uint16 *)&samus_last_different_pose_x_dir = * (unaligned_uint16 *)&samus_prev_pose_x_dir;
     samus_prev_pose = samus_pose;
-    *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+    * (unaligned_uint16 *)&samus_prev_pose_x_dir = * (unaligned_uint16 *)&samus_pose_x_dir;
     substate = 0;
     return 1;
   }

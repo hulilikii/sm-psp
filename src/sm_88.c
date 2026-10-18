@@ -400,8 +400,8 @@ void InitializeSpecialEffectsForNewRoom(void) {  // 0x8882C1
   layer2_x_pos = 0;
   layer2_y_pos = 0;
   room_loading_irq_handler = 0;
-  *(VoidP *)((uint8 *)&pause_hook.addr + 1) = -30720;
-  *(VoidP *)((uint8 *)&unpause_hook.addr + 1) = -30720;
+  * (unaligned_uint16 *)((uint8 *)&pause_hook.addr + 1) = -30720;
+  * (unaligned_uint16 *)((uint8 *)&unpause_hook.addr + 1) = -30720;
   pause_hook.addr = FUNC16(PauseHook_Empty);
   unpause_hook.addr = FUNC16(PauseHook_Empty);
   WriteReg(WMADDL, 0xF0);

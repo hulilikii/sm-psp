@@ -54,7 +54,7 @@ void Draygon_Init(void) {  // 0xA58687
   for (j = 4094; (j & 0x8000) == 0; j -= 2)
     tilemap_stuff[j >> 1] = 824;
   Get_Draygon(cur_enemy_index)->base.palette_index = 0xe00;
-  *(uint16 *)&enemy_gfx_drawn_hook.bank = 165;
+  * (unaligned_uint16 *)&enemy_gfx_drawn_hook.bank = 165;
   enemy_gfx_drawn_hook.addr = FUNC16(Draygon_Func_36);
   flag_process_all_enemies = -1;
   Get_Draygon(0)->base.current_instruction = addr_kDraygon_Ilist_9889;
@@ -142,7 +142,7 @@ void Draygon_Func_1(void) {  // 0xA5871B
       v2 = gVramWriteEntry(vram_write_queue_tail);
       v2->size = 1536;
       v2->src.addr = -27648;
-      *(uint16 *)&v2->src.bank = 177;
+      * (unaligned_uint16 *)&v2->src.bank = 177;
       v2->vram_dst = 27904;
       vram_write_queue_tail += 7;
       Draygon_Func_45();

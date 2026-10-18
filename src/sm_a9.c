@@ -4834,7 +4834,7 @@ void CorpseRottingRotEntryFinishedHook(void) {  // 0xA9DC08
     QueueSfx2_Max3(0x10);
 }
 
-void InitializeCorpseRottingDataTable(uint16 *table, uint16 a) {  // 0xA9DC40
+void InitializeCorpseRottingDataTable(unaligned_uint16 *table, uint16 a) {  // 0xA9DC40
   int16 v2;
   v2 = a - 1;
   uint16 r18 = 0;
@@ -4858,12 +4858,12 @@ void InitializeEnemyCorpseRotting(uint16 k, uint16 j) {  // 0xA9DC5F
   uint16 v4 = GET_WORD(v2 + 12);
   E->dms_var_56 = v4;
   E->dms_var_5A = *((unaligned_uint16*)RomPtr_A9(v4) + 1) - 12;
-  uint16 *v5 = (uint16 *)v2;
+  const unaligned_uint16 *v5 = (const unaligned_uint16 *)v2;
   uint16 v6 = v5[4];
   E->dms_var_57 = v6--;
   E->dms_var_58 = v6;
   E->dms_var_59 = v6 - 1;
-  InitializeCorpseRottingDataTable((uint16*)(g_ram + *v5), v5[4]);
+  InitializeCorpseRottingDataTable((unaligned_uint16 *)(g_ram + *v5), v5[4]);
   CallCorpseRottingInit(v5[5] | 0xA90000);
 }
 
@@ -4874,9 +4874,9 @@ void ProcessCorpseRottingVramTransfers(uint16 k) {  // 0xA9DCB9
   do {
     VramWriteEntry *v3 = gVramWriteEntry(v1);
     v3->size = v2;
-    *(unaligned_uint16 *)((uint8 *)&v3->src.addr + 1) = *((uint16 *)p + 1);
-    v3->src.addr = *((uint16 *)p + 2);
-    v3->vram_dst = *((uint16 *)p + 3);
+    *(unaligned_uint16 *)((uint8 *)&v3->src.addr + 1) = *((unaligned_uint16 *)p + 1);
+    v3->src.addr = *((unaligned_uint16 *)p + 2);
+    v3->vram_dst = *((unaligned_uint16 *)p + 3);
     v1 += 7;
     p += 8;
     v2 = *(unaligned_uint16 *)p;

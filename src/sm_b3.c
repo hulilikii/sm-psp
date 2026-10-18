@@ -687,7 +687,7 @@ void Botwoon_Init(void) {  // 0xB39583
   Enemy_Botwoon *E = Get_Botwoon(cur_enemy_index);
   if ((boss_bits_for_area[4] & 2) != 0) {
     SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x0f, 0x04, 0xb797 });
-    *(uint16 *)scrolls = 257;
+    * (unaligned_uint16 *)scrolls = 257;
     E->base.current_instruction = addr_kBotwoon_Ilist_9389;
     E->base.properties |= kEnemyProps_Deleted;
   } else {
@@ -1057,8 +1057,8 @@ void Botwoon_Func_21(void) {  // 0xB39C48
 void Botwoon_Func_22(void) {  // 0xB39C7B
   Enemy_Botwoon *E = Get_Botwoon(cur_enemy_index);
   uint16 botwoon_var_B = E->botwoon_var_B;
-  *(uint16 *)((uint8 *)&kraid_unk9000 + botwoon_var_B) = E->base.x_pos;
-  *(uint16 *)((uint8 *)&g_word_7E9002 + botwoon_var_B) = E->base.y_pos;
+  * (unaligned_uint16 *)((uint8 *)&kraid_unk9000 + botwoon_var_B) = E->base.x_pos;
+  * (unaligned_uint16 *)((uint8 *)&g_word_7E9002 + botwoon_var_B) = E->base.y_pos;
 }
 
 void Botwoon_Func_23(void) {  // 0xB39C90
@@ -1088,8 +1088,8 @@ void Botwoon_Func_23(void) {  // 0xB39C90
       }
     }
     int v7 = botwoo_var_00 >> 1;
-    eproj_x_pos[v7] = *(uint16 *)((uint8 *)&kraid_unk9000 + r18);
-    eproj_y_pos[v7] = *(uint16 *)((uint8 *)&g_word_7E9002 + r18);
+    eproj_x_pos[v7] = * (unaligned_uint16 *)((uint8 *)&kraid_unk9000 + r18);
+    eproj_y_pos[v7] = * (unaligned_uint16 *)((uint8 *)&g_word_7E9002 + r18);
     r18 = (r18 - E->botwoon_var_C) & 0x3FF;
     n -= 2;
   } while ((n & 0x8000) == 0);

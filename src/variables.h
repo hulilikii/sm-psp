@@ -25,9 +25,9 @@ static inline void SetHiLo(void *hi_ptr, void *lo_ptr, uint32 t) {
 extern int32 *cur_coll_amt32;
 
 // Not used anymore
-#define REMOVED_R18 *(uint16*)(g_ram + 18)
-#define REMOVED_R20 *(uint16*)(g_ram + 20)
-#define REMOVED_R22 *(uint16*)(g_ram + 22)
+#define REMOVED_R18 * (unaligned_uint16 *)(g_ram + 18)
+#define REMOVED_R20 * (unaligned_uint16 *)(g_ram + 20)
+#define REMOVED_R22 * (unaligned_uint16 *)(g_ram + 22)
 
 #define reg_INIDISP (*(uint8*)(g_ram+0x51))
 #define reg_OBSEL (*(uint8*)(g_ram+0x52))
@@ -1138,8 +1138,8 @@ extern int32 *cur_coll_amt32;
 #define custom_background ((unaligned_uint16*)(g_ram+0x19602))
 #define kSramChecksum ((uint16*)(g_sram+0x0))
 #define kSramChecksumInverted ((uint16*)(g_sram+0x8))
-#define sram_save_slot_selected (*(uint16*)(g_sram+0x1FEC))
-#define sram_save_slot_selected_complement (*(uint16*)(g_sram+0x1FEE))
+#define sram_save_slot_selected (* (unaligned_uint16 *)(g_sram+0x1FEC))
+#define sram_save_slot_selected_complement (* (unaligned_uint16 *)(g_sram+0x1FEE))
 #define kSramChecksumUpper ((uint16*)(g_sram+0x1FF0))
 #define kSramChecksumInvertedUpper ((uint16*)(g_sram+0x1FF8))
 

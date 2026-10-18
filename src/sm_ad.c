@@ -386,7 +386,7 @@ uint8 MotherBrain_FadeFromGray_Drained(uint16 a) {  // 0xADEF0D
   WriteColorsToPalette(0x82, 0xad, j, 13);
   WriteColorsToPalette(0x122, 0xad, j, 13);
   WriteColorsToPalette(0x168, 0xad, j + 26, 5);
-  *(uint16 *)&g_ram[0x17C] = *(unaligned_uint16 *)RomPtr_AD(j + 36);
+  * (unaligned_uint16 *)&g_ram[0x17C] = *(unaligned_uint16 *)RomPtr_AD(j + 36);
   return 0;
 }
 
@@ -398,7 +398,7 @@ uint8 MotherBrain_FadeToGray_Drained(uint16 a) {  // 0xADEF4A
   WriteColorsToPalette(0x82, 0xad, j, 15);
   WriteColorsToPalette(0x122, 0xad, j, 15);
   WriteColorsToPalette(0x168, 0xad, j + 30, 5);
-  *(uint16 *)&g_ram[0x17C] = *(unaligned_uint16 *)RomPtr_AD(j + 40);
+  * (unaligned_uint16 *)&g_ram[0x17C] = *(unaligned_uint16 *)RomPtr_AD(j + 40);
   return 0;
 }
 
@@ -434,10 +434,10 @@ void EnableEarthquakeAframes(uint16 a) {  // 0xADF40B
 void HandleMotherBrainBodyFlickering(void) {  // 0xADF41C
   EnemyData *v0 = gEnemyData(0);
   if (v0->frame_counter & 1) {
-    *(uint16 *)&reg_TM |= 2;
+    * (unaligned_uint16 *)&reg_TM |= 2;
     v0->properties &= ~kEnemyProps_Invisible;
   } else {
-    *(uint16 *)&reg_TM &= ~2;
+    * (unaligned_uint16 *)&reg_TM &= ~2;
     v0->properties |= kEnemyProps_Invisible;
   }
 }

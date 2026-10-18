@@ -54,7 +54,7 @@ static void ClearMessageBoxBg3Tilemap(void) {  // 0x8581F3
   int16 v0;
   v0 = 1790;
   do {
-    *(uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + (uint16)v0) = 0xe;
+    * (unaligned_uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + (uint16)v0) = 0xe;
     v0 -= 2;
   } while (v0 >= 0);
   WriteRegWord(VMADDL, addr_unk_605880);
@@ -152,13 +152,13 @@ static void MsgBoxMakeHdmaTable(void) {
   } while (--r20);
   uint16 v2 = v1 * 2;
   do {
-    *(uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + v2) = 0;
+    * (unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + v2) = 0;
     v2 += 2;
   } while ((int16)(v2 - 480) < 0);
 }
 
 static void SetupMessageBoxBg3YscrollHdma(void) {  // 0x858363
-  *(uint32 *)&ram3000.menu.palette_backup_in_menu[64] = -516947713;
+  * (unaligned_uint32 *)&ram3000.menu.palette_backup_in_menu[64] = -516947713;
   ram3000.pause_menu_map_tilemap[450] = 12542;
   ram3000.msgbox.indirect_hdma[6] = 0;
   WriteReg(DMAP6, 0x42);
@@ -212,7 +212,7 @@ static void DrawSpecialButtonAndSetupPpuForLargeMessageBox(uint16 a) {
       }
     }
   }
-  *(uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[256] + kMsgBoxSpecialButtonTilemapOffs[message_box_index - 1]) = kTileNumbersForButtonLetters[v1 >> 1];
+  * (unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[256] + kMsgBoxSpecialButtonTilemapOffs[message_box_index - 1]) = kTileNumbersForButtonLetters[v1 >> 1];
   SetupPpuForActiveMessageBox(416);
 }
 

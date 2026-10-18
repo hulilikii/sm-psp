@@ -115,9 +115,9 @@ void StartSamusDeathAnimation(void) {  // 0x9BB3A7
   SamusFunc_F433();
   Samus_SetAnimationFrameIfPoseChanged();
   samus_last_different_pose = samus_prev_pose;
-  *(uint16 *)&samus_last_different_pose_x_dir = *(uint16 *)&samus_prev_pose_x_dir;
+  * (unaligned_uint16 *)&samus_last_different_pose_x_dir = * (unaligned_uint16 *)&samus_prev_pose_x_dir;
   samus_prev_pose = samus_pose;
-  *(uint16 *)&samus_prev_pose_x_dir = *(uint16 *)&samus_pose_x_dir;
+  * (unaligned_uint16 *)&samus_prev_pose_x_dir = * (unaligned_uint16 *)&samus_pose_x_dir;
   samus_anim_frame_skip = 0;
   samus_anim_frame = v1;
   samus_x_pos -= layer1_x_pos;

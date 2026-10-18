@@ -5293,19 +5293,19 @@ void CinematicFunction_Intro_Func127(void) {  // 0x8BE7BB
     v4 = v1;
     uint8 *v2 = RomPtr_RAM(v0);
     *(unaligned_uint16 *)v2 = v1;
-    *((uint16 *)v2 + 6) = 0;
-    *((uint16 *)v2 + 7) = 0;
+    *((unaligned_uint16 *)v2 + 6) = 0;
+    *((unaligned_uint16 *)v2 + 7) = 0;
     uint16 v3 = g_word_8BE9CF[((8 * v1) >> 1) + 3];
     if (v3) {
-      *((uint16 *)v2 + 5) = v3;
+      *((unaligned_uint16 *)v2 + 5) = v3;
       *(unaligned_uint16 *)v2 |= 0x8000;
     } else {
-      *((uint16 *)v2 + 5) = 32;
+      *((unaligned_uint16 *)v2 + 5) = 32;
     }
-    *((uint16 *)v2 + 1) = 128;
-    *((uint16 *)v2 + 3) = 128;
-    *((uint16 *)v2 + 2) = 0;
-    *((uint16 *)v2 + 4) = 0;
+    *((unaligned_uint16 *)v2 + 1) = 128;
+    *((unaligned_uint16 *)v2 + 3) = 128;
+    *((unaligned_uint16 *)v2 + 2) = 0;
+    *((unaligned_uint16 *)v2 + 4) = 0;
     v0 += 16;
     ++v1;
   } while ((int16)(v4 - 39) < 0);
@@ -5330,35 +5330,35 @@ void CinematicFunction_Intro_Func149(void) {  // 0x8BE812
       if (*(unaligned_int16 *)v3 < 0) {
         uint8 *v1 = v3;
         v2 = GET_WORD(v1 + 10) - 1;
-        *((uint16 *)v1 + 5) = v2;
+        *((unaligned_uint16 *)v1 + 5) = v2;
         if (v2 < 0) {
-          *((uint16 *)v1 + 5) = 32;
+          *((unaligned_uint16 *)v1 + 5) = 32;
           *(unaligned_uint16 *)v1 = *v1;
         }
       } else {
-        int v4 = (8 * (uint8) * (uint16 *)v3) >> 1;
+        int v4 = (8 * (uint8) * (unaligned_uint16 *)v3) >> 1;
         if (sign16((GET_WORD(v3) & 0xFF00) - 1024)) {
-          *((uint16 *)v3 + 6) += g_word_8BE9CF[v4];
+          *((unaligned_uint16 *)v3 + 6) += g_word_8BE9CF[v4];
           v5 = GET_WORD(v3 + 14);
         } else {
-          *((uint16 *)v3 + 6) += g_word_8BE9CF[v4] + g_word_8BE9CF[v4];
-          v5 = g_word_8BE9CF[v4 + 1] + *((uint16 *)v3 + 7);
+          *((unaligned_uint16 *)v3 + 6) += g_word_8BE9CF[v4] + g_word_8BE9CF[v4];
+          v5 = g_word_8BE9CF[v4 + 1] + *((unaligned_uint16 *)v3 + 7);
         }
-        *((uint16 *)v3 + 7) = g_word_8BE9CF[v4 + 1] + v5;
+        *((unaligned_uint16 *)v3 + 7) = g_word_8BE9CF[v4 + 1] + v5;
         uint16 v23 = GET_WORD(v3 + 12);
         uint16 r18 = (int8)HIBYTE(v23);
         uint16 r20 = (v23 << 8) & 0xFF00;
         v8 = GET_WORD(v3 + 4);
         bool v9 = __CFADD__uint16(r20, v8);
-        *((uint16 *)v3 + 2) = r20 + v8;
-        *((uint16 *)v3 + 1) += r18 + v9;
+        *((unaligned_uint16 *)v3 + 2) = r20 + v8;
+        *((unaligned_uint16 *)v3 + 1) += r18 + v9;
         uint16 v24 = GET_WORD(v3 + 14);
         r18 = (int8)HIBYTE(v24);
         r20 = (v24 << 8) & 0xFF00;
         v12 = GET_WORD(v3 + 8);
         v9 = __CFADD__uint16(r20, v12);
-        *((uint16 *)v3 + 4) = r20 + v12;
-        *((uint16 *)v3 + 3) += r18 + v9;
+        *((unaligned_uint16 *)v3 + 4) = r20 + v12;
+        *((unaligned_uint16 *)v3 + 3) += r18 + v9;
       }
       v0 += 16;
     } while (--n);
@@ -5375,21 +5375,21 @@ void CinematicFunction_Intro_Func149(void) {  // 0x8BE812
             || (v18 = gOamEnt(v13), *(unaligned_uint16 *)&v18->xcoord = v17 - 4, v19 = GET_WORD(v16 + 6), v16[7])
             || ((v19 - 4) & 0xFF00) != 0) {
           uint8 *v21 = v15;
-          *((uint16 *)v21 + 5) = 32;
-          *((uint16 *)v21 + 1) = 128;
-          *((uint16 *)v21 + 3) = 128;
-          *((uint16 *)v21 + 2) = 0;
-          *((uint16 *)v21 + 4) = 0;
-          *((uint16 *)v21 + 6) = 0;
-          *((uint16 *)v21 + 7) = 0;
+          *((unaligned_uint16 *)v21 + 5) = 32;
+          *((unaligned_uint16 *)v21 + 1) = 128;
+          *((unaligned_uint16 *)v21 + 3) = 128;
+          *((unaligned_uint16 *)v21 + 2) = 0;
+          *((unaligned_uint16 *)v21 + 4) = 0;
+          *((unaligned_uint16 *)v21 + 6) = 0;
+          *((unaligned_uint16 *)v21 + 7) = 0;
           *(unaligned_uint16 *)v21 = *v21;
         } else {
           *(unaligned_uint16 *)&v18->ycoord = v19 - 4;
           v20 = GET_WORD(v16 + 10) - 1;
-          *((uint16 *)v16 + 5) = v20;
+          *((unaligned_uint16 *)v16 + 5) = v20;
           if (v20 <= 0) {
             v22 = GET_WORD(v16);
-            *((uint16 *)v16 + 5) = g_word_8BE9CF[((8 * (uint8) * (uint16 *)v16) >> 1) + 2];
+            *((unaligned_uint16 *)v16 + 5) = g_word_8BE9CF[((8 * (uint8) * (unaligned_uint16 *)v16) >> 1) + 2];
             *(unaligned_uint16 *)v16 = v22 + 512;
           }
           if (v16[1]) {

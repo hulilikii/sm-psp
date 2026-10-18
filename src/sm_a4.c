@@ -384,9 +384,9 @@ void Crocomire_Init(void) {  // 0xA48A5A
     tilemap_stuff[v0 >> 1] = 824;
     v0 += 2;
   } while ((int16)(v0 - 4096) < 0);
-  if ((*(uint16 *)&boss_bits_for_area[area_index] & 2) != 0) {
-    *(uint16 *)scrolls = 257;
-    *(uint16 *)&scrolls[2] = 257;
+  if ((* (unaligned_uint16 *)&boss_bits_for_area[area_index] & 2) != 0) {
+    * (unaligned_uint16 *)scrolls = 257;
+    * (unaligned_uint16 *)&scrolls[2] = 257;
     croco_target_0688 = 0;
     Enemy_Crocomire *E = Get_Crocomire(0);
     E->base.properties = E->base.properties & 0x7BFF | 0x400;
@@ -404,7 +404,7 @@ void Crocomire_Init(void) {  // 0xA48A5A
     v7 = gVramWriteEntry(vram_write_queue_tail);
     v7->size = 2048;
     v7->src.addr = 0x2000;
-    *(uint16 *)&v7->src.bank = 126;
+    * (unaligned_uint16 *)&v7->src.bank = 126;
     v7->vram_dst = (reg_BG2SC & 0xFC) << 8;
     vram_write_queue_tail = v6 + 7;
   } else {
@@ -413,7 +413,7 @@ void Crocomire_Init(void) {  // 0xA48A5A
     Enemy_Crocomire *E = Get_Crocomire(cur_enemy_index);
     E->crocom_var_A = 0;
     E->crocom_var_E = 0;
-    *(uint16 *)scrolls = 0;
+    * (unaligned_uint16 *)scrolls = 0;
     for (int i = 32; i >= 0; i -= 2) {
       int v3 = i >> 1;
       target_palettes[v3 + 160] = g_word_A4B8BD[v3];
@@ -491,9 +491,9 @@ void Crocomire_Main(void) {
 
 void Crocomire_Func_28(void) {  // 0xA48C6E
   Crocomire_Func_37();
-  *(uint16 *)&scrolls[4] = 257;
+  * (unaligned_uint16 *)&scrolls[4] = 257;
   if (!sign16(samus_x_pos - 1312))
-    *(uint16 *)&scrolls[4] = 256;
+    * (unaligned_uint16 *)&scrolls[4] = 256;
   Crocomire_Func_27(cur_enemy_index);
 }
 
@@ -748,7 +748,7 @@ void Crocomire_Func_49(void) {  // 0xA49099
     QueueMusic_Delayed8(6);
     E->crocom_var_A = 88;
     E->base.current_instruction = addr_kCrocomire_Ilist_E1D2;
-    *(uint16 *)&scrolls[4] = 257;
+    * (unaligned_uint16 *)&scrolls[4] = 257;
     debug_disable_minimap = 0;
     Get_Crocomire(0x40)->base.properties |= 0x200;
     SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x4e, 0x03, 0xb753 });
@@ -987,7 +987,7 @@ void Crocomire_93BE(uint16 k) {  // 0xA493BE
   v3 = gVramWriteEntry(vram_write_queue_tail);
   v3->size = k;
   v3->src.addr = 0x2000;
-  *(uint16 *)&v3->src.bank = 126;
+  * (unaligned_uint16 *)&v3->src.bank = 126;
   v3->vram_dst = (reg_BG2SC & 0xFC) << 8;
   vram_write_queue_tail = v2 + 7;
 }
@@ -1044,14 +1044,14 @@ void Crocomire_Func_60(void) {  // 0xA4943D
     uint16 v3 = *(unaligned_uint16 *)((uint8 *)&g_word_A49BC7 + i);
     int n = g_word_7E068E;
     do {
-      *(uint16 *)&g_ram[v3] = GET_WORD(RomPtrWithBank(bank, v2));
+      * (unaligned_uint16 *)&g_ram[v3] = GET_WORD(RomPtrWithBank(bank, v2));
       v3 += 2, v2 += 2;
     } while (--n >= 0);
   }
   croco_word_7E069A = i + 2;
   g_word_7E068A = i + 2;
   for (int j = 128; j >= 0; j -= 2)
-    *(uint16 *)&croco_vline_height[(uint16)j] = 0;
+    * (unaligned_uint16 *)&croco_vline_height[(uint16)j] = 0;
 }
 
 void Crocomire_Func_61(void) {  // 0xA494B2
@@ -1104,11 +1104,11 @@ void Crocomire_950F(void) {  // 0xA4950F
   ++E->crocom_var_A;
   v4 = Get_Crocomire(0);
   Get_Crocomire(0x80)->crocom_var_D = v4->base.x_pos;
-  *(uint16 *)crocomire_bg2_scroll_hdma_indirect = 255;
+  * (unaligned_uint16 *)crocomire_bg2_scroll_hdma_indirect = 255;
   *(unaligned_uint16 *)&crocomire_bg2_scroll_hdma_indirect[1] = -13584;
   *(unaligned_uint16 *)&crocomire_bg2_scroll_hdma_indirect[3] = 225;
-  *(uint16 *)&crocomire_bg2_scroll_hdma_indirect[4] = -13330;
-  *(uint16 *)&crocomire_bg2_scroll_hdma_indirect[6] = 0;
+  * (unaligned_uint16 *)&crocomire_bg2_scroll_hdma_indirect[4] = -13330;
+  * (unaligned_uint16 *)&crocomire_bg2_scroll_hdma_indirect[6] = 0;
   v4->crocom_var_1F = SpawnHdmaObject(0xa4, &unk_A49559);
 }
 
@@ -1139,7 +1139,7 @@ void Crocomire_Func_65(void) {  // 0xA49580
 LABEL_4:;
       Enemy_Crocomire *EK = Get_Crocomire(cur_enemy_index);
       EK->crocom_var_A += 2;
-      for (i = croco_word_7E069A; *(uint16 *)((uint8 *)&g_word_A49BC5 + i) != 0xFFFF; i += 8)
+      for (i = croco_word_7E069A; * (unaligned_uint16 *)((uint8 *)&g_word_A49BC5 + i) != 0xFFFF; i += 8)
         ;
       croco_word_7E069A = i + 2;
       hdma_object_channels_bitmask[E0->crocom_var_1F >> 1] = 0;
@@ -1187,7 +1187,7 @@ void Crocomire_Func_66(void) {  // 0xA49653
   v3 = gVramWriteEntry(vram_write_queue_tail);
   v3->size = 2048;
   v3->src.addr = 0x2000;
-  *(uint16 *)&v3->src.bank = 126;
+  * (unaligned_uint16 *)&v3->src.bank = 126;
   v3->vram_dst = (reg_BG2SC & 0xFE) << 8;
   vram_write_queue_tail = v2 + 7;
   Crocomire_9BB3();
@@ -1335,7 +1335,7 @@ void Crocomire_Func_71(void) {  // 0xA4990A
       v6 = gVramWriteEntry(vram_write_queue_tail);
       v6->size = 512;
       v6->src.addr = g_word_A499D9[v4];
-      *(uint16 *)&v6->src.bank = 173;
+      * (unaligned_uint16 *)&v6->src.bank = 173;
       v6->vram_dst = g_word_A499CB[v4] + ((reg_OBSEL & 7) << 13);
       vram_write_queue_tail = v5 + 7;
       croco_target_0688 = v3 + 2;
@@ -1481,8 +1481,8 @@ void Crocomire_Func_88(void) {  // 0xA49B06
 }
 
 void Crocomire_9B65(void) {  // 0xA49B65
-  *(uint16 *)scrolls = 257;
-  *(uint16 *)&scrolls[2] = 257;
+  * (unaligned_uint16 *)scrolls = 257;
+  * (unaligned_uint16 *)&scrolls[2] = 257;
   SpawnHardcodedPlm((SpawnHardcodedPlmArgs) { 0x1e, 0x03, 0xb753 });
   Crocomire_9BB3();
 }
@@ -1500,7 +1500,7 @@ void Crocomire_Func_90(void) {  // 0xA49B7D
 void Crocomire_9B86(void) {  // 0xA49B86
   QueueMusic_Delayed8(6);
   camera_distance_index = 0;
-  *(uint16 *)&boss_bits_for_area[area_index] |= 2;
+  * (unaligned_uint16 *)&boss_bits_for_area[area_index] |= 2;
   QueueMusic_Delayed8(6);
   Crocomire_Func_87(0, 0xFFF0);
   Crocomire_Func_87(0, 0x10);
@@ -1630,7 +1630,7 @@ void Crocomire_Func_1(void) {  // 0xA4BAB4
 
 void CrocomireTongue_Init(void) {  // 0xA4F67A
   Enemy_Crocomire *E = Get_Crocomire(cur_enemy_index);
-  if ((*(uint16 *)&boss_bits_for_area[area_index] & 2) != 0) {
+  if ((* (unaligned_uint16 *)&boss_bits_for_area[area_index] & 2) != 0) {
     E->base.properties = E->base.properties & 0xDCFF | 0x300;
   } else {
     E->base.current_instruction = addr_kCrocomire_Ilist_BE56;
