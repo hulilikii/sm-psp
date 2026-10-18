@@ -43,13 +43,33 @@ static struct RendererFuncs g_renderer_funcs;
 #if PSP_AUDIO_ENABLED
 static SceUID g_audio_sema = -1;
 #endif
-static bool g_running = true;
+static volatile bool g_running = true;
 static bool g_turbo;
 static uint8 g_replay_turbo = true;
 static int g_ppu_render_flags;
 static int g_snes_width = 256;
 static int g_snes_height = 240;
 static uint32_t g_frame_ctr;
+
+static int ExitCallback(int arg1, int arg2, void *common) {
+  (void)arg1; (void)arg2; (void)common;
+  g_running = false;
+  return 0;
+}
+
+static int CallbackThread(SceSize args, void *argp) {
+  (void)args; (void)argp;
+  int cb = sceKernelCreateCallback("exit_cb", ExitCallback, NULL);
+  sceKernelRegisterExitCallback(cb);
+  sceKernelSleepThreadCB();
+  return 0;
+}
+
+static void SetupExitCallback(void) {
+  int thid = sceKernelCreateThread("exit_thread", CallbackThread, 0x11, 0xFA0, 0, NULL);
+  if (thid >= 0)
+    sceKernelStartThread(thid, 0, NULL);
+}
 
 void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
@@ -176,6 +196,7 @@ static void SetupFilesystem(const char *argv0) {
 int main(int argc, char **argv) {
   (void)argc;
   
+  SetupExitCallback();
   SetupFilesystem(argv[0]);
   PspInput_Init();
   ParseConfigFile(NULL);
