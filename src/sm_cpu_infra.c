@@ -1215,7 +1215,9 @@ again_theirs:
 #ifdef PSP_PROFILE
     profile_stage_start = sceKernelGetSystemTimeLow();
 #endif
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_CPU);
     RunOneFrameOfGame_Emulated();
+    PspRenderer_SetPpuWritePhase(PSP_PPU_PHASE_OTHER);
 #ifdef PSP_PROFILE
     profile_emulated_us +=
         sceKernelGetSystemTimeLow() - profile_stage_start;
