@@ -90,36 +90,28 @@ static PspPpuCapture g_ppu_capture[PSP_CAPTURE_PPU_COUNT];
 #ifdef PSP_PROFILE
 static uint8_t g_history_probe_logged[PSP_CAPTURE_PPU_COUNT][4];
 static void PspRenderer_LogHistoryProbe(Ppu *ppu, int line);
-static uint32_t g_capture_status_frame;
-
-static void PspRenderer_LogCaptureStatus(void) {
-  if (++g_capture_status_frame % 60 != 0)
+static void PspRenderer_LogCaptureStatus(PspPpuCapture *capture) {
+  if (capture->frame == 0 || capture->frame % 60 != 59)
     return;
 
-  for (int i = 0; i < PSP_CAPTURE_PPU_COUNT; ++i) {
-    PspPpuCapture *capture = &g_ppu_capture[i];
-    if (capture->ppu == NULL)
-      continue;
-
-    char message[224];
-    snprintf(message, sizeof(message),
-             "ppu_timing ppu=%d frame=%u callbacks=%u "
-             "writes=%u line_mismatches=%u vblank_writes=%u "
-             "first=%d:%d:%d last=%d:%d:%d",
-             capture->ppu == capture->ppu->snes->my_ppu ? 1 : 0,
-             (unsigned int)capture->frame,
-             (unsigned int)capture->scanlineCallbacks,
-             (unsigned int)capture->timingWriteCount,
-             (unsigned int)capture->timingLineMismatchCount,
-             (unsigned int)capture->timingVblankWriteCount,
-             capture->timingFirstActiveLine,
-             capture->timingFirstVPos,
-             capture->timingFirstHPos,
-             capture->timingLastActiveLine,
-             capture->timingLastVPos,
-             capture->timingLastHPos);
-    PspProfileLog(message);
-  }
+  char message[224];
+  snprintf(message, sizeof(message),
+           "ppu_timing ppu=%d frame=%u callbacks=%u "
+           "writes=%u line_mismatches=%u vblank_writes=%u "
+           "first=%d:%d:%d last=%d:%d:%d",
+           capture->ppu == capture->ppu->snes->my_ppu ? 1 : 0,
+           (unsigned int)capture->frame,
+           (unsigned int)capture->scanlineCallbacks,
+           (unsigned int)capture->timingWriteCount,
+           (unsigned int)capture->timingLineMismatchCount,
+           (unsigned int)capture->timingVblankWriteCount,
+           capture->timingFirstActiveLine,
+           capture->timingFirstVPos,
+           capture->timingFirstHPos,
+           capture->timingLastActiveLine,
+           capture->timingLastVPos,
+           capture->timingLastHPos);
+  PspProfileLog(message);
 }
 #endif
 
@@ -491,9 +483,6 @@ static uint32_t PspRenderer_HashWords(const uint16_t *src, int count) {
 void PspRenderer_BeginPpuFrame(Ppu *ppu) {
   g_tile_ppu = ppu;
 
-#ifdef PSP_PROFILE
-  PspRenderer_LogCaptureStatus();
-#endif
 
   if (++g_frame_stamp == 0) {
     memset(g_seen4, 0, sizeof(g_seen4));
@@ -528,6 +517,13 @@ void PspRenderer_OnPpuScanline(Ppu *ppu, int line) {
      * This includes writes from the entire frame, including late lines.
      */
     PspRenderer_ValidatePpuJournal(capture);
+#endif
+
+#ifdef PSP_PROFILE
+    /*
+     * Log the previous frame before its timing counters are reset below.
+     */
+    PspRenderer_LogCaptureStatus(capture);
 #endif
 
     if (++capture->frame == 0)
