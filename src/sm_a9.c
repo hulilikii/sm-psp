@@ -4750,7 +4750,7 @@ void DeadSkree_Rotting(uint16 k) {  // 0xA9DAFC
 }
 
 uint8 ProcessCorpseRotting(uint16 k) {  // 0xA9DB12
-  unaligned_int16 *v5;
+  int16 *v5;
   int16 v7;
   int16 v8;
 
@@ -4767,11 +4767,11 @@ uint8 ProcessCorpseRotting(uint16 k) {  // 0xA9DB12
   uint16 dms_var_52 = EK->dms_var_52;
   uint16 v4 = 0;
   uint16 v15;
-  unaligned_uint16 *v6;
+  uint16 *v6;
   while (1) {
     v15 = v4;
-    v5 = (unaligned_int16 *)(g_ram + dms_var_52);
-    v6 = (unaligned_uint16 *)v5;
+    v5 = (int16 *)(g_ram + dms_var_52);
+    v6 = (uint16 *)v5;
     if (*v5 >= 0)
       break;
 LABEL_12:
@@ -4798,7 +4798,7 @@ LABEL_12:
   Enemy_DeadMonsters *E = Get_DeadMonsters(0);
   uint16 r18 = E->dms_var_43;
 
-  unaligned_uint16 *v11 = (unaligned_uint16 *)(g_ram + dms_var_52);
+  uint16 *v11 = (uint16 *)(g_ram + dms_var_52);
   CopyMoveCorpseRottingRotEntry((unaligned_uint16*)RomPtr_A9(E->dms_var_44), *v11, r18);
   uint16 v12 = *v11 + 2;
   if (v12 < E->dms_var_46) {
@@ -4813,7 +4813,7 @@ LABEL_12:
   return 0;
 }
 
-void CopyMoveCorpseRottingRotEntry(const unaligned_uint16 *r20, uint16 a, uint16 r18) {  // 0xA9DBE0
+void CopyMoveCorpseRottingRotEntry(const uint16 *r20, uint16 a, uint16 r18) {  // 0xA9DBE0
   Enemy_DeadMonsters *E = Get_DeadMonsters(0);
   E->dms_var_41 = a;
   uint16 v1 = (uint16)(a & 0xFFF8) >> 2;
