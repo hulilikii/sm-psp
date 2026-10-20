@@ -1688,7 +1688,7 @@ void DrawRoomSelectMap(void) {  // 0x829517
 }
 
 void DrawRoomSelectMapAreaLabel(uint16 *dst) {  // 0x829628
-  unaligned_uint16 *v2 = (unaligned_uint16 * )RomPtr_82(kPauseAreaLabelTilemap[area_index]);
+  const unaligned_uint16 *v2 = (const unaligned_uint16 * )RomPtr_82(kPauseAreaLabelTilemap[area_index]);
   for(int i = 0; i < 12; i++)
     dst[i] = v2[i] & 0xEFFF;
 }

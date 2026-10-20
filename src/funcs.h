@@ -3560,7 +3560,7 @@ uint8 Shitroid_CheckIfOnScreen(uint16 k);
 uint8 Shitroid_Func_1(uint16 k, uint16 j);
 uint8 Shitroid_Func_2(uint16 k, Rect16U rect);
 uint8 Shitroid_Func_27(uint16 k);
-void CopyMoveCorpseRottingRotEntry(const uint16 *r20, uint16 a, uint16 r18);
+void CopyMoveCorpseRottingRotEntry(const unaligned_uint16 *r20, uint16 a, uint16 r18);
 void CorpseRottingRotEntryFinishedHook(void);
 void DeadMonsters_Func_1(uint16 k);
 void DeadMonsters_Func_2(uint16 k);
