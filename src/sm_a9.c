@@ -4798,7 +4798,7 @@ LABEL_12:
   Enemy_DeadMonsters *E = Get_DeadMonsters(0);
   uint16 r18 = E->dms_var_43;
 
-  uint16 *v11 = (unaligned_uint16 *)(g_ram + dms_var_52);
+  unaligned_uint16 *v11 = (unaligned_uint16 *)(g_ram + dms_var_52);
   CopyMoveCorpseRottingRotEntry((unaligned_uint16*)RomPtr_A9(E->dms_var_44), *v11, r18);
   uint16 v12 = *v11 + 2;
   if (v12 < E->dms_var_46) {

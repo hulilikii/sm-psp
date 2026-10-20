@@ -3611,7 +3611,7 @@ void Ridley_Func_92(void) {  // 0xA6D2D6
 }
 
 void Ridley_Func_93(uint16 j, uint16 k) {  // 0xA6D3B4
-  uint16 *dst = (uint16*)(g_ram + j);
+  unaligned_uint16 *dst = (unaligned_uint16 *)(g_ram + j);
   const unaligned_uint16 *src = (const unaligned_uint16 *)RomPtr_A6(k);
   int v3 = 7;
   do {

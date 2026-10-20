@@ -2097,7 +2097,7 @@ void UpdateLevelOrBackgroundDataColumn(uint16 k) {  // 0x80A9DE
   uint16 v2 = 2 * (prod + v1) + 2;
   if (k)
     v2 += 0x9600;
-  const uint16 *r54 = (const uint16 * )(g_ram + 0x10000 + v2);
+  const unaligned_uint16 *r54 = (const unaligned_uint16 *)(g_ram + 0x10000 + v2);
   uint16 v3 = (4 * vram_blocks_to_update_y_block) & 0x3C;
   *(unaligned_uint16 *)((uint8 *)&bg1_update_col_wrapped_size + k) = v3;
   *(unaligned_uint16 *)((uint8 *)&bg1_update_col_unwrapped_size + k) = (v3 ^ 0x3F) + 1;
@@ -2185,7 +2185,7 @@ void UpdateLevelOrBackgroundDataRow(uint16 v0) {  // 0x80AB78
   uint16 v2 = 2 * (prod + v1) + 2;
   if (v0)
     v2 -= 27136;
-  const uint16 *r54 = (const uint16 *)(g_ram + 0x10000 + v2);
+  const unaligned_uint16 *r54 = (const unaligned_uint16 *)(g_ram + 0x10000 + v2);
   uint16 var933 = vram_blocks_to_update_x_block & 0xF;
   *(unaligned_uint16 *)((uint8 *)&bg1_update_row_unwrapped_size + v0) = 4 * (16 - var933);
   *(unaligned_uint16 *)((uint8 *)&bg1_update_row_wrapped_size + v0) = 4 * (var933 + 1);

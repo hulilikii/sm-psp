@@ -1860,7 +1860,7 @@ void ResetPauseMenuAnimations(void) {  // 0x82A0F7
   pausemenu_palette_animation_frame = 0;
 }
 
-static void ChangePaletteValues(uint16 *target, uint16 new_color, size_t n) {  // 0x82A29D
+static void ChangePaletteValues(unaligned_uint16 *target, uint16 new_color, size_t n) {  // 0x82A29D
   for (size_t i = 0; i != n; i++)
     target[i] = target[i] & ~0x1C00 | new_color;
 }
@@ -1876,7 +1876,7 @@ void LoadEquipmentScreenEquipmentTilemaps(void) {  // 0x82A12B
       memcpy(g_ram + p[i], RomPtr_82(kHyperBeamWeaponsTilemaps[i]), 10);
   } else {
     for (int i = 0; i < 6; i++) {
-      uint16 *target = (uint16 *)(g_ram + p[i]);
+      unaligned_uint16 *target = (unaligned_uint16 *)(g_ram + p[i]);
       if ((collected_beams & kEquipmentBitmasks_Weapons[i]) != 0) {
         memcpy(target, RomPtr_82(kEquipmentTilemaps_Weapons[i]), 10);
         if ((equipped_beams & kEquipmentBitmasks_Weapons[i]) == 0)
@@ -1889,7 +1889,7 @@ void LoadEquipmentScreenEquipmentTilemaps(void) {  // 0x82A12B
 
   p = (unaligned_uint16*)RomPtr_82(addr_kEquipmentTilemapOffs_Suits);
   for(int i = 0; i < 6; i++) {
-    uint16 *target = (uint16*)(g_ram + p[i]);
+    unaligned_uint16 *target = (unaligned_uint16 *)(g_ram + p[i]);
     if ((collected_items & kEquipmentBitmasks_Suits[i]) != 0) {
       memcpy(target, RomPtr_82(kEquipmentTilemaps_Suits[i]), 18);
       if ((equipped_items & kEquipmentBitmasks_Suits[i]) == 0)
@@ -1901,7 +1901,7 @@ void LoadEquipmentScreenEquipmentTilemaps(void) {  // 0x82A12B
   
   p = (unaligned_uint16*)RomPtr_82(addr_kEquipmentTilemapOffs_Boots);
   for (int i = 0; i < 3; i++) {
-    uint16 *target = (uint16*)(g_ram + p[i]);
+    unaligned_uint16 *target = (unaligned_uint16 *)(g_ram + p[i]);
     if ((collected_items & kEquipmentBitmasks_Boots[i]) != 0) {
       memcpy(target, RomPtr_82(kEquipmentTilemaps_Boots[i]), 18);
       if ((equipped_items & kEquipmentBitmasks_Boots[i]) == 0)
@@ -2666,11 +2666,11 @@ void EquipmentScreenCategory_Weapons_PlazmaSpazerCheck(uint16 R36) {  // 0x82B06
   if ((t & 4) != 0) {
     if ((R36 & 4) == 0 && (equipped_beams & 8) != 0) {
       equipped_beams &= ~8;
-      ChangePaletteValues((uint16 *)(g_ram + kEquipmentTilemapOffs_Weapons[4]), 3072, 5);
+      ChangePaletteValues((unaligned_uint16 *)(g_ram + kEquipmentTilemapOffs_Weapons[4]), 3072, 5);
     }
   } else if ((t & 8) != 0 && (R36 & 8) == 0 && (equipped_beams & 4) != 0) {
     equipped_beams &= ~4;
-    ChangePaletteValues((uint16 *)(g_ram + kEquipmentTilemapOffs_Weapons[3]), 3072, 5);
+    ChangePaletteValues((unaligned_uint16 *)(g_ram + kEquipmentTilemapOffs_Weapons[3]), 3072, 5);
   }
 }
 
@@ -2953,7 +2953,7 @@ void EquipmentScreenCategory_ButtonResponse(uint16 r24) {  // 0x82B568
     uint16 mask = *(unaligned_uint16 *)RomPtr_82(kEquipmentPtrsToBitmasks[category] + item * 2);
     if ((*var & mask) != 0) {
       *var &= ~mask;
-      ChangePaletteValues((uint16*)target, 0xc00, r24 >> 1);
+      ChangePaletteValues((unaligned_uint16 *)target, 0xc00, r24 >> 1);
     } else {
       *var |= mask;
       uint16 src = *(unaligned_uint16 *)RomPtr_82(kEquipmentPtrsToEquipmentTilemaps[category] + item * 2);

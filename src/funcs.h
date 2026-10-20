@@ -1501,7 +1501,7 @@ uint8 SomeMotherBrainScripts_3_EnableHyperBeam(void);
 uint8 SomeMotherBrainScripts_4(void);
 uint8 Xray_Initialize(void);
 uint8 nullsub_164(void);
-void CalculateXrayHdmaTableInner(uint16 k, uint16 j, uint16 r18, uint16 r20, bool off_screen, uint16 *dest_addr);
+void CalculateXrayHdmaTableInner(uint16 k, uint16 j, uint16 r18, uint16 r20, bool off_screen, unaligned_uint16 *dest_addr);
 void CopyToSamusSuitPalette(uint16 k);
 void CopyToSamusSuitTargetPalette(uint16 k);
 void DemoObjectInputHandler(void);

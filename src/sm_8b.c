@@ -1556,7 +1556,7 @@ void CreditsObject_ProcessOne(void) {  // 0x8B996A
 void CreditsObject_Func1(uint16 j) {  // 0x8B99C1
   uint16 RegWord = Mult8x8(cinematic_var26, 0x40);
   int n = 31;
-  const uint16 *src = (const uint16*)(g_ram + 0x10000 + *((unaligned_uint16*)RomPtr_8C(j) + 1));
+  const unaligned_uint16 *src = (const unaligned_uint16 *)(g_ram + 0x10000 + *((unaligned_uint16 *)RomPtr_8C(j) + 1));
   do {
     *(unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + RegWord) = *src++;
     RegWord += 2;

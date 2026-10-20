@@ -815,7 +815,7 @@ void DrawPlm(uint16 k) {  // 0x848DAA
   uint16 y = plm_y_block;
   uint16 r3;
   //LongPtr r0, r6;
-  uint16 *r0, *r6;
+  unaligned_uint16 *r0, *r6;
 LABEL_2:
   r26 = layer1_y_pos >> 4;
   if (sign16((layer1_y_pos >> 4) + 15 - y))
@@ -853,8 +853,8 @@ LABEL_2:
             CalculatePlmDrawTilemapVramDst(vram_write_queue_tail, r9, r12, r20, r24, r26, 0x8000);
             v25 = gVramWriteEntry(v24);
             v25[1].vram_dst = v25[0].vram_dst + 1;
-            r0 = (uint16 *)(g_ram + v25[0].src.addr);
-            r6 = (uint16 *)(g_ram + v25[1].src.addr);
+            r0 = (unaligned_uint16 *)(g_ram + v25[0].src.addr);
+            r6 = (unaligned_uint16 *)(g_ram + v25[1].src.addr);
             vram_write_queue_tail = v24 + 14;
             r18 *= 2;
             r3 = r18 + v1 + 2;
@@ -975,12 +975,12 @@ LABEL_70:
             v10[3].size = v11;
             v12 = plm_draw_tilemap_index - 14648;
             v10->src.addr = plm_draw_tilemap_index - 14648;
-            r0 = (uint16 *)(g_ram + v12);
+            r0 = (unaligned_uint16 *)(g_ram + v12);
             v13 = v10->size + v12;
             v10[1].src.addr = v13;
             uint16 v14 = v10[1].size + v13;
             v10[2].src.addr = v14;
-            r6 = (uint16 *)(g_ram + v14);
+            r6 = (unaligned_uint16 *)(g_ram + v14);
             v10[3].src.addr = v10[2].size + v14;
             v10->src.bank = 126;
             v10[1].src.bank = 126;
@@ -991,8 +991,8 @@ LABEL_70:
             PartiallyQueueVramForSingleScreenPlm(a, v3, r20, 0);
             v15 = gVramWriteEntry(v3);
             v15[1].vram_dst = v15[0].vram_dst + 32;
-            r0 = (uint16 *)(g_ram + v15[0].src.addr);
-            r6 = (uint16 *)(g_ram + v15[1].src.addr);
+            r0 = (unaligned_uint16 *)(g_ram + v15[0].src.addr);
+            r6 = (unaligned_uint16 *)(g_ram + v15[1].src.addr);
             vram_write_queue_tail = v3 + 14;
           }
           r18 *= 2;

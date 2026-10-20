@@ -181,7 +181,7 @@ typedef struct AnimtilesDef {
 } AnimtilesDef;
 
 /* 15 */
-typedef struct HdmaScrollEntry {
+typedef struct __attribute__((packed, aligned(1))) HdmaScrollEntry {
   uint16 top_pos;
   uint16 scroll_subspeed;
   uint16 scroll_speed;

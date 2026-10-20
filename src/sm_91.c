@@ -636,22 +636,22 @@ typedef struct XrayHdmaCtx {
   uint16 r30;
   uint16 r32;
   uint16 r18_avoid;
-  uint16 *dest;
+  unaligned_uint16 *dest;
 } XrayHdmaCtx;
 
-static void XrayFillUp(uint16 *dest, uint16 fill_with, uint16 v1) {
+static void XrayFillUp(unaligned_uint16 *dest, uint16 fill_with, uint16 v1) {
   do {
     dest[v1 >> 1] = fill_with;
   } while (!sign16(v1 -= 2));
 }
 
-static void XrayFillDown(uint16 *dest, uint16 fill_with, uint16 v1) {
+static void XrayFillDown(unaligned_uint16 *dest, uint16 fill_with, uint16 v1) {
   do {
     dest[v1 >> 1] = fill_with;
   } while ((v1 += 2) < 460);
 }
 
-static void XrayFillUpRamped(uint16 *dest, int pos, uint32 left, uint32 left_step, uint32 right, uint32 right_step, int adjust) {
+static void XrayFillUpRamped(unaligned_uint16 *dest, int pos, uint32 left, uint32 left_step, uint32 right, uint32 right_step, int adjust) {
   do {
     left += left_step;
     right += right_step;
@@ -669,7 +669,7 @@ static void XrayFillUpRamped(uint16 *dest, int pos, uint32 left, uint32 left_ste
   } while ((pos -= 2) >= 0);
 }
 
-static void XrayFillDownRamped(uint16 *dest, int pos, uint32 left, uint32 left_step, uint32 right, uint32 right_step, int adjust) {
+static void XrayFillDownRamped(unaligned_uint16 *dest, int pos, uint32 left, uint32 left_step, uint32 right, uint32 right_step, int adjust) {
   do {
     left += left_step;
     right += right_step;
@@ -790,10 +790,10 @@ static void XrayHdmaOnScreen_BeamHoriz(XrayHdmaCtx *ctx) {  // 0x91C998
   XrayFillDown(ctx->dest, 0xff, v0 + 2);
 }
 
-void CalculateXrayHdmaTableInner(uint16 k, uint16 j, uint16 r18, uint16 r20, bool off_screen, uint16 *dest_addr) {
+void CalculateXrayHdmaTableInner(uint16 k, uint16 j, uint16 r18, uint16 r20, bool off_screen, unaligned_uint16 *dest_addr) {
   int v3;
   XrayHdmaCtx ctx[1];
-  ctx->dest = (uint16*)dest_addr;
+  ctx->dest = dest_addr;
   ctx->r18_avoid = r18;
   ctx->r22 = k << 8;
   ctx->r24 = j;
@@ -998,7 +998,7 @@ void Xray_SetupStage4_Func2(uint16 dst_r22, uint16 r34) {  // 0x91CD42
   if (r34 == 0)
     return;
   const uint8 *jp = Xray_GetXrayedBlock(r34 - 1);
-  uint16 *dst = (uint16 *)((uint8 *)ram4000.xray_tilemaps + dst_r22);
+  unaligned_uint16 *dst = (unaligned_uint16 *)((uint8 *)ram4000.xray_tilemaps + dst_r22);
 
   if (jp == NULL)
     return;

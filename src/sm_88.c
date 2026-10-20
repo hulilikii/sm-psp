@@ -422,7 +422,7 @@ void InitializeSpecialEffectsForNewRoom(void) {  // 0x8882C1
   gameplay_BG3SC = 90;
 }
 
-static uint16 SpawnHdmaObjectInner(uint16 k, uint16 *p, uint16 r18, uint16 r20, uint16 r24) {  // 0x888477
+static uint16 SpawnHdmaObjectInner(uint16 k, const unaligned_uint16 *p, uint16 r18, uint16 r20, uint16 r24) {  // 0x888477
   int v2 = k >> 1;
   hdma_object_pre_instructions[v2] = FUNC16(nullsub_293);
   hdma_object_pre_instruction_bank[v2] = 136;
@@ -444,7 +444,7 @@ uint16 SpawnHdmaObject(uint8 db, const void *p) {  // 0x888435
   uint16 v3 = 0;
   for (;;) {
     if (!hdma_object_channels_bitmask[v3 >> 1])
-      return SpawnHdmaObjectInner(v3, (uint16 *)p, r18, r20, db << 8);
+      return SpawnHdmaObjectInner(v3, (const unaligned_uint16 *)p, r18, r20, db << 8);
     bool v4 = r18 >> 15;
     r18 *= 2;
     if (v4)
@@ -457,7 +457,7 @@ uint16 SpawnHdmaObject(uint8 db, const void *p) {  // 0x888435
 }
 
 void SpawnHdmaObjectToSlot0xA(uint8 db, const void *p) {  // 0x88840A
-  SpawnHdmaObjectInner(0xa, (uint16 *)p, 0x8000, 0x70, db << 8);
+  SpawnHdmaObjectInner(0xa, (const unaligned_uint16 *)p, 0x8000, 0x70, db << 8);
 }
 
 void HdmaObjectHandler(void) {  // 0x8884B9
@@ -744,12 +744,12 @@ void CalculateXrayHdmaTable(void) {  // 0x888896
   if (v0 < 0) {
     if (samus_pose_x_dir != 4) {
 off_screen:
-      CalculateXrayHdmaTableInner(v0, v1, xray_angle, demo_input, true, (uint16*)(g_ram + 0x9800));
+      CalculateXrayHdmaTableInner(v0, v1, xray_angle, demo_input, true, (unaligned_uint16 *)(g_ram + 0x9800));
       return;
     }
   } else {
     if ((int16)(v0 - 256) < 0) {
-      CalculateXrayHdmaTableInner(v0, v1, xray_angle, demo_input, false, (uint16 *)(g_ram + 0x9800));
+      CalculateXrayHdmaTableInner(v0, v1, xray_angle, demo_input, false, (unaligned_uint16 *)(g_ram + 0x9800));
       return;
     }
     if (samus_pose_x_dir != 8)
@@ -1651,7 +1651,7 @@ void HdmaobjPreInstr_SkyLandBG2XscrollInner(uint16 k) {  // 0x88ADC2
   reg_BG2SC = 74;
   uint16 v1 = 0;
   do {
-    uint16 *v3 = (uint16 *)&g_ram[kHdmaScrollEntrys[v1].hdma_data_table_entry];
+    unaligned_uint16 *v3 = (unaligned_uint16 *)&g_ram[kHdmaScrollEntrys[v1].hdma_data_table_entry];
     AddToHiLo(&v3[1], &v3[0], __PAIR32__(kHdmaScrollEntrys[v1].scroll_speed, kHdmaScrollEntrys[v1].scroll_subspeed));
     v1++;
   } while (sign16(v1 * 8 - 184));
@@ -3045,9 +3045,9 @@ void sub_88E987(uint16 v0) {  // 0x88E987
   uint16 v1 = enemy_data[1].y_pos - layer1_y_pos;
   uint16 v2 = enemy_data[1].x_pos - layer1_x_pos;
   if ((int16)(enemy_data[1].x_pos - layer1_x_pos) >= 0 && sign16(enemy_data[1].x_pos - layer1_x_pos - 256)) {
-    CalculateXrayHdmaTableInner(v2, v1, r18, r20, false, &g_word_7E9100);
+    CalculateXrayHdmaTableInner(v2, v1, r18, r20, false, (unaligned_uint16 *)&g_word_7E9100);
   } else {
-    CalculateXrayHdmaTableInner(v2, v1, r18, r20, true, &g_word_7E9100);
+    CalculateXrayHdmaTableInner(v2, v1, r18, r20, true, (unaligned_uint16 *)&g_word_7E9100);
   }
   reg_COLDATA[0] = *((uint8 *)hdma_object_A + v3);
   reg_COLDATA[1] = *((uint8 *)hdma_object_A + v3 + 1);
