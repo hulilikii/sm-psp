@@ -22,6 +22,7 @@
 #include "spc_player.h"
 #include "psp/psp_renderer.h"
 #include "psp/psp_input.h"
+#include "psp/psp_log.h"
 
 PSP_MODULE_INFO("Super Metroid", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
@@ -43,7 +44,7 @@ static struct RendererFuncs g_renderer_funcs;
 #if PSP_AUDIO_ENABLED
 static SceUID g_audio_sema = -1;
 #endif
-static bool g_running = true;
+static volatile bool g_running = true;
 static bool g_turbo;
 static uint8 g_replay_turbo = true;
 static int g_ppu_render_flags;
@@ -51,8 +52,33 @@ static int g_snes_width = 256;
 static int g_snes_height = 240;
 static uint32_t g_frame_ctr;
 
+
+/* HOME is owned by the firmware in user mode: without an exit callback the
+ * button shows the exit dialog and then hangs the app */
+static int ExitCallback(int arg1, int arg2, void *common) {
+  (void)arg1; (void)arg2; (void)common;
+  g_running = false;
+  return 0;
+}
+
+static int CallbackThread(SceSize args, void *argp) {
+  (void)args; (void)argp;
+  int cb = sceKernelCreateCallback("exit_cb", ExitCallback, NULL);
+  sceKernelRegisterExitCallback(cb);
+  sceKernelSleepThreadCB();
+  return 0;
+}
+
+static void SetupExitCallback(void) {
+  int thid = sceKernelCreateThread("exit_thread", CallbackThread, 0x11, 0xFA0, 0, NULL);
+  if (thid >= 0)
+    sceKernelStartThread(thid, 0, NULL);
+}
+
 void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
+  PspLog("DIE: %s", error);
+  PspLog_Flush();
   sceKernelExitGame();
   for (;;) sceKernelDelayThread(1000000);
 }
@@ -176,7 +202,10 @@ static void SetupFilesystem(const char *argv0) {
 int main(int argc, char **argv) {
   (void)argc;
   
+  SetupExitCallback();
   SetupFilesystem(argv[0]);
+  PspLog_Init();
+  PspLog("clock cpu=%d bus=%d", scePowerGetCpuClockFrequency(), scePowerGetBusClockFrequency());
   PspInput_Init();
   ParseConfigFile(NULL);
 
@@ -185,9 +214,11 @@ int main(int argc, char **argv) {
   g_snes_height = 240;
   g_ppu_render_flags = kPpuRenderFlags_NewRenderer | kPpuRenderFlags_Height240;
 
+  PspLog("boot: before renderer init");
   PspRenderer_Create(&g_renderer_funcs);
   if (!g_renderer_funcs.Initialize())
     return 1;
+  PspLog("boot: renderer ready, loading ROM");
 
   g_snes = SnesInit("sm.smc");
   if (g_snes == NULL)
@@ -196,6 +227,8 @@ int main(int argc, char **argv) {
   PpuBeginDrawing(g_snes->snes_ppu, g_pixels, 256 * 4, 0);
   PpuBeginDrawing(g_snes->my_ppu, g_my_pixels, 256 * 4, 0);
 
+  PspLog("boot: ROM loaded, entering main loop");
+  PspLog_Flush();
   g_spc_player = SpcPlayer_Create();
   SpcPlayer_Initialize(g_spc_player);
   #if PSP_AUDIO_ENABLED
@@ -209,9 +242,19 @@ int main(int argc, char **argv) {
   while (g_running) {
     SceCtrlData pad;
     sceCtrlPeekBufferPositive(&pad, 1);
-    if (pad.Buttons & PSP_CTRL_HOME) {
-      g_running = false;
-      break;
+
+    /* Renderer toggle (software <-> GE): NOTE or SCREEN button, or L+R+SELECT.
+     * Edge-triggered. NOTE/SCREEN are not forwarded to the game. */
+    {
+      static unsigned prev_buttons;
+      const unsigned chord = PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER | PSP_CTRL_SELECT;
+      const unsigned single = PSP_CTRL_NOTE | PSP_CTRL_SCREEN;
+      unsigned b = pad.Buttons;
+      bool now = (b & single) != 0 || (b & chord) == chord;
+      bool before = (prev_buttons & single) != 0 || (prev_buttons & chord) == chord;
+      if (now && !before)
+        PspRenderer_ToggleGe();
+      prev_buttons = b;
     }
 
     uint16 inputs = PspInput_Read();
@@ -230,6 +273,8 @@ int main(int argc, char **argv) {
   #if PSP_AUDIO_ENABLED
   Audio_Shutdown();
   #endif
+  PspLog("clean exit after %u frames", (unsigned)g_frame_ctr);
+  PspLog_Flush();
   g_renderer_funcs.Destroy();
   sceKernelExitGame();
   return 0;

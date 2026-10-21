@@ -184,4 +184,14 @@ void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_fl
 
 int PpuGetCurrentRenderScale(Ppu *ppu, uint32_t render_flags);
 
+// Optional hook invoked before each visible line (line >= 1) is rendered.
+extern void (*g_ppu_line_hook)(const Ppu *ppu, int line);
+// Optional hooks around the software drawing work of a line (brightness cache,
+// sprite evaluation, pixel drawing), and a switch to skip that work entirely
+// while another renderer draws the frame. The game never reads the overflow
+// flags that sprite evaluation sets.
+extern void (*g_ppu_draw_begin)(void);
+extern void (*g_ppu_draw_end)(void);
+extern bool g_ppu_skip_draw;
+
 #endif

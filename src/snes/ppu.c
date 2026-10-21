@@ -244,6 +244,11 @@ static inline void ClearBackdrop(PpuPixelPrioBufs *buf) {
      buf->data[i] = 0x0500;
 }
 
+void (*g_ppu_line_hook)(const Ppu *ppu, int line);
+void (*g_ppu_draw_begin)(void);
+void (*g_ppu_draw_end)(void);
+bool g_ppu_skip_draw;
+
 void ppu_runLine(Ppu* ppu, int line) {
   if(line == 0) {
     // pre-render line
@@ -253,6 +258,12 @@ void ppu_runLine(Ppu* ppu, int line) {
     ppu->timeOver = false;
     ppu->evenFrame = !ppu->evenFrame;
   } else {  
+    if (g_ppu_line_hook)
+      g_ppu_line_hook(ppu, line);
+    if (g_ppu_skip_draw)
+      return;
+    if (g_ppu_draw_begin)
+      g_ppu_draw_begin();
     // Cache the brightness computation
     if (ppu->brightness != ppu->lastBrightnessMult) {
       uint8_t ppu_brightness = ppu->brightness;
@@ -277,6 +288,8 @@ void ppu_runLine(Ppu* ppu, int line) {
         ppu_handlePixel(ppu, x, line);
       }
     }
+    if (g_ppu_draw_end)
+      g_ppu_draw_end();
   }
 }
 
