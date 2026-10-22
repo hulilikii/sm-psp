@@ -108,6 +108,7 @@ typedef struct LineSnap {
   uint8_t subneg, subwin;                          /* subtract mode; subscreen layers (bit l) windowed */
   uint8_t tint, tinthalf;                          /* fixed-colour math on this row; result halved */
   uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
+  uint8_t subobj;                                  /* OBJ enabled on the subscreen */
 } LineSnap;
 
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
@@ -298,10 +299,7 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
       } else {
         /* fixed == 0 and no half: adding the subscreen only changes pixels where
          * a subscreen layer is opaque (ppu.c: empty subscreen pixel = fixed color
-         * = 0, unhalved). Sprites can't be checked cheaply; BG tiles are checked
-         * per frame in DrawGe. */
-        if (p->screenEnabled[1] & 16)
-          r |= kReasonSubObj;
+         * = 0, unhalved). Subscreen sprite bounds checked in DrawGe. */
         if (p->screenEnabled[1] & 7)
           *submath = true;
       }
@@ -373,6 +371,7 @@ static void CaptureImpl(const Ppu *p, int line) {
   s->tint = tint;
   s->tinthalf = tinthalf;
   s->tintfix = tintfix;
+  s->subobj = (p->screenEnabled[1] & 16) ? 1 : 0;
   s->subneg = p->subtractColor ? 1 : 0;
   {
     uint8_t sw = 0;
@@ -1047,11 +1046,45 @@ static bool DrawGe(void) {
     CountReasons(kReasonObjCfg);
     return false;
   }
+  
   if (o1 > o0) {
     if (!PrepareObj(o0, o1))
       return false;
     BuildClutObj(obj_bright);
   }
+  
+  /* Subscreen sprite bounding check: defer fallback unless a visible sprite
+   * actively overlaps a row where subscreen colour math is enabled. */
+  bool subobj_active = false;
+  for (int r = 0; r < g_line_count; r++) {
+    if (g_lines[r].subobj && g_lines[r].mathmask != 0) {
+      subobj_active = true;
+      break;
+    }
+  }
+
+  if (subobj_active) {
+    bool subobj_hit = false;
+    for (int k = 0; k < g_nspr; k++) {
+      const Sprite *sp = &g_spr[k];
+      int r0 = sp->y;
+      int r1 = sp->y + sp->size;
+      if (r0 < 0) r0 = 0;
+      if (r1 > g_line_count) r1 = g_line_count;
+      for (int r = r0; r < r1; r++) {
+        if (g_lines[r].subobj && g_lines[r].mathmask != 0) {
+          subobj_hit = true;
+          break;
+        }
+      }
+      if (subobj_hit) break;
+    }
+    if (subobj_hit) {
+      CountReasons(kReasonSubObj);
+      return false;
+    }
+  }
+
   sceKernelDcacheWritebackRange(g_clut2, sizeof(g_clut2));
   sceKernelDcacheWritebackRange(g_clut4, sizeof(g_clut4));
   sceKernelDcacheWritebackRange(g_clutobj, sizeof(g_clutobj));
