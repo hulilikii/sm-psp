@@ -24,7 +24,13 @@
 #define SM_PSP_GE_STRIPS 0
 #endif
 
-/* Gate 3.2: each layer run is walked once into a list of non-empty tiles that the
+/* Gate 4a: sprites are drawn first, in reverse precedence order with the depth test ALWAYS, each
+ * sprite writing its own depth marker ((prio*4+2)*256 + 127-k); sprite-vs-sprite is decided by OAM
+ * order alone and the priority bits only matter against the BGs. BG passes follow with GEQUAL, z =
+ * SNES level * 256 (BG3 high is always level 15, as in ppu.c). Depth is always on. New: fixed-colour
+ * and half-colour tint (colour math without a subscreen layer) as a blended overlay of CPU rectangles
+ * plus the depth-marker restore pass; colour math below full brightness falls back to software.
+ * Gate 3.2: each layer run is walked once into a list of non-empty tiles that the
  * subscreen check, counting and emission share; cheaper per-line capture; skip
  * hysteresis 8 frames; strips off by default (no measurable gain on hardware).
  * Gate 3.1: logging/profiling compile out with PSP_LOG=0 (see psp_log.h); finer
@@ -73,16 +79,18 @@ enum {
 // Reasons a frame is handed back to the software renderer. 
 enum {
   kReasonMode = 1, kReasonBigTile = 2, kReasonMosaic = 4, kReasonWindow = 8,
-  kReasonMathClip = 16,   /* color window clip mode */
-  kReasonMathTint = 32,   /* fixed color != 0 or half color with math enabled */
-  kReasonBg3Prio = 64, kReasonBudget = 128,
+  kReasonMathClip = 16,   /* color window clip mode, or prevent mode 1/2 (window dependent) */
+  kReasonMathTint = 32,   /* fixed colour or half colour together with subscreen layers */
+  kReasonBg3Prio = 64,    /* unused since Gate 4a (BG3 high is level 15 as in ppu.c) */
+  kReasonBudget = 128,
   kReasonSubObj = 256,    /* sprites enabled on the subscreen */
   kReasonSubBg = 512,     /* BG tiles visible on the subscreen where math applies */
   kReasonObjCfg = 1024,   /* OBJ interlace / config changes mid-frame / non-contiguous OBJ rows */
   kReasonObjLimit = 2048, /* a line exceeds 32 sprites or 34 tile slivers (hardware drops some) */
   kReasonSubWin = 4096,   /* contributing subscreen layer is windowed (TSW) */
   kReasonSubMulti = 8192, /* >1 contributing subscreen layer, or math config varies per line */
-  kReasonCount = 14,
+  kReasonMathBright = 16384, /* colour math in use while brightness < 15 (software clamps before brightness) */
+  kReasonCount = 15,
 };
 
 typedef struct BgSnap {
@@ -98,6 +106,8 @@ typedef struct LineSnap {
   uint8_t brightness, bg3prio, mathmask, submath;  /* submath: subscreen add may matter */
   uint8_t objon;                                   /* OBJ enabled on the main screen */
   uint8_t subneg, subwin;                          /* subtract mode; subscreen layers (bit l) windowed */
+  uint8_t tint, tinthalf;                          /* fixed-colour math on this row; result halved */
+  uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
 } LineSnap;
 
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
@@ -135,11 +145,11 @@ static uint16_t g_obj_adr1, g_obj_adr2;
 static bool g_obj_rot;
 typedef struct Sprite { int16_t x; uint8_t y, size; uint16_t attr; } Sprite;
 typedef struct ObjSeg { uint8_t pal; uint16_t first, n; } ObjSeg;  /* first/n in vertices */
-static Sprite g_spr[128];
-static int g_nspr, g_spr_quads[4];
-static ObjSeg g_objseg[4][128];
-static int g_nobjseg[4];
-static TileVert *g_objbase[4];
+static Sprite g_spr[128];                 /* in precedence order (index k wins over k+1) */
+static int g_nspr, g_spr_quads;
+static ObjSeg g_objseg[128];              /* runs of consecutive sprites with one palette */
+static int g_nobjseg;
+static TileVert *g_objbase;
 static uint32_t g_clutobj[16][8][16] __attribute__((aligned(64)));
 static uint16_t g_clutobj_stamp[16];
 
@@ -172,11 +182,17 @@ static int g_nbruns;
 static int g_bcounts[kMaxLines + 1][2][8];
 static Geom g_bgeom[kMaxLines + 1][2][8];
 static int g_zbg[kLayers][2];  /* depth marker per BG layer/priority pass */
-static uint32_t g_frames_blend;
-enum { kZScale = 16, kZBackdrop = 11 * kZScale };  /* depth markers, scaled like Zelda3-PSP's */
+static uint32_t g_frames_blend, g_frames_tint;
+/* Depth markers: z = SNES priority level * kZLevel (see DrawGe); sprites add 127-k; backdrop is below level 1. */
+enum { kZLevel = 256, kZBackdrop = 64 };
+/* Rows [r0,r1) whose main-screen pixels get the fixed colour added/subtracted (optionally halved). */
+typedef struct TintRun { uint16_t r0, r1, fix; uint8_t half; } TintRun;
+static TintRun g_tint[kMaxLines];
+static int g_ntint;
 
 static bool g_ge_ok;
 static bool g_ge_active;
+static int g_ge_level;  /* 0 software, 1 GE, 2 GE without tint (tint frames go back to software) */
 static unsigned g_vcount_last;
 static uint32_t g_frame;
 static uint32_t g_frames_ge, g_frames_sw, g_reason_counts[kReasonCount];
@@ -251,8 +267,12 @@ static void PspRenderer_Convert(void) {
 
 //capture
 
-static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath) {
+static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool *tint, uint16_t *tintfix,
+                           bool *tinthalf) {
   *submath = false;
+  *tint = false;
+  *tintfix = 0;
+  *tinthalf = false;
   if (p->forcedBlank)
     return 0;
   uint16_t r = 0;
@@ -269,20 +289,37 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath) {
   if (p->clipMode != 0)
     r |= kReasonMathClip;
   if (mathmask != 0 && p->preventMathMode != 3) {
-    bool fixed = (p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0;
-    if (fixed || p->halfColor) {
-      r |= kReasonMathTint;
-    } else if (p->addSubscreen && p->screenEnabled[1] != 0) {
-      /* fixed == 0 and no half: adding the subscreen only changes pixels where
-       * a subscreen layer is opaque (ppu.c: empty subscreen pixel = fixed color
-       * = 0, unhalved). Sprites can't be checked cheaply; BG tiles are checked
-       * per frame in DrawGe. If !addSubscreen the math adds fixed color 0. */
-      if (p->screenEnabled[1] & 16)
-        r |= kReasonSubObj;
-      if (p->screenEnabled[1] & 7)
-        *submath = true;
-    }
-  }
+    if (p->preventMathMode != 0)
+      r |= kReasonMathClip;  /* prevent inside/outside the colour window: depends on the window */
+    uint16_t fix = (uint16_t)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10);
+    if (p->addSubscreen && p->screenEnabled[1] != 0) {
+      if (fix || p->halfColor) {
+        r |= kReasonMathTint;
+      } else {
+        /* fixed == 0 and no half: adding the subscreen only changes pixels where
+         * a subscreen layer is opaque (ppu.c: empty subscreen pixel = fixed color
+         * = 0, unhalved). Sprites can't be checked cheaply; BG tiles are checked
+         * per frame in DrawGe. */
+        if (p->screenEnabled[1] & 16)
+          r |= kReasonSubObj;
+        if (p->screenEnabled[1] & 7)
+          *submath = true;
+      }
+    } else if (p->addSubscreen) {
+      /* Empty subscreen: every pixel gets the fixed colour added, never halved (ppu.c). */
+      if (fix) {
+        *tint = true;
+        *tintfix = fix;
+      }
+    } else if (fix || p->halfColor) {
+      /* No subscreen add: fixed colour added/subtracted, result halved when half colour is set. */
+      *tint = true;
+      *tintfix = fix;
+      *tinthalf = p->halfColor;
+     }
+   }
+  if ((*submath || *tint) && p->brightness < 15)
+    r |= kReasonMathBright;
   return r;
 }
 
@@ -329,9 +366,13 @@ static void CaptureImpl(const Ppu *p, int line) {
   for (int i = 0; i < 6; i++)
     mm |= (uint8_t)((p->mathEnabled[i] ? 1 : 0) << i);
   s->mathmask = mm;
-  bool submath;
-  s->reasons = LineReasons(p, mm, &submath);
+  bool submath, tint, tinthalf;
+  uint16_t tintfix;
+  s->reasons = LineReasons(p, mm, &submath, &tint, &tintfix, &tinthalf);
   s->submath = submath;
+  s->tint = tint;
+  s->tinthalf = tinthalf;
+  s->tintfix = tintfix;
   s->subneg = p->subtractColor ? 1 : 0;
   {
     uint8_t sw = 0;
@@ -363,8 +404,6 @@ static void CaptureImpl(const Ppu *p, int line) {
     g_note_pending = true;
   }
 #endif
-  if (line > 1 && s->bg3prio != g_lines[0].bg3prio)
-    g_frame_reasons |= kReasonBg3Prio;
   g_line_count = line;
 }
 
@@ -601,7 +640,7 @@ static bool PrepareObj(int o0, int o1) {
   static uint16_t ct[256];
   memset(cs, 0, sizeof(cs));
   memset(ct, 0, sizeof(ct));
-  memset(g_spr_quads, 0, sizeof(g_spr_quads));
+  g_spr_quads = 0;
   g_nspr = 0;
   for (int k = 0; k < 128; k++) {
     int i = (g_obj_start + k) & 127;
@@ -631,15 +670,14 @@ static bool PrepareObj(int o0, int o1) {
       continue;
     g_spr[g_nspr++] = (Sprite){(int16_t)x, (uint8_t)y, (uint8_t)size, w1};
     int q = (size >> 3) * (size >> 3) * ((y + size > 256) ? 2 : 1);
-    g_spr_quads[(w1 >> 12) & 3] += q;
+    g_spr_quads += q;
   }
   for (int r = o0; r < o1; r++)
     if (cs[r] > 32 || ct[r] > 34) {
       CountReasons(kReasonObjLimit);
       return false;
     }
-  int total = g_spr_quads[0] + g_spr_quads[1] + g_spr_quads[2] + g_spr_quads[3];
-  if (total > kMaxSpriteQuads) {
+  if (g_spr_quads > kMaxSpriteQuads) {
     CountReasons(kReasonBudget);
     return false;
   }
@@ -700,7 +738,7 @@ static int SubRunContributes(int l, const LineSnap *ls, int r0, int r1, TileList
   TileList lst;
   if (!BuildTileList(l, ls, r0, r1, &lst))
     return -1;
-  bool harmless_hi = l == 2 && (ls->bg[2].flags & 4) && ls->bg3prio && !(ls->mathmask & 4);
+  bool harmless_hi = l == 2 && (ls->bg[2].flags & 4) && !(ls->mathmask & 4);  /* BG3 high is level 15 */
   uint16_t pm[8];
   uint8_t pm_ok = 0;
   int contrib = 0;
@@ -751,13 +789,9 @@ static void CountReasons(int mask) {
       g_reason_counts[i]++;
 }
 
-/* Back to front (ppu.c z values): BG3 low 1, OBJ0 2, [BG3 high 3 if bg3priority
- * is off], OBJ1 6, BG2 low 7, BG1 low 8, OBJ2 10, BG2 high 11, BG1 high 12,
- * OBJ3 14, BG3 high 15 (bg3priority on). {obj, a, b}: BG pass = {0, layer,
- * prio}; OBJ pass = {1, prio, 0}. */
-typedef struct Pass { uint8_t obj, a, b; } Pass;
-static const Pass kPassBg3Top[10] = {{0,2,0},{1,0,0},{1,1,0},{0,1,0},{0,0,0},{1,2,0},{0,1,1},{0,0,1},{1,3,0},{0,2,1}};
-static const Pass kPassBg3Low[10] = {{0,2,0},{1,0,0},{0,2,1},{1,1,0},{0,1,0},{0,0,0},{1,2,0},{0,1,1},{0,0,1},{1,3,0}};
+/* Depth levels (ppu.c z values, level * kZLevel): BG3 low 1, OBJ prio0 2, OBJ1 6, BG2 low 7, BG1 low 8,
+ * OBJ2 10, BG2 high 11, BG1 high 12, OBJ3 14, BG3 high 15. ppu.c always uses 15 for BG3 high (it never
+ * looks at the BG3-priority bit). Sprites: (prio*4+2)*kZLevel + 127-k, k = precedence index. */
 
 enum { kVtTile = GU_TEXTURE_32BITF | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
        kVtColor = GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
@@ -813,11 +847,11 @@ static void DrawBgPass(int l, int pr) {
   }
 }
 
-/* only_excluded: draw just the segments that never take part in colour math
+/* only_excluded: draw just the sprites that never take part in colour math
  * (OBJ palettes 0-3 always; 4-7 when the OBJ math bit is off). */
-static void DrawObjPass(int pr, int bright, bool only_excluded, int mathmask) {
-  for (int i = 0; i < g_nobjseg[pr]; i++) {
-    const ObjSeg *sg = &g_objseg[pr][i];
+static void DrawObjSegs(int bright, bool only_excluded, int mathmask) {
+  for (int i = 0; i < g_nobjseg; i++) {
+    const ObjSeg *sg = &g_objseg[i];
     if (only_excluded && !(sg->pal < 4 || !(mathmask & 0x10)))
       continue;
     PROF(g_c_clut++;)
@@ -825,7 +859,7 @@ static void DrawObjPass(int pr, int bright, bool only_excluded, int mathmask) {
     sceGuClutLoad(2, g_clutobj[bright][sg->pal]);
     sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
     sceGuTexImage(0, 256, 512, 256, g_atlas4);
-    GeDraw(kVtTile, sg->n, g_objbase[pr] + sg->first);
+    GeDraw(kVtTile, sg->n, g_objbase + sg->first);
   }
 }
 
@@ -907,6 +941,37 @@ static bool DrawGe(void) {
     g_frame_subnoop = false;
   }
 
+  /* Tint rows: colour math with the fixed colour (no subscreen layer involved). All tint rows must
+   * share the layer mask and add/subtract mode; the colour and halving may change per row. */
+  bool tint = false;
+  g_ntint = 0;
+  for (int r = 0; r < g_line_count; r++) {
+    const LineSnap *ls = &g_lines[r];
+    if (!ls->tint)
+      continue;
+    if (!tint) {
+      tint = true;
+      bmath = ls->mathmask;
+      bneg = ls->subneg;
+    } else if (ls->mathmask != bmath || ls->subneg != bneg) {
+      CountReasons(kReasonSubMulti);
+      return false;
+    }
+    TintRun *tr = g_ntint ? &g_tint[g_ntint - 1] : NULL;
+    if (tr && tr->r1 == r && tr->fix == ls->tintfix && tr->half == ls->tinthalf)
+      tr->r1 = (uint16_t)(r + 1);
+    else
+      g_tint[g_ntint++] = (TintRun){(uint16_t)r, (uint16_t)(r + 1), ls->tintfix, ls->tinthalf};
+  }
+  if (tint && blend) {  /* subscreen-layer blend and fixed-colour tint in one frame: not drawn */
+    CountReasons(kReasonSubMulti);
+    return false;
+  }
+  if (tint && g_ge_level != 1) {  /* level 2 (hardware bisect): tint frames use the software image */
+    CountReasons(kReasonMathTint);
+    return false;
+  }
+
   PROF(uint32_t t_cls = Now(); g_pc_class = t_cls - g_t_draw_start;)
 
   /* Pass A, before the list is opened: runs, atlas decode, CLUTs. The GE is
@@ -975,9 +1040,9 @@ static bool DrawGe(void) {
     o1 = r + 1;
   }
   g_nspr = 0;
-  memset(g_spr_quads, 0, sizeof(g_spr_quads));
-  memset(g_nobjseg, 0, sizeof(g_nobjseg));
-  memset(g_objbase, 0, sizeof(g_objbase));
+  g_spr_quads = 0;
+  g_nobjseg = 0;
+  g_objbase = NULL;
   if (!obj_ok) {
     CountReasons(kReasonObjCfg);
     return false;
@@ -991,15 +1056,16 @@ static bool DrawGe(void) {
   sceKernelDcacheWritebackRange(g_clut4, sizeof(g_clut4));
   sceKernelDcacheWritebackRange(g_clutobj, sizeof(g_clutobj));
 
-  const Pass *order = g_lines[0].bg3prio ? kPassBg3Top : kPassBg3Low;
-  for (int k = 0; k < 10; k++)
-    if (!order[k].obj)
-      g_zbg[order[k].a][order[k].b] = (1 + k) * kZScale;
+  g_zbg[0][0] = 8 * kZLevel;  g_zbg[0][1] = 12 * kZLevel;  /* BG1 low / high */
+  g_zbg[1][0] = 7 * kZLevel;  g_zbg[1][1] = 11 * kZLevel;  /* BG2 */
+  g_zbg[2][0] = 1 * kZLevel;  g_zbg[2][1] = 15 * kZLevel;  /* BG3 */
 
-  /* Pass B: the display list. In a blend frame every main-screen pass also
-   * writes a depth marker identifying itself (BG pass, backdrop, OBJ segment),
-   * so the layers that don't take part in colour math can be restored exactly
-   * after the subscreen is blended over everything. */
+  /* Pass B: the display list. Depth is always on. Sprites are drawn first with the depth test ALWAYS
+   * (the last one drawn, the lowest OAM index, wins an overlap) and leave their depth marker; BG
+   * passes then draw with GEQUAL against it (z = SNES priority level), so layering against the BGs
+   * follows the priority bits. In an overlay frame (subscreen blend or tint) the markers also
+   * identify every pass, so the layers that don't take part in colour math can be restored exactly
+   * after the overlay with an EQUAL test. */
   g_t_list_start = Now();
   PROF(g_pc_obj = g_t_list_start - t_bg;)
   g_prep_us = g_t_list_start - g_t_draw_start;
@@ -1008,17 +1074,13 @@ static bool DrawGe(void) {
   sceGuDisable(GU_BLEND);
   sceGuDisable(GU_ALPHA_TEST);
   sceGuClearColor(0xff000000);
-  if (blend) {
-    sceGuDepthRange(65535, 0);
-    sceGuClearDepth(0);
-    sceGuEnable(GU_DEPTH_TEST);
-    sceGuDepthFunc(GU_ALWAYS);
-    sceGuDepthMask(GU_FALSE);
-    sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
-  } else {
-    sceGuDisable(GU_DEPTH_TEST);
-    sceGuClear(GU_COLOR_BUFFER_BIT);
-  }
+  sceGuDepthRange(65535, 0);
+  sceGuClearDepth(0);
+  sceGuEnable(GU_DEPTH_TEST);
+  sceGuDepthMask(GU_FALSE);
+  sceGuDepthFunc(GU_ALWAYS);
+  sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
+  sceGuDepthFunc(GU_GEQUAL);
 
   /* Backdrop, merged into runs of identical colour, drawn as vertical strips
    * that don't cross 64-pixel framebuffer columns (strip-major order, so
@@ -1081,31 +1143,34 @@ static bool DrawGe(void) {
         g_bgeom[i][pr][p].n = g_bcounts[i][pr][p] ? (int)(w[pr][p] - g_bgeom[i][pr][p].v) : 0;
   }
 
-  /* Sprite geometry: per priority, reverse precedence order so the sprite that
-   * wins an overlap on hardware (first in OAM order) is drawn last. Consecutive
-   * sprites that share a palette share one draw (and one depth marker). */
-  for (int pr = 0; pr < 4; pr++) {
-    if (g_spr_quads[pr] == 0)
-      continue;
-    TileVert *base = sceGuGetMemory(g_spr_quads[pr] * 2 * sizeof(TileVert));
+  /* Sprite geometry: reverse precedence order, so the sprite that wins an overlap on hardware (lowest
+   * OAM index) is drawn last. Every sprite carries its own depth marker; consecutive sprites that
+   * share a palette share one draw. */
+  if (g_spr_quads > 0) {
+    TileVert *base = sceGuGetMemory(g_spr_quads * 2 * sizeof(TileVert));
     TileVert *w = base;
-    g_objbase[pr] = base;
+    g_objbase = base;
     for (int k = g_nspr - 1; k >= 0; k--) {
       const Sprite *sp = &g_spr[k];
-      if (((sp->attr >> 12) & 3) != pr)
-        continue;
-      int pal = (sp->attr >> 9) & 7, nseg = g_nobjseg[pr];
-      bool newseg = nseg == 0 || g_objseg[pr][nseg - 1].pal != pal;
-      int idx = newseg ? nseg : nseg - 1;
+      int pal = (sp->attr >> 9) & 7, prio = (sp->attr >> 12) & 3;
       TileVert *start = w;
-      WalkSprite(sp, o0, o1, &w, (16 + pr * 128 + idx) * kZScale);
+      WalkSprite(sp, o0, o1, &w, (prio * 4 + 2) * kZLevel + 127 - k);
       if (w == start)
         continue;
-      if (newseg) {
-        g_objseg[pr][nseg] = (ObjSeg){(uint8_t)pal, (uint16_t)(start - base), 0};
-        g_nobjseg[pr] = nseg + 1;
-      }
-      g_objseg[pr][idx].n = (uint16_t)(g_objseg[pr][idx].n + (w - start));
+      if (g_nobjseg == 0 || g_objseg[g_nobjseg - 1].pal != pal)
+        g_objseg[g_nobjseg++] = (ObjSeg){(uint8_t)pal, (uint16_t)(start - base), 0};
+      g_objseg[g_nobjseg - 1].n = (uint16_t)(g_objseg[g_nobjseg - 1].n + (w - start));
+    }
+  }
+
+  /* Tint overlay: one colour rectangle per run of rows with the same fixed colour. */
+  ColorVert *tv = NULL;
+  if (tint) {
+    tv = sceGuGetMemory(g_ntint * 2 * sizeof(ColorVert));
+    for (int i = 0; i < g_ntint; i++) {
+      uint32_t col = BakeColor(g_tint[i].fix, 15, false);
+      tv[2 * i] = (ColorVert){col, (int16_t)kLeft, (int16_t)(kTop + g_tint[i].r0), 0};
+      tv[2 * i + 1] = (ColorVert){col, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + g_tint[i].r1), 0};
     }
   }
 
@@ -1118,33 +1183,54 @@ static bool DrawGe(void) {
   sceGuTexScale(1.0f, 1.0f);
   sceGuTexOffset(0.0f, 0.0f);
 
-  for (int k = 0; k < 10; k++) {
-    if (order[k].obj)
-      DrawObjPass(order[k].a, obj_bright, false, bmath);
-    else
-      DrawBgPass(order[k].a, order[k].b);
-  }
+  /* Sprites: depth ALWAYS, the markers they leave decide the layering against the BGs below. */
+  sceGuDepthFunc(GU_ALWAYS);
+  DrawObjSegs(obj_bright, false, bmath);
+  sceGuDepthFunc(GU_GEQUAL);
+  for (int l = 0; l < kLayers; l++)
+    for (int pr = 0; pr < 2; pr++)
+      DrawBgPass(l, pr);
 
-  if (blend) {
-    /* Blend the subscreen layer over everything it covers (colour math adds or
-     * subtracts the subscreen pixel; fixed colour is 0 so uncovered pixels are
-     * unchanged), then restore layers whose math bit is off. */
+  if (blend || tint) {
     sceGuDisable(GU_DEPTH_TEST);
     sceGuEnable(GU_BLEND);
-    sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
-    for (int i = 0; i < g_nbruns; i++) {
-      int b = g_lines[g_bruns[i].first].brightness;
-      for (int pr = 0; pr < 2; pr++) {
-        for (int p = 0; p < 8; p++) {
-          const Geom *g = &g_bgeom[i][pr][p];
-          if (g->n == 0)
-            continue;
-          BindBg(g_bruns[i].l, b, p);
-          GeDraw(kVtTile, g->n, g->v);
+    if (blend) {
+      /* Blend the subscreen layer over everything it covers (colour math adds or
+       * subtracts the subscreen pixel; fixed colour is 0 so uncovered pixels are
+       * unchanged). */
+      sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
+      for (int i = 0; i < g_nbruns; i++) {
+        int b = g_lines[g_bruns[i].first].brightness;
+        for (int pr = 0; pr < 2; pr++) {
+          for (int p = 0; p < 8; p++) {
+            const Geom *g = &g_bgeom[i][pr][p];
+            if (g->n == 0)
+              continue;
+            BindBg(g_bruns[i].l, b, p);
+            GeDraw(kVtTile, g->n, g->v);
+          }
         }
       }
+    } else {
+      /* Tint: dst = dst +/- fixed, or (dst +/- fixed) / 2 with half colour (factors 0.5 / 0.5). */
+      sceGuDisable(GU_TEXTURE_2D);
+      sceGuDisable(GU_ALPHA_TEST);
+      for (int i = 0; i < g_ntint;) {
+        int j = i;
+        while (j < g_ntint && g_tint[j].half == g_tint[i].half)
+          j++;
+        unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
+        sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
+        GeDraw(kVtColor, (j - i) * 2, tv + 2 * i);
+        i = j;
+      }
+      sceGuEnable(GU_TEXTURE_2D);
+      sceGuEnable(GU_ALPHA_TEST);
     }
     sceGuDisable(GU_BLEND);
+
+    /* Restore the layers whose colour-math bit is off: redraw them where their depth marker is
+     * still in the buffer (the overlay neither tests nor writes depth). */
 
     sceGuEnable(GU_DEPTH_TEST);
     sceGuDepthFunc(GU_EQUAL);
@@ -1160,11 +1246,13 @@ static bool DrawGe(void) {
       if (!(bmath & (1 << l)))
         for (int pr = 0; pr < 2; pr++)
           DrawBgPass(l, pr);
-    for (int pr = 0; pr < 4; pr++)
-      DrawObjPass(pr, obj_bright, true, bmath);
+    DrawObjSegs(obj_bright, true, bmath);
     sceGuDepthMask(GU_FALSE);
     sceGuDisable(GU_DEPTH_TEST);
-    g_frames_blend++;
+    if (blend)
+      g_frames_blend++;
+    else
+      g_frames_tint++;
   }
   Present();
   return true;
@@ -1177,11 +1265,13 @@ void PspRenderer_ToggleGe(void) {
     PspLog("toggle ignored: VRAM budget too small");
     return;
   }
-  g_ge_active = !g_ge_active;
+  g_ge_level = (g_ge_level + 1) % 3;
+  g_ge_active = g_ge_level != 0;
   g_line_count = 0;
   g_ppu_skip_draw = false;  /* the next frame must be drawn by the software PPU */
   g_streak = 0;
-  PspLog("f=%u renderer -> %s", (unsigned)g_frame, g_ge_active ? "GE (BG1-3 + OBJ)" : "software");
+  PspLog("f=%u renderer -> %s", (unsigned)g_frame,
+         g_ge_level == 0 ? "software" : g_ge_level == 1 ? "GE (BG1-3 + OBJ + tint)" : "GE without tint");
   PspLog_Flush();
 }
 
@@ -1391,15 +1481,17 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u) sw=%u gaps=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
-           (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_sw, (unsigned)g_capture_gaps);
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+           (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
+           (unsigned)g_capture_gaps);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
            (unsigned)g_reason_counts[6], (unsigned)g_reason_counts[7], (unsigned)g_reason_counts[8],
            (unsigned)g_reason_counts[9]);
-    PspLog("  why2: objcfg=%u objlimit=%u subwin=%u submulti=%u", (unsigned)g_reason_counts[10],
-           (unsigned)g_reason_counts[11], (unsigned)g_reason_counts[12], (unsigned)g_reason_counts[13]);
+    PspLog("  why2: objcfg=%u objlimit=%u subwin=%u submulti=%u mathbright=%u", (unsigned)g_reason_counts[10],
+           (unsigned)g_reason_counts[11], (unsigned)g_reason_counts[12], (unsigned)g_reason_counts[13],
+           (unsigned)g_reason_counts[14]);
   }
   if ((g_frame % 300) == 0)
     ProfLog();
