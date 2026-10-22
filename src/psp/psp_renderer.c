@@ -108,7 +108,7 @@ typedef struct LineSnap {
   uint8_t subneg, subwin;                          /* subtract mode; subscreen layers (bit l) windowed */
   uint8_t tint, tinthalf;                          /* fixed-colour math on this row; result halved */
   uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
-  uint8_t subobj;                                  /* OBJ enabled on the subscreen */
+  uint8_t subobj;                                  /* OBJ on the subscreen and added by colour math */
 } LineSnap;
 
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
@@ -371,7 +371,8 @@ static void CaptureImpl(const Ppu *p, int line) {
   s->tint = tint;
   s->tinthalf = tinthalf;
   s->tintfix = tintfix;
-  s->subobj = (p->screenEnabled[1] & 16) ? 1 : 0;
+  /* only matters where the subscreen is added to the main screen with the fixed colour at 0 */
+  s->subobj = (!forced && mm != 0 && p->preventMathMode != 3 && p->addSubscreen && (p->screenEnabled[1] & 16)) ? 1 : 0;
   s->subneg = p->subtractColor ? 1 : 0;
   {
     uint8_t sw = 0;
@@ -683,6 +684,34 @@ static bool PrepareObj(int o0, int o1) {
   for (int i = 0; i < g_nspr; i++)
     WalkSprite(&g_spr[i], o0, o1, NULL, 0);
   return true;
+}
+
+/* True if a sprite that is visible horizontally covers a row with subscreen OBJ + colour math. */
+static bool SubObjHit(void) {
+  static uint8_t row[256];
+  bool any = false;
+  memset(row, 0, sizeof(row));
+  for (int r = 0; r < g_line_count; r++)
+    if (g_lines[r].subobj) {
+      row[r] = 1;
+      any = true;
+    }
+  if (!any)
+    return false;
+  for (int i = 0; i < 128; i++) {
+    int hb = g_hoam[i >> 2] >> ((i & 3) * 2);
+    int size = kSpriteSizes[g_obj_size][(hb >> 1) & 1];
+    int x = (g_oam[2 * i] & 0xff) | ((hb & 1) << 8);
+    if (x > 255)
+      x -= 512;
+    if (x <= -size)
+      continue;
+    int y = g_oam[2 * i] >> 8;
+    for (int r = 0; r < size; r++)  /* rows wrap modulo 256 like ppu.c */
+      if (row[(y + r) & 255])
+        return true;
+  }
+  return false;
 }
 
 // Wait for the panel only if ahead
@@ -1053,36 +1082,11 @@ static bool DrawGe(void) {
     BuildClutObj(obj_bright);
   }
   
-  /* Subscreen sprite bounding check: defer fallback unless a visible sprite
-   * actively overlaps a row where subscreen colour math is enabled. */
-  bool subobj_active = false;
-  for (int r = 0; r < g_line_count; r++) {
-    if (g_lines[r].subobj && g_lines[r].mathmask != 0) {
-      subobj_active = true;
-      break;
-    }
-  }
-
-  if (subobj_active) {
-    bool subobj_hit = false;
-    for (int k = 0; k < g_nspr; k++) {
-      const Sprite *sp = &g_spr[k];
-      int r0 = sp->y;
-      int r1 = sp->y + sp->size;
-      if (r0 < 0) r0 = 0;
-      if (r1 > g_line_count) r1 = g_line_count;
-      for (int r = r0; r < r1; r++) {
-        if (g_lines[r].subobj && g_lines[r].mathmask != 0) {
-          subobj_hit = true;
-          break;
-        }
-      }
-      if (subobj_hit) break;
-    }
-    if (subobj_hit) {
-      CountReasons(kReasonSubObj);
-      return false;
-    }
+  /* Sprites on the subscreen (added by colour math) are not drawn: fall back if any sprite touches a
+   * row where that matters. Scans the OAM itself, so it also works when OBJ is off on the main screen. */
+  if (SubObjHit()) {
+    CountReasons(kReasonSubObj);
+    return false;
   }
 
   sceKernelDcacheWritebackRange(g_clut2, sizeof(g_clut2));
