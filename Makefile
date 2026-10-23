@@ -51,7 +51,7 @@ LIBS :=
 ifeq ($(PSP_AUDIO_ME),1)
 LIBS += -lme-core -lme-core-lib
 endif
-LIBS := -lpspaudiolib \
+LIBS += -lpspaudiolib \
         -lpspaudio \
         -lpsppower \
         -lpspgu \
