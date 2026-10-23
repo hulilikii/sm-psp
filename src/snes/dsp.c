@@ -575,17 +575,28 @@ void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
 }
 
 void dsp_getSamples(Dsp* dsp, int16_t* sampleData, int samplesPerFrame) {
-  // resample from 534 samples per frame to wanted value
-  // float, not double: double is software-emulated on the PSP (and on the ME).
-  float adder = 534.0f / samplesPerFrame;
-  float location = 0.0f;
+  // Resample 534 samples per frame to the wanted count with linear interpolation.
+  // (Nearest-neighbour repeats samples, which sounds gritty/tinny.)
+  // Integer 16.16 position: no float drift, no soft-float on the PSP or the ME.
+  uint32_t step = (534u << 16) / (uint32_t)samplesPerFrame;
+  uint32_t pos = 0;
   for(int i = 0; i < samplesPerFrame; i++) {
-    int idx = (int) location;
-    if (idx > 533)
+    int idx = (int) (pos >> 16);
+    int next = idx + 1;
+    if (idx > 533) {
       idx = 533;
-    sampleData[i * 2] = dsp->sampleBuffer[idx * 2];
-    sampleData[i * 2 + 1] = dsp->sampleBuffer[idx * 2 + 1];
-    location += adder;
+      next = 533;
+    } else if (next > 533) {
+      next = 533;  // last sample: no following sample in this block
+    }
+    // 15-bit fraction keeps (diff * frac) inside int32 (|diff| <= 65535).
+    int32_t frac = (int32_t) ((pos >> 1) & 0x7fff);
+    for(int c = 0; c < 2; c++) {
+      int32_t a = dsp->sampleBuffer[idx * 2 + c];
+      int32_t b = dsp->sampleBuffer[next * 2 + c];
+      sampleData[i * 2 + c] = (int16_t) (a + (((b - a) * frac) >> 15));
+    }
+    pos += step;
   }
   dsp->sampleOffset = 0;
 }
