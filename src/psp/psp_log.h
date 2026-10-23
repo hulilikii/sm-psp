@@ -16,7 +16,7 @@
 #endif
 #define PSP_STR2(x) #x
 #define PSP_STR(x) PSP_STR2(x)
-#define PSP_LOG_FILE "smpsp_g4a_strips" PSP_STR(SM_PSP_GE_STRIPS) ".log"
+#define PSP_LOG_FILE "smpsp_g4b_strips" PSP_STR(SM_PSP_GE_STRIPS) ".log"
 
 #include <stdbool.h>
 

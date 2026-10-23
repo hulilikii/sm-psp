@@ -760,9 +760,10 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
       uint32 i = left;
       do {
         uint32 color = ppu->cgram[ppu->bgBuffers[0].data[i] & 0xff];
-        dst[0] = ppu->brightnessMult[color & clip_color_mask] << 16 |
+        /* PSP GE 8888 byte order: R in byte 0, B in byte 2 */
+        dst[0] = ppu->brightnessMult[color & clip_color_mask] |
           ppu->brightnessMult[(color >> 5) & clip_color_mask] << 8 |
-          ppu->brightnessMult[(color >> 10) & clip_color_mask];
+          ppu->brightnessMult[(color >> 10) & clip_color_mask] << 16;
       } while (dst++, ++i < right);
     } else {
       uint8 *half_color_map = ppu->halfColor ? ppu->brightnessMultHalf : ppu->brightnessMult;
@@ -797,7 +798,7 @@ static NOINLINE void PpuDrawWholeLine(Ppu *ppu, uint y) {
             b += b2;
           }
         }
-        dst[0] = color_map[b] | color_map[g] << 8 | color_map[r] << 16;
+        dst[0] = color_map[r] | color_map[g] << 8 | color_map[b] << 16;
       } while (dst++, ++i < right);
     }
   } while (cw_clip_math >>= 1, ++windex < cwin.nr);
@@ -860,9 +861,9 @@ static void ppu_handlePixel(Ppu* ppu, int x, int y) {
   }
   int row = y - 1;
   uint8 *pixelBuffer = (uint8*) &ppu->renderBuffer[row * ppu->renderPitch + (x + ppu->extraLeftRight) * 4];
-  pixelBuffer[0] = ((b << 3) | (b >> 2)) * ppu->brightness / 15;
+  pixelBuffer[0] = ((r << 3) | (r >> 2)) * ppu->brightness / 15;
   pixelBuffer[1] = ((g << 3) | (g >> 2)) * ppu->brightness / 15;
-  pixelBuffer[2] = ((r << 3) | (r >> 2)) * ppu->brightness / 15;
+  pixelBuffer[2] = ((b << 3) | (b >> 2)) * ppu->brightness / 15;
   pixelBuffer[3] = 0;
 }
 

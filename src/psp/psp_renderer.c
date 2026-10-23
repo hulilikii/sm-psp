@@ -24,7 +24,10 @@
 #define SM_PSP_GE_STRIPS 0
 #endif
 
-/* Gate 4a: sprites are drawn first, in reverse precedence order with the depth test ALWAYS, each
+/* Gate 4b: software frames no longer convert to 565 on the CPU: the PPU writes 8888 in the GE's byte
+ * order (R first, see ppu.c) and the GE samples that frame directly (saves ~3.7 ms per software frame).
+ * Capture stops once a frame has a fallback reason (no VRAM copy / per-line work for lost frames).
+ * Gate 4a: sprites are drawn first, in reverse precedence order with the depth test ALWAYS, each
  * sprite writing its own depth marker ((prio*4+2)*256 + 127-k); sprite-vs-sprite is decided by OAM
  * order alone and the priority bits only matter against the BGs. BG passes follow with GEQUAL, z =
  * SNES level * 256 (BG3 high is always level 15, as in ppu.c). Depth is always on. New: fixed-colour
@@ -67,7 +70,7 @@ enum {
   kTop = (kPspHeight - kGameHeight) / 2,
 
 // VRAM: [0,0x44000) draw, [0x44000,0x88000) disp, [0x88000,0xCC000) depth,
-// [0xCC000,0x10C000) software texture, 512x512 T4 2bpp atlas, 256x512 T4 4bpp atlas.
+// [0xCC000,0x10C000) unused since Gate 4b (was the 565 software texture), 512x512 T4 2bpp atlas, 256x512 T4 4bpp atlas.
   kVramTexture = 512 * 272 * 6,
   kVramAtlas2 = kVramTexture + kTexWidth * kTexHeight * 2,
   kAtlas2Bytes = 512 * 512 / 2,
@@ -117,9 +120,9 @@ typedef struct Run { uint16_t r0, r1, first; } Run;
 typedef struct Geom { TileVert *v; int n; } Geom;
 
 static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
-static uint16_t *g_texture;                 /* uncached VRAM, software path */
 static uint8_t *g_atlas2, *g_atlas4;        /* uncached VRAM tile atlases */
-static uint8_t g_framebuffer[kGameWidth * kGameHeight * 4] __attribute__((aligned(16)));
+/* Software-PPU frame, sampled by the GE as a 256x256 8888 texture (rows 240-255 unused). */
+static uint8_t g_framebuffer[kGameWidth * 256 * 4] __attribute__((aligned(64)));
 
 static LineSnap g_lines[kMaxLines];
 static int g_line_count;
@@ -127,6 +130,7 @@ static uint16_t g_frame_reasons;
 #if SM_PSP_LOG
 static uint16_t g_logged_reasons;
 #endif
+static bool g_frame_dead;  /* a fallback reason is already known: stop capturing this frame */
 static bool g_frame_subnoop;
 static uint32_t g_frames_subnoop;
 static Run g_subruns[kMaxLines];
@@ -251,21 +255,6 @@ static uint32_t BakeColor(uint16_t c, int brightness, bool transparent) {
   return (transparent ? 0u : 0xff000000u) | b << 16 | g << 8 | r;
 }
 
-//software patch
-
-static inline uint16_t Rgb565(const uint8_t *p) {
-  return (uint16_t)(((p[0] >> 3) << 11) | ((p[1] >> 2) << 5) | (p[2] >> 3));
-}
-
-static void PspRenderer_Convert(void) {
-  for (int y = 0; y < kGameHeight; ++y) {
-    const uint8_t *src = g_framebuffer + y * kGameWidth * 4;
-    uint16_t *dst = g_texture + y * kTexWidth;
-    for (int x = 0; x < kGameWidth; ++x)
-      dst[x] = Rgb565(src + x * 4);
-  }
-}
-
 //capture
 
 static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool *tint, uint16_t *tintfix,
@@ -325,13 +314,7 @@ static void CaptureImpl(const Ppu *p, int line) {
   if (!g_ge_active || line < 1 || line > kMaxLines)
     return;
   if (line == 1) {
-    /* VRAM/CGRAM as the display saw them for this frame. One 64 KB copy per frame, never per line. */
-    PROF(uint32_t t_cpy = Now();)
-    memcpy(g_vram, p->vram, sizeof(g_vram));
-    memcpy(g_cgram, p->cgram, sizeof(g_cgram));
-    memcpy(g_oam, p->oam, sizeof(g_oam));
-    memcpy(g_hoam, p->highOam, sizeof(g_hoam));
-    PROF(g_cpy_us = Now() - t_cpy;)
+    g_frame_dead = false;
     g_obj_size = p->objSize;
     g_obj_adr1 = p->objTileAdr1;
     g_obj_adr2 = p->objTileAdr2;
@@ -339,6 +322,8 @@ static void CaptureImpl(const Ppu *p, int line) {
     g_obj_start = g_obj_rot ? (uint8_t)((p->oamAdr & 0xfe) >> 1) : 0;
     g_line_count = 0;
     g_frame_reasons = 0;
+  } else if (g_frame_dead) {
+    return;  /* DrawGe hands this frame back anyway; skip the per-line work */
   } else if (line != g_line_count + 1) {
     g_capture_gaps++;
     return;
@@ -394,6 +379,18 @@ static void CaptureImpl(const Ppu *p, int line) {
     s->reasons |= r2;
   }
   g_frame_reasons |= s->reasons;
+  if (line == 1 && !g_frame_reasons) {
+    /* VRAM/CGRAM as the display saw them for this frame. One 64 KB copy per frame, never per line,
+     * and only if the frame can still be drawn by the GE. */
+    PROF(uint32_t t_cpy = Now();)
+    memcpy(g_vram, p->vram, sizeof(g_vram));
+    memcpy(g_cgram, p->cgram, sizeof(g_cgram));
+    memcpy(g_oam, p->oam, sizeof(g_oam));
+    memcpy(g_hoam, p->highOam, sizeof(g_hoam));
+    PROF(g_cpy_us = Now() - t_cpy;)
+  }
+  if (g_frame_reasons)
+    g_frame_dead = true;
 #if SM_PSP_LOG
   if (s->reasons & ~g_logged_reasons) {  /* first time each reason is seen: remember the register state */
     g_logged_reasons |= s->reasons;
@@ -1318,7 +1315,6 @@ bool PspRenderer_GeActive(void) {
 
 static bool PspRenderer_Initialize(void) {
   uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
-  g_texture = (uint16_t *)(vram + kVramTexture);
   g_atlas2 = (uint8_t *)(vram + kVramAtlas2);
   g_atlas4 = (uint8_t *)(vram + kVramAtlas4);
   g_ge_ok = (unsigned)sceGeEdramGetSize() >= (unsigned)kVramNeeded;
@@ -1379,7 +1375,6 @@ static void PspRenderer_Destroy(void) {
   g_ppu_skip_draw = false;
   sceGuDisplay(GU_FALSE);
   sceGuTerm();
-  g_texture = NULL;
   g_atlas2 = g_atlas4 = NULL;
 }
 
@@ -1449,8 +1444,7 @@ static void PspRenderer_EndDraw(void) {
       g_frames_sw++;
     g_streak = 0;
     g_t_draw_start = Now();
-    PspRenderer_Convert();
-    sceKernelDcacheWritebackAll();
+    sceKernelDcacheWritebackRange(g_framebuffer, sizeof(g_framebuffer));
     g_t_list_start = Now();
     g_prep_us = g_t_list_start - g_t_draw_start;
     sceGuStart(GU_DIRECT, g_gu_list);
@@ -1458,9 +1452,10 @@ static void PspRenderer_EndDraw(void) {
     sceGuDisable(GU_DEPTH_TEST);
     sceGuDisable(GU_BLEND);
     sceGuEnable(GU_TEXTURE_2D);
-    sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+    sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
     sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
-    sceGuTexImage(0, kTexWidth, kTexHeight, kTexWidth, g_texture);
+    sceGuTexImage(0, 256, 256, 256, g_framebuffer);
+    sceGuTexFlush();
     int edges[8];
     int nstrip = StripEdges(kLeft, kLeft + kGameWidth, edges);
     PspVertex *v = (PspVertex *)sceGuGetMemory(nstrip * 2 * sizeof(PspVertex));
