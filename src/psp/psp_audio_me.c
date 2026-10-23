@@ -198,7 +198,10 @@ bool PspAudioMe_Render(int16_t *output, int samples, int channels, const uint8_t
   if (!WaitForValue(kShState, kIdle, ME_JOB_TIMEOUT_US)) {
     ME_STAT(g_st.render_to++);
     goto fail;
-
+  }
+  ME_STAT_T(t1);
+  ME_STAT(StatAdd(&g_st.prewait, t1 - t0));
+  
   ME_SHARED[kShSamples] = (uint32_t)samples;
   ME_SHARED[kShPortsIn] = ports[0] | ports[1] << 8 | ports[2] << 16 | (uint32_t)ports[3] << 24;
   meLibSync();
