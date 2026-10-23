@@ -15,6 +15,30 @@
 
 enum { kBooting, kIdle, kRun, kStop, kHalted, kFault };
 
+#if PSP_ME_STATS
+// Diagnostics only. Render stats are written by the audio thread, lock stats by
+// the game thread; LogStats runs on the game thread. Unsynchronised on purpose:
+// an occasional lost update in a counter is harmless.
+typedef struct { uint32_t n, sum, max; } MeStat;
+static struct {
+  MeStat job;        // ME run time seen by the CPU: kRun set -> kIdle seen (us)
+  MeStat prewait;    // render: wait for the ME to be idle before submitting (us)
+  MeStat lockwait;   // game thread: LockState wait for a running job (us)
+  uint32_t render_to, lock_to, faults, rejected;
+} g_st;
+static inline void StatAdd(MeStat *s, uint32_t v) {
+  s->n++;
+  s->sum += v;
+  if (v > s->max)
+    s->max = v;
+}
+#define ME_STAT_T(var) uint32_t var = sceKernelGetSystemTimeLow()
+#define ME_STAT(code) code
+#else
+#define ME_STAT_T(var) ((void)0)
+#define ME_STAT(code) ((void)0)
+#endif
+
 enum {
   kShState, kShProgress, kShPlayer, kShDsp, kShSamples, kShPortsIn,
   kShCount = 16,  // 64 bytes: whole cache line
@@ -163,13 +187,16 @@ bool PspAudioMe_IsActive(void) { return g_me_active; }
 
 bool PspAudioMe_Render(int16_t *output, int samples, int channels, const uint8_t ports[4]) {
   if (samples <= 0 || samples > ME_MAX_SAMPLES || channels != ME_CHANNELS || !g_me_active) {
+    ME_STAT(g_st.rejected++);
     if (samples > 0 && channels > 0)
       memset(output, 0, (size_t)samples * channels * sizeof(*output));
     return false;
   }
   size_t bytes = (size_t)samples * ME_CHANNELS * sizeof(*output);
+  ME_STAT_T(t0);
 
-  if (!WaitForValue(kShState, kIdle, ME_JOB_TIMEOUT_US))
+  if (!WaitForValue(kShState, kIdle, ME_JOB_TIMEOUT_US)) {
+    ME_STAT(g_st.render_to++);
     goto fail;
 
   ME_SHARED[kShSamples] = (uint32_t)samples;
@@ -178,8 +205,12 @@ bool PspAudioMe_Render(int16_t *output, int samples, int channels, const uint8_t
   ME_SHARED[kShState] = kRun;
   meLibSync();
 
-  if (!WaitForValue(kShState, kIdle, ME_JOB_TIMEOUT_US))
+  if (!WaitForValue(kShState, kIdle, ME_JOB_TIMEOUT_US)) {
+    ME_STAT(g_st.render_to++);
     goto fail;
+  }
+  ME_STAT_T(t2);
+  ME_STAT(StatAdd(&g_st.job, t2 - t1));
 
   CpuInvalidate(g_me_output, bytes);  // output is only ever written by the ME
   memcpy(output, g_me_output, bytes);
@@ -188,6 +219,7 @@ bool PspAudioMe_Render(int16_t *output, int samples, int channels, const uint8_t
 fail:
   if (ME_SHARED[kShState] == kFault) {
     // ME is dead: fall back to the CPU path. Drop stale CPU lines first.
+    ME_STAT(g_st.faults++);
     g_me_active = false;
     CpuInvalidate(g_me_player, sizeof(*g_me_player));
     CpuInvalidate(g_me_player->dsp, sizeof(*g_me_player->dsp));
@@ -205,11 +237,13 @@ void PspAudioMe_LockState(void) {
     if (sceKernelGetSystemTimeLow() - start >= ME_JOB_TIMEOUT_US) {
       // Treat the ME as dead; the CPU audio path takes over. Its state is as of
       // the ME's last write-back.
+      ME_STAT(g_st.lock_to++);
       g_me_active = false;
       break;
     }
     sceKernelDelayThread(ME_POLL_US);
   }
+  ME_STAT(StatAdd(&g_st.lockwait, sceKernelGetSystemTimeLow() - start));
   CpuInvalidate(g_me_player, sizeof(*g_me_player));
   CpuInvalidate(g_me_player->dsp, sizeof(*g_me_player->dsp));
 }
@@ -231,3 +265,17 @@ void PspAudioMe_Shutdown(void) {
   WaitForValue(kShState, kHalted, ME_BOOT_TIMEOUT_US);
   g_me_active = false;
 }
+
+#if PSP_ME_STATS
+void PspAudioMe_LogStats(void) {
+  if (!g_me_active && g_st.job.n == 0 && g_st.faults == 0 && g_st.lock_to == 0)
+    return;
+  typeof(g_st) s = g_st;  // snapshot, then reset
+  memset(&g_st, 0, sizeof(g_st));
+#define AVG(st) (unsigned)((st).n ? (st).sum / (st).n : 0), (unsigned)(st).max
+  PspLog("ME n=%u job=%u/%u prewait=%u/%u | lock n=%u wait=%u/%u | timeouts render=%u lock=%u faults=%u rejected=%u",
+         (unsigned)s.job.n, AVG(s.job), AVG(s.prewait), (unsigned)s.lockwait.n, AVG(s.lockwait),
+         (unsigned)s.render_to, (unsigned)s.lock_to, (unsigned)s.faults, (unsigned)s.rejected);
+#undef AVG
+}
+#endif

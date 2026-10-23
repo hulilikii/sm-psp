@@ -13,6 +13,7 @@
 #include "src/snes/ppu.h"
 #include "src/psp/psp_renderer.h"
 #include "src/psp/psp_log.h"
+#include "src/psp/psp_audio_me.h"
 
 #if SM_PSP_LOG
 #define PROF(...) __VA_ARGS__
@@ -1432,6 +1433,7 @@ static void ProfLog(void) {
            AVG(p->tdec), AVG(p->draws), AVG(p->clut), AVG(p->verts));
 #undef AVG
   }
+  PspAudioMe_LogStats();  // no-op unless PSP_LOG, PSP_AUDIO_ME and PSP_ME_LOG are all on
   memset(g_prof, 0, sizeof(g_prof));
 }
 #endif
