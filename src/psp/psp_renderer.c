@@ -20,12 +20,18 @@
 #define PROF(...)
 #endif
 
+#ifndef SM_PSP_SW_PATH
+#define SM_PSP_SW_PATH -1
+#endif
+
 #ifndef SM_PSP_GE_STRIPS
 #define SM_PSP_GE_STRIPS 0
 #endif
 
-/* Gate 4b: software frames no longer convert to 565 on the CPU: the PPU writes 8888 in the GE's byte
- * order (R first, see ppu.c) and the GE samples that frame directly (saves ~3.7 ms per software frame).
+/* Gate 4b: the PPU writes 8888 in the GE's byte order (R first, see ppu.c). Sampling that frame straight
+ * from main RAM cost 17.5 ms of GE time on hardware (log g4b), so software frames now pick, by
+ * measuring at run time (SM_PSP_SW_PATH = -1), between the old CPU conversion to a 565 VRAM texture
+ * and a GE copy of the 8888 frame into VRAM followed by sampling it there.
  * Capture stops once a frame has a fallback reason (no VRAM copy / per-line work for lost frames).
  * Gate 4a: sprites are drawn first, in reverse precedence order with the depth test ALWAYS, each
  * sprite writing its own depth marker ((prio*4+2)*256 + 127-k); sprite-vs-sprite is decided by OAM
@@ -70,7 +76,7 @@ enum {
   kTop = (kPspHeight - kGameHeight) / 2,
 
 // VRAM: [0,0x44000) draw, [0x44000,0x88000) disp, [0x88000,0xCC000) depth,
-// [0xCC000,0x10C000) unused since Gate 4b (was the 565 software texture), 512x512 T4 2bpp atlas, 256x512 T4 4bpp atlas.
+// [0xCC000,0x10C000) software-frame texture (565 512x256, or 8888 256x256), 512x512 T4 2bpp atlas, 256x512 T4 4bpp atlas.
   kVramTexture = 512 * 272 * 6,
   kVramAtlas2 = kVramTexture + kTexWidth * kTexHeight * 2,
   kAtlas2Bytes = 512 * 512 / 2,
@@ -121,7 +127,8 @@ typedef struct Geom { TileVert *v; int n; } Geom;
 
 static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
 static uint8_t *g_atlas2, *g_atlas4;        /* uncached VRAM tile atlases */
-/* Software-PPU frame, sampled by the GE as a 256x256 8888 texture (rows 240-255 unused). */
+static uint16_t *g_texture;                 /* uncached VRAM: 565 texture, or the 8888 copy target (256x256x4 = same bytes) */
+/* Software-PPU frame, 256x256 8888 (rows 240-255 unused). */
 static uint8_t g_framebuffer[kGameWidth * 256 * 4] __attribute__((aligned(64)));
 
 static LineSnap g_lines[kMaxLines];
@@ -200,6 +207,9 @@ static bool g_ge_active;
 static int g_ge_level;  /* 0 software, 1 GE, 2 GE without tint (tint frames go back to software) */
 static unsigned g_vcount_last;
 static uint32_t g_frame;
+static int g_swpath = SM_PSP_SW_PATH;  /* -1 calibrating, 0 CPU 565 convert, 1 GE copy to VRAM */
+enum { kSwPaths = 2, kSwCalFrames = 30, kSwCalSkip = 3 };
+static uint32_t g_cal_frames, g_cal_sum[kSwPaths], g_cal_n[kSwPaths];
 static uint32_t g_frames_ge, g_frames_sw, g_reason_counts[kReasonCount];
 
 //profiling
@@ -253,6 +263,21 @@ static uint32_t BakeColor(uint16_t c, int brightness, bool transparent) {
   uint32_t g = (uint32_t)(((g5 << 3) | (g5 >> 2)) * brightness / 15);
   uint32_t b = (uint32_t)(((b5 << 3) | (b5 >> 2)) * brightness / 15);
   return (transparent ? 0u : 0xff000000u) | b << 16 | g << 8 | r;
+}
+
+ //software patch
+ 
+static inline uint16_t Rgb565(const uint8_t *p) {
+  return (uint16_t)((p[0] >> 3) | (p[1] >> 2) << 5 | (p[2] >> 3) << 11);  /* PSP 5650: R in the low bits */
+}
+
+static void PspRenderer_Convert(void) {
+  for (int y = 0; y < kGameHeight; y++) {
+    const uint8_t *src = g_framebuffer + y * kGameWidth * 4;
+    uint16_t *dst = g_texture + y * kTexWidth;
+    for (int x = 0; x < kGameWidth; x++)
+      dst[x] = Rgb565(src + x * 4);
+  }
 }
 
 //capture
@@ -1317,6 +1342,7 @@ static bool PspRenderer_Initialize(void) {
   uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
   g_atlas2 = (uint8_t *)(vram + kVramAtlas2);
   g_atlas4 = (uint8_t *)(vram + kVramAtlas4);
+  g_texture = (uint16_t *)(vram + kVramTexture);
   g_ge_ok = (unsigned)sceGeEdramGetSize() >= (unsigned)kVramNeeded;
   PspLog("edram size=%u needed=%u ge_ok=%d", (unsigned)sceGeEdramGetSize(),
          (unsigned)kVramNeeded, (int)g_ge_ok);
@@ -1376,6 +1402,7 @@ static void PspRenderer_Destroy(void) {
   sceGuDisplay(GU_FALSE);
   sceGuTerm();
   g_atlas2 = g_atlas4 = NULL;
+  g_texture = NULL;
 }
 
 static void PspRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {
@@ -1444,6 +1471,9 @@ static void PspRenderer_EndDraw(void) {
       g_frames_sw++;
     g_streak = 0;
     g_t_draw_start = Now();
+    int swpath = g_swpath >= 0 ? g_swpath : (int)((g_cal_frames / kSwCalFrames) % kSwPaths);
+    if (swpath == 0)
+      PspRenderer_Convert();
     sceKernelDcacheWritebackRange(g_framebuffer, sizeof(g_framebuffer));
     g_t_list_start = Now();
     g_prep_us = g_t_list_start - g_t_draw_start;
@@ -1452,9 +1482,18 @@ static void PspRenderer_EndDraw(void) {
     sceGuDisable(GU_DEPTH_TEST);
     sceGuDisable(GU_BLEND);
     sceGuEnable(GU_TEXTURE_2D);
-    sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
     sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
-    sceGuTexImage(0, 256, 256, 256, g_framebuffer);
+    if (swpath == 0) {
+      sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+      sceGuTexImage(0, kTexWidth, kTexHeight, kTexWidth, g_texture);
+    } else {
+      /* GE copy RAM -> VRAM (physical address 0x04xxxxxx), then sample the VRAM copy. */
+      void *vram_phys = (void *)(0x04000000u | ((uintptr_t)g_texture & 0x001fffffu));
+      sceGuCopyImage(GU_PSM_8888, 0, 0, kGameWidth, kGameHeight, kGameWidth, g_framebuffer, 0, 0, 256, vram_phys);
+      sceGuTexSync();
+      sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+      sceGuTexImage(0, 256, 256, 256, g_texture);
+    }
     sceGuTexFlush();
     int edges[8];
     int nstrip = StripEdges(kLeft, kLeft + kGameWidth, edges);
@@ -1466,6 +1505,18 @@ static void PspRenderer_EndDraw(void) {
     }
     GeDraw(kVtTexF, nstrip * 2, v);
     Present();
+    if (g_swpath < 0) {  /* calibration: CPU + GE cost of getting the frame on screen, per path */
+      uint32_t k = g_cal_frames++;
+      if (k % kSwCalFrames >= kSwCalSkip) {
+        g_cal_sum[swpath] += g_prep_us + g_gewait_us;
+        g_cal_n[swpath]++;
+      }
+      if (g_cal_frames == kSwPaths * kSwCalFrames) {
+        uint32_t a0 = g_cal_n[0] ? g_cal_sum[0] / g_cal_n[0] : ~0u, a1 = g_cal_n[1] ? g_cal_sum[1] / g_cal_n[1] : ~0u;
+        g_swpath = a1 < a0 ? 1 : 0;
+        PspLog("swpath: convert565=%u us, gecopy8888=%u us -> using %d", (unsigned)a0, (unsigned)a1, g_swpath);
+      }
+    }
   }
 
   /* Decide for the NEXT frame whether the software PPU may skip its drawing. */

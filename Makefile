@@ -13,6 +13,8 @@ PSP_LOG ?= 1
 PSP_LOG_FLUSH_FRAMES ?= 1800
 # PSP_GE_STRIPS=1 draws large 2D rectangles as 64-pixel-wide vertical strips (a PPSSPP docs suggestion). no gain, slightly more CPU, so it is off by default.
 PSP_GE_STRIPS ?= 0
+# How software frames reach the screen: -1 measures both paths at run time and keeps the faster one (logged), 0 = CPU conversion to a 565 VRAM texture, 1 = GE copies the 8888 frame to VRAM and samples it there.
+PSP_SW_PATH ?= -1
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
@@ -27,7 +29,7 @@ build/embedded_rom.o: sm.smc
 CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 CFLAGS += -DSM_PSP_LOG=$(PSP_LOG) -DSM_PSP_LOG_FLUSH_FRAMES=$(PSP_LOG_FLUSH_FRAMES)
-CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS)
+CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS) -DSM_PSP_SW_PATH=$(PSP_SW_PATH)
 
 # PSP-only build. PSPSDK supplies its standard libraries through build.mak.
 LIBS := -lpspaudiolib \
@@ -42,7 +44,7 @@ EXTRA_TARGETS := EBOOT.PBP
 PSP_EBOOT_TITLE := Super Metroid
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
