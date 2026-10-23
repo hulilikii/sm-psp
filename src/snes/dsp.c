@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#ifdef __PSP__
+#include <malloc.h>
+#endif
 
 #include "dsp.h"
 #include "apu.h"
@@ -61,7 +64,13 @@ static int16_t dsp_getSample(Dsp* dsp, int ch, int sampleNum, int offset);
 static void dsp_handleNoise(Dsp* dsp);
 
 Dsp* dsp_init(uint8_t *ram) {
+#ifdef __PSP__
+  // 64-byte aligned and padded: the Media Engine flushes/invalidates this struct
+  // by whole cache lines, which must not overlap other heap data.
+  Dsp* dsp = memalign(64, (sizeof(Dsp) + 63) & ~(size_t)63);
+#else
   Dsp* dsp = malloc(sizeof(Dsp));
+#endif
   dsp->apu_ram = ram;
   return dsp;
 }
@@ -567,11 +576,15 @@ void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
 
 void dsp_getSamples(Dsp* dsp, int16_t* sampleData, int samplesPerFrame) {
   // resample from 534 samples per frame to wanted value
-  double adder = 534.0 / samplesPerFrame;
-  double location = 0.0;
+  // float, not double: double is software-emulated on the PSP (and on the ME).
+  float adder = 534.0f / samplesPerFrame;
+  float location = 0.0f;
   for(int i = 0; i < samplesPerFrame; i++) {
-    sampleData[i * 2] = dsp->sampleBuffer[((int) location) * 2];
-    sampleData[i * 2 + 1] = dsp->sampleBuffer[((int) location) * 2 + 1];
+    int idx = (int) location;
+    if (idx > 533)
+      idx = 533;
+    sampleData[i * 2] = dsp->sampleBuffer[idx * 2];
+    sampleData[i * 2 + 1] = dsp->sampleBuffer[idx * 2 + 1];
     location += adder;
   }
   dsp->sampleOffset = 0;

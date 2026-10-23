@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#ifdef __PSP__
+#include <malloc.h>
+#endif
 #include "types.h"
 #include "snes/spc.h"
 #include "snes/dsp_regs.h"
@@ -1511,7 +1514,12 @@ void Sfx3_Init(SpcPlayer *p) {
 }
 
 SpcPlayer *SpcPlayer_Create(void) {
+#ifdef __PSP__
+  // 64-byte aligned and padded for ME cache-line flushes (see psp_audio_me.c).
+  SpcPlayer *p = (SpcPlayer *)memalign(64, (sizeof(SpcPlayer) + 63) & ~(size_t)63);
+#else
   SpcPlayer *p = (SpcPlayer *)malloc(sizeof(SpcPlayer));
+#endif
   memset(p, 0, sizeof(SpcPlayer));
   p->dsp = dsp_init(p->ram);
   p->reg_write_history = 0;

@@ -6,6 +6,10 @@
 #include "funcs.h"
 #include "spc_player.h"
 #include "util.h"
+#include "config.h"
+#if PSP_AUDIO_ME
+#include "psp/psp_audio_me.h"
+#endif
 
 struct StateRecorder;
 
@@ -593,7 +597,7 @@ static bool IsFrameEmpty(ApuWriteEnt *w) {
 }
 
 void RtlPushApuState(void) {
-  RtlApuLock();
+  RtlApuQueueLock();
   if (!is_uploading_apu) {
     // Strive for the queue to be empty.
     if (g_apu_queue_size == 0) {
@@ -601,7 +605,7 @@ void RtlPushApuState(void) {
     } else {
       if (g_apu_time_since_empty >= 32 && IsFrameEmpty(&g_apu_write)) {
         g_apu_time_since_empty -= 4;
-        RtlApuUnlock();
+        RtlApuQueueUnlock();
         return;
       }
       g_apu_time_since_empty++;
@@ -622,7 +626,7 @@ void RtlPushApuState(void) {
   } else {
     g_apu_queue_size = 0;
   }
-  RtlApuUnlock();
+  RtlApuQueueUnlock();
 }
 
 static void RtlPopApuState_Locked(void) {
@@ -639,6 +643,17 @@ static void RtlPopApuState_Locked(void) {
   }
 }
 
+// ME path: pop one queued frame of port writes (255 = unset). Takes the queue lock.
+static void RtlPopApuPorts(uint8 ports[4]) {
+  memset(ports, 0xff, 4);
+  RtlApuQueueLock();
+  if (!is_uploading_apu && g_apu_queue_size != 0) {
+    ApuWriteEnt *w = &g_apu_write_ents[(g_apu_write_ent_pos - g_apu_queue_size--) & (kApuMaxQueueSize - 1)];
+    memcpy(ports, w->ports, 4);
+  }
+  RtlApuQueueUnlock();
+}
+
 static void RtlResetApuQueue(void) {
   g_apu_write_ent_pos = g_apu_time_since_empty = g_apu_queue_size = 0;
   memset(&g_apu_write, 0xff, sizeof(g_apu_write));
@@ -646,7 +661,9 @@ static void RtlResetApuQueue(void) {
 
 void RtlApuUpload(const uint8 *p) {
   RtlApuLock();
+  RtlApuQueueLock();
   RtlResetApuQueue();
+  RtlApuQueueUnlock();
   SpcPlayer_Upload(g_spc_player, p);
   RtlApuUnlock();
 }
@@ -662,13 +679,16 @@ void RtlRestoreMusicAfterLoad_Locked(bool is_reset) {
     SpcPlayer_Initialize(g_spc_player);
   }
 
+  RtlApuQueueLock();
   RtlResetApuQueue();
+  RtlApuQueueUnlock();
 }
 
 void RtlSaveMusicStateToRam_Locked(void) {
   if (g_use_my_apu_code) {
     // Apply the whole contents of the queue to input ports
     SpcPlayer *spc_player = g_spc_player;
+    RtlApuQueueLock();
     for (int i = g_apu_queue_size; i; i--) {
       ApuWriteEnt *we = &g_apu_write_ents[(g_apu_write_ent_pos - i) & (kApuMaxQueueSize - 1)];
       for (int j = 0; j < 4; j++) {
@@ -676,6 +696,7 @@ void RtlSaveMusicStateToRam_Locked(void) {
           spc_player->input_ports[j] = we->ports[j];
       }
     }
+    RtlApuQueueUnlock();
     SpcPlayer_CopyVariablesToRam(g_spc_player);
     memcpy(g_snes->apu->dsp->ram, g_spc_player->dsp->ram, sizeof(Dsp) - offsetof(Dsp, ram));
     memcpy(g_snes->apu->ram, g_spc_player->ram, 65536);
@@ -684,9 +705,25 @@ void RtlSaveMusicStateToRam_Locked(void) {
 
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
   assert(channels == 2);
-  RtlApuLock();
 
+#if PSP_AUDIO_ME
+  if (g_use_my_apu_code && PspAudioMe_IsActive()) {
+    // The state lock is held for the whole ME job so the game thread cannot
+    // touch the SPC/DSP state while the ME owns it. RtlApuLockRaw does not
+    // flush caches: this thread never reads the player itself.
+    uint8 ports[4];
+    RtlApuLockRaw();
+    RtlPopApuPorts(ports);
+    PspAudioMe_Render(audio_buffer, samples, channels, ports);
+    RtlApuUnlockRaw();
+    return;
+  }
+#endif
+
+  RtlApuLock();
+  RtlApuQueueLock();
   RtlPopApuState_Locked();
+  RtlApuQueueUnlock();
 
   if (!g_use_my_apu_code) {
     if (!is_uploading_apu) {

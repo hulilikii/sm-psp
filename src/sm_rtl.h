@@ -109,8 +109,12 @@ enum {
 
 void RtlSaveLoad(int cmd, int slot);
 void RtlCheat(char c);
-void RtlApuLock();
+void RtlApuLock();       // full APU state lock (SPC/DSP + queue); also syncs the ME
 void RtlApuUnlock();
+void RtlApuLockRaw();    // state semaphore only, no ME cache sync (audio thread)
+void RtlApuUnlockRaw();
+void RtlApuQueueLock();  // port-write queue only (short, never waits for the ME)
+void RtlApuQueueUnlock();
 void RtlApuUpload(const uint8 *p);
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels);
 void RtlPushApuState();

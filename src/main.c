@@ -23,8 +23,11 @@
 #include "psp/psp_renderer.h"
 #include "psp/psp_input.h"
 #include "psp/psp_log.h"
+#if PSP_AUDIO_ME
+#include "psp/psp_audio_me.h"
+#endif
 
-PSP_MODULE_INFO("Super Metroid", 0, 1, 0);
+PSP_MODULE_INFO("スーパーメトロイド", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
 PSP_MAIN_THREAD_STACK_SIZE_KB(512);
 PSP_HEAP_SIZE_KB(-1024);
@@ -41,9 +44,6 @@ int g_got_mismatch_count;
 static uint8_t g_pixels[256 * 4 * 240] __attribute__((aligned(16)));
 static uint8_t g_my_pixels[256 * 4 * 240] __attribute__((aligned(16)));
 static struct RendererFuncs g_renderer_funcs;
-#if PSP_AUDIO_ENABLED
-static SceUID g_audio_sema = -1;
-#endif
 static volatile bool g_running = true;
 static bool g_turbo;
 static uint8 g_replay_turbo = true;
@@ -89,27 +89,83 @@ void Warning(const char *error) {
 
 #if PSP_AUDIO_ENABLED
 
+// g_audio_sema guards the SPC/DSP state (held across a whole ME job);
+// g_apu_queue_sema guards only the port-write queue (short holds).
 static SceUID g_audio_sema = -1;
+static SceUID g_apu_queue_sema = -1;
 
-void RtlApuLock(void) {
+void RtlApuLockRaw(void) {
   if (g_audio_sema >= 0)
     sceKernelWaitSema(g_audio_sema, 1, NULL);
 }
 
-void RtlApuUnlock(void) {
+void RtlApuUnlockRaw(void) {
   if (g_audio_sema >= 0)
     sceKernelSignalSema(g_audio_sema, 1);
 }
 
+void RtlApuLock(void) {
+  RtlApuLockRaw();
+#if PSP_AUDIO_ME
+  PspAudioMe_LockState();
+#endif
+}
+
+void RtlApuUnlock(void) {
+#if PSP_AUDIO_ME
+  PspAudioMe_UnlockState();
+#endif
+  RtlApuUnlockRaw();
+}
+
+void RtlApuQueueLock(void) {
+  if (g_apu_queue_sema >= 0)
+    sceKernelWaitSema(g_apu_queue_sema, 1, NULL);
+}
+
+void RtlApuQueueUnlock(void) {
+  if (g_apu_queue_sema >= 0)
+    sceKernelSignalSema(g_apu_queue_sema, 1);
+}
+
+// One SPC frame is 534 samples @ ~32040 Hz = 735 frames @ 44100 Hz. The PSP audio
+// callback asks for a different block size (1024), so render whole 735-frame
+// blocks and hand them out in pieces.
+#define SM_AUDIO_BLOCK_FRAMES 735
+static int16_t g_audio_block[SM_AUDIO_BLOCK_FRAMES * 2] __attribute__((aligned(64)));
+static unsigned g_audio_block_pos = SM_AUDIO_BLOCK_FRAMES;
+
 static void AudioCallback(void *buf, unsigned int reqn, void *pdata) {
   (void)pdata;
-  RtlRenderAudio((int16 *)buf, (int)reqn, 2);
+  int16_t *out = (int16_t *)buf;
+  while (reqn != 0) {
+    if (g_audio_block_pos >= SM_AUDIO_BLOCK_FRAMES) {
+      RtlRenderAudio(g_audio_block, SM_AUDIO_BLOCK_FRAMES, 2);
+      g_audio_block_pos = 0;
+    }
+    unsigned n = SM_AUDIO_BLOCK_FRAMES - g_audio_block_pos;
+    if (n > reqn)
+      n = reqn;
+    memcpy(out, &g_audio_block[g_audio_block_pos * 2], n * 2 * sizeof(int16_t));
+    out += n * 2;
+    g_audio_block_pos += n;
+    reqn -= n;
+  }
 }
 
 static void Audio_Init(void) {
   g_audio_sema = sceKernelCreateSema("sm-psp-audio", 0, 1, 1, NULL);
-  if (g_audio_sema < 0)
+  g_apu_queue_sema = sceKernelCreateSema("sm-psp-apuq", 0, 1, 1, NULL);
+  if (g_audio_sema < 0 || g_apu_queue_sema < 0)
     Die("sceKernelCreateSema failed");
+
+#if PSP_AUDIO_ME
+  // Before pspAudioInit so no audio callback can race the ME start-up.
+  if (PspAudioMe_Init(g_spc_player))
+    PspLog("audio: SPC/DSP running on the Media Engine");
+  else
+    PspLog("audio: Media Engine unavailable, using CPU audio");
+#endif
 
   if (pspAudioInit() < 0)
     Die("pspAudioInit failed");
@@ -119,11 +175,19 @@ static void Audio_Init(void) {
 }
 
 static void Audio_Shutdown(void) {
+  // Order: stop the audio callback first, then the ME, then the semaphores.
   pspAudioSetChannelCallback(0, NULL, NULL);
   pspAudioEnd();
+#if PSP_AUDIO_ME
+  PspAudioMe_Shutdown();
+#endif
   if (g_audio_sema >= 0) {
     sceKernelDeleteSema(g_audio_sema);
     g_audio_sema = -1;
+  }
+  if (g_apu_queue_sema >= 0) {
+    sceKernelDeleteSema(g_apu_queue_sema);
+    g_apu_queue_sema = -1;
   }
 }
 
@@ -133,6 +197,18 @@ void RtlApuLock(void) {
 }
 
 void RtlApuUnlock(void) {
+}
+
+void RtlApuLockRaw(void) {
+}
+
+void RtlApuUnlockRaw(void) {
+}
+
+void RtlApuQueueLock(void) {
+}
+
+void RtlApuQueueUnlock(void) {
 }
 
 #endif
