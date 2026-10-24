@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
+#include "dsp_resample_tab.h"
 #ifdef __PSP__
 #include <malloc.h>
 #endif
@@ -598,5 +600,37 @@ void dsp_getSamples(Dsp* dsp, int16_t* sampleData, int samplesPerFrame) {
     }
     pos += step;
   }
+  dsp->sampleOffset = 0;
+}
+
+void dsp_getSamplesHQ(Dsp* dsp, int16_t* sampleData, int samplesPerFrame, int16_t* work) {
+  if (samplesPerFrame != 735) {
+    dsp_getSamples(dsp, sampleData, samplesPerFrame);
+    return;
+  }
+  // work = [15 frames of history][534 new frames]
+  memcpy(work + 15 * 2, dsp->sampleBuffer, sizeof(dsp->sampleBuffer));
+  int k = 0, acc = 0;  // k = floor(i * 534 / 735), tracked exactly
+  for(int i = 0; i < 735; i++) {
+    const int16_t* tap = kDspResampleTab[i];
+    const int16_t* s = work + k * 2;
+    int32_t l = 16384, r = 16384;  // rounding
+    for(int m = 0; m < 16; m++) {
+      int32_t w = tap[m];
+      l += w * s[m * 2];
+      r += w * s[m * 2 + 1];
+    }
+    l >>= 15;
+    r >>= 15;
+    sampleData[i * 2] = (int16_t) (l > 32767 ? 32767 : (l < -32768 ? -32768 : l));
+    sampleData[i * 2 + 1] = (int16_t) (r > 32767 ? 32767 : (r < -32768 ? -32768 : r));
+    acc += 534;
+    if (acc >= 735) {
+      acc -= 735;
+      k++;
+    }
+  }
+  // keep the last 15 frames as history for the next block
+  memcpy(work, work + 534 * 2, 15 * 2 * sizeof(int16_t));
   dsp->sampleOffset = 0;
 }

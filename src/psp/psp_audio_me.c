@@ -50,6 +50,11 @@ static volatile uint32_t g_me_shared_storage[kShCount]
 #define ME_SHARED ((volatile uint32_t *)(UNCACHED_USER_MASK | (uintptr_t)g_me_shared_storage))
 
 static int16_t g_me_output[ME_MAX_SAMPLES * ME_CHANNELS] __attribute__((aligned(ME_CACHE_LINE)));
+// Resampler history/work buffer. Touched ONLY by the ME, so it needs no cache
+// operations, but it must own whole cache lines: 64-byte aligned and padded, or a
+// later ME write-back of a shared line could overwrite CPU data next to it.
+#define ME_RS_PAD ((DSP_RS_WORK_SAMPLES + 31) & ~31)  // int16 count, multiple of 32 = 64 bytes
+static int16_t g_me_rs_work[ME_RS_PAD] __attribute__((aligned(ME_CACHE_LINE)));
 static SpcPlayer *g_me_player;
 static bool g_me_active;
 
@@ -119,7 +124,7 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
         player->input_ports[i] = v;
     }
     SpcPlayer_GenerateSamples(player);
-    dsp_getSamples(dsp, g_me_output, (int)samples);
+    dsp_getSamplesHQ(dsp, g_me_output, (int)samples, g_me_rs_work);
 
     // Publish everything the job wrote, then signal completion.
     MeWriteback(g_me_output, samples * ME_CHANNELS * sizeof(int16_t));

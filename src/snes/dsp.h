@@ -94,6 +94,14 @@ void dsp_cycle(Dsp* dsp);
 uint8_t dsp_read(Dsp* dsp, uint8_t adr);
 void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val);
 void dsp_getSamples(Dsp* dsp, int16_t* sampleData, int samplesPerFrame);
+
+// High-quality resample of one frame (534 -> samplesPerFrame stereo frames).
+// Exact polyphase table only for samplesPerFrame == 735 (44100 Hz); other counts use
+// dsp_getSamples. `work` is caller-owned, persistent per output stream, zero-initialised,
+// and holds the previous frames' tail: DSP_RS_WORK_SAMPLES int16 values. Output is delayed
+// by 8 input samples (0.25 ms). Pad/align `work` to 64 bytes if the ME uses it.
+#define DSP_RS_WORK_SAMPLES ((15 + 534) * 2)
+void dsp_getSamplesHQ(Dsp* dsp, int16_t* sampleData, int samplesPerFrame, int16_t* work);
 void dsp_saveload(Dsp *dsp, SaveLoadFunc *func, void *ctx);
 
 #endif
