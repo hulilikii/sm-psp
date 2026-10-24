@@ -83,7 +83,9 @@ enum {
   kAtlas2Bytes = 512 * 512 / 2,
   kVramAtlas4 = kVramAtlas2 + kAtlas2Bytes,
   kAtlas4Bytes = 256 * 512 / 2,
-  kVramNeeded = kVramAtlas4 + kAtlas4Bytes,
+  kVramAtlas7 = kVramAtlas4 + kAtlas4Bytes,  /* mode 7: 256 tiles of 8x8, 8 bit, 16x16 tiles = 128x128 */
+  kAtlas7Bytes = 128 * 128,
+  kVramNeeded = kVramAtlas7 + kAtlas7Bytes,
 };
 
 // Reasons a frame is handed back to the software renderer. 
@@ -100,7 +102,8 @@ enum {
   kReasonSubWin = 4096,   /* contributing subscreen layer is windowed (TSW) */
   kReasonSubMulti = 8192, /* >1 contributing subscreen layer, or math config varies per line */
   kReasonMathBright = 16384, /* colour math in use while brightness < 15 (software clamps before brightness) */
-  kReasonCount = 15,
+  kReasonM7 = 32768,      /* mode 7 setup the GE path cannot draw (rotation, flips, charfill, varying matrix, ...) */
+  kReasonCount = 16,
 };
 
 typedef struct BgSnap {
@@ -166,7 +169,28 @@ static TileVert *g_objbase;
 static uint32_t g_clutobj[16][8][16] __attribute__((aligned(64)));
 static uint16_t g_clutobj_stamp[16];
 
-static uint32_t g_hash2[4096], g_hash4[2048];
+static uint32_t g_hash2[4096], g_hash4[2048], g_hash7[256];
+static uint16_t g_seen7[256];
+static uint8_t g_empty7[256];
+static uint8_t *g_atlas7;
+static uint32_t g_clut7[256] __attribute__((aligned(64)));
+static uint16_t g_clut7_stamp;
+static uint8_t *g_vram_u;     /* uncached VRAM base */
+static uint32_t g_draw_off;   /* VRAM offset of the buffer the GE draws into (toggles on every swap) */
+/* Mode 7 (GE path): one constant matrix per frame, b = c = 0, a, d > 0, large field, no flips/charfill/extbg. */
+typedef struct M7Cfg { int16_t m[8]; uint8_t fl, bright, bg1; } M7Cfg;
+static M7Cfg g_m7c;
+static bool g_m7_set;
+static int g_frame_mode = -1;        /* BG mode of this frame (first line that is not forced blank) */
+static bool g_m7_ok = true;          /* cleared if the texture-coordinate self test or the verification fails */
+static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at the sample point (x, y) */
+static bool g_verify_now;
+static uint32_t g_m7_vn, g_m7_vbad, g_m7_vnear;
+enum { kM7Verify = 20, kM7MaxQuads = 4096 };
+typedef struct M7Quad { int16_t x0, x1, y0, y1; float u0, u1, v0, v1; } M7Quad;
+static M7Quad g_m7q[kM7MaxQuads];
+static int g_m7_nq;
+static TileVert *g_m7v;
 static uint16_t g_seen2[4096], g_seen4[2048];
 static uint8_t g_empty2[4096], g_empty4[2048];
 static uint16_t g_mask2[4096], g_mask4[2048];  /* bit i set: tile uses pixel value i */
@@ -292,9 +316,8 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
   if (p->forcedBlank)
     return 0;
   uint16_t r = 0;
-  if (p->mode != 1)
-    r |= kReasonMode;
-  for (int l = 0; l < kLayers; l++) {
+  int nl = p->mode == 7 ? 1 : kLayers;  /* mode 7 has BG1 only */
+  for (int l = 0; l < nl; l++) {
     if (p->bgLayer[l].bigTiles)
       r |= kReasonBigTile;
     if (p->bgLayer[l].mosaicEnabled && p->mosaicSize > 1)
@@ -307,6 +330,8 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
   if (mathmask != 0 && p->preventMathMode != 3) {
     if (p->preventMathMode != 0)
       r |= kReasonMathClip;  /* prevent inside/outside the colour window: depends on the window */
+    if (p->mode == 7 && p->addSubscreen && p->screenEnabled[1] != 0)
+      r |= kReasonM7;  /* subscreen layers in mode 7 are not drawn */
     uint16_t fix = (uint16_t)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10);
     if (p->addSubscreen && p->screenEnabled[1] != 0) {
       if (fix || p->halfColor) {
@@ -336,11 +361,35 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
   return r;
 }
 
+static uint16_t M7LineReasons(const Ppu *p) {
+  const int16_t *m = p->m7matrix;
+  uint8_t fl = (uint8_t)((p->m7largeField ? 1 : 0) | (p->m7charFill ? 2 : 0) | (p->m7xFlip ? 4 : 0) |
+                         (p->m7yFlip ? 8 : 0) | (p->m7extBg ? 16 : 0));
+  uint16_t r = 0;
+  if (m[1] || m[2] || m[0] <= 0 || m[3] <= 0 || fl != 1 || !g_m7_ok)
+    r |= kReasonM7;
+  M7Cfg c;
+  memset(&c, 0, sizeof(c));
+  memcpy(c.m, m, sizeof(c.m));
+  c.fl = fl;
+  c.bright = (uint8_t)(p->brightness & 15);
+  c.bg1 = (p->screenEnabled[0] & 1) ? 1 : 0;
+  if (!g_m7_set) {
+    g_m7c = c;
+    g_m7_set = true;
+  } else if (memcmp(&c, &g_m7c, sizeof(c))) {
+    r |= kReasonM7;  /* matrix, scroll, centre or brightness changes inside the frame (HDMA) */
+  }
+  return r;
+}
+
 static void CaptureImpl(const Ppu *p, int line) {
   if (!g_ge_active || line < 1 || line > kMaxLines)
     return;
   if (line == 1) {
     g_frame_dead = false;
+    g_frame_mode = -1;
+    g_m7_set = false;
     g_obj_size = p->objSize;
     g_obj_adr1 = p->objTileAdr1;
     g_obj_adr2 = p->objTileAdr2;
@@ -382,6 +431,14 @@ static void CaptureImpl(const Ppu *p, int line) {
   s->tint = tint;
   s->tinthalf = tinthalf;
   s->tintfix = tintfix;
+  if (!forced) {
+    if (g_frame_mode < 0)
+      g_frame_mode = p->mode;
+    if (p->mode != g_frame_mode || (p->mode != 1 && p->mode != 7))
+      s->reasons |= kReasonMode;
+    if (p->mode == 7)
+      s->reasons |= M7LineReasons(p);
+  }
   /* only matters where the subscreen is added to the main screen with the fixed colour at 0 */
   s->subobj = (!forced && mm != 0 && p->preventMathMode != 3 && p->addSubscreen && (p->screenEnabled[1] & 16)) ? 1 : 0;
   s->subneg = p->subtractColor ? 1 : 0;
@@ -392,7 +449,7 @@ static void CaptureImpl(const Ppu *p, int line) {
         sw |= (uint8_t)(1 << l);
     s->subwin = sw;
   }
-  bool objon = !forced && p->mode == 1 && (p->screenEnabled[0] & 16);
+  bool objon = !forced && (p->mode == 1 || p->mode == 7) && (p->screenEnabled[0] & 16);
   s->objon = objon;
   if (objon) {
     uint16_t r2 = 0;
@@ -430,9 +487,111 @@ static void CaptureImpl(const Ppu *p, int line) {
   g_line_count = line;
 }
 
+#if SM_PSP_LOG
+/* Mode 7 probe (log only, no effect on drawing): is the matrix constant over a frame or changed per
+ * line (HDMA), how much of the 1024x1024 plane is visible, which options are in use. Runs for every
+ * frame, whether or not the GE path is on. */
+typedef struct M7Rec { int16_t m[8]; uint8_t fl; } M7Rec;  /* m: a, b, c, d, centre x, y, scroll h, v */
+static struct {
+  M7Rec first, cur;
+  int lines, chg_abcd, chg_sc, chg_fl, other_lines;
+  int amin, amax, dmin, dmax;
+  bool rot;
+} g_m7;
+static struct {
+  uint32_t n, constant, abcd, scroll, rot, large, charfill, flip, extbg, mosaic, obj, mixed;
+  uint32_t tiles_sum, tiles_max;
+} g_m7w;
+static uint32_t g_m7_total;
+
+static void M7Probe(const Ppu *p, int line) {
+  if (line < 1 || line > kMaxLines)
+    return;
+  if (line == 1)
+    memset(&g_m7, 0, sizeof(g_m7));
+  if (p->forcedBlank || p->mode != 7) {
+    g_m7.other_lines++;
+    return;
+  }
+  M7Rec r;
+  memcpy(r.m, p->m7matrix, sizeof(r.m));
+  r.fl = (uint8_t)((p->m7largeField ? 1 : 0) | (p->m7charFill ? 2 : 0) | (p->m7xFlip ? 4 : 0) | (p->m7yFlip ? 8 : 0) |
+                   (p->m7extBg ? 16 : 0) | ((p->bgLayer[0].mosaicEnabled && p->mosaicSize > 1) ? 32 : 0) |
+                   ((p->screenEnabled[0] & 16) ? 64 : 0));
+  if (g_m7.lines == 0) {
+    g_m7.first = r;
+    g_m7.amin = g_m7.amax = r.m[0];
+    g_m7.dmin = g_m7.dmax = r.m[3];
+  } else {
+    if (memcmp(r.m, g_m7.cur.m, 4 * sizeof(int16_t)))
+      g_m7.chg_abcd++;
+    if (memcmp(r.m + 4, g_m7.cur.m + 4, 4 * sizeof(int16_t)))
+      g_m7.chg_sc++;
+    if (r.fl != g_m7.cur.fl)
+      g_m7.chg_fl++;
+    if (r.m[0] < g_m7.amin) g_m7.amin = r.m[0];
+    if (r.m[0] > g_m7.amax) g_m7.amax = r.m[0];
+    if (r.m[3] < g_m7.dmin) g_m7.dmin = r.m[3];
+    if (r.m[3] > g_m7.dmax) g_m7.dmax = r.m[3];
+  }
+  if (r.m[1] || r.m[2])
+    g_m7.rot = true;
+  g_m7.cur = r;
+  g_m7.lines++;
+}
+
+static void M7FrameEnd(void) {
+  if (g_m7.lines == 0)
+    return;
+  g_m7_total++;
+  g_m7w.n++;
+  if (!g_m7.chg_abcd && !g_m7.chg_sc)
+    g_m7w.constant++;
+  else if (g_m7.chg_abcd)
+    g_m7w.abcd++;
+  else
+    g_m7w.scroll++;
+  uint8_t fl = g_m7.first.fl;
+  g_m7w.rot += g_m7.rot;
+  g_m7w.large += fl & 1;
+  g_m7w.charfill += (fl >> 1) & 1;
+  g_m7w.flip += (fl >> 2 & 3) != 0;
+  g_m7w.extbg += (fl >> 4) & 1;
+  g_m7w.mosaic += (fl >> 5) & 1;
+  g_m7w.obj += (fl >> 6) & 1;
+  g_m7w.mixed += g_m7.other_lines != 0;
+  /* plane area covered by the screen (plane pixels): 256 x lines x |a*d - b*c| / 65536, in 8x8 tiles */
+  const int16_t *m = g_m7.first.m;
+  int64_t det = (int64_t)m[0] * m[3] - (int64_t)m[1] * m[2];
+  if (det < 0)
+    det = -det;
+  uint32_t tiles = (uint32_t)((int64_t)256 * g_m7.lines * det / 65536 / 64);
+  g_m7w.tiles_sum += tiles;
+  if (tiles > g_m7w.tiles_max)
+    g_m7w.tiles_max = tiles;
+  if (g_m7_total <= 6 || g_m7_total % 600 == 0)
+    PspLog("M7s f=%u a=%d b=%d c=%d d=%d cx=%d cy=%d hs=%d vs=%d fl=%02x | last a=%d d=%d | chg abcd=%d sc=%d fl=%d lines=%d other=%d | A %d..%d D %d..%d | tiles~%u",
+           (unsigned)g_frame, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], fl, g_m7.cur.m[0], g_m7.cur.m[3],
+           g_m7.chg_abcd, g_m7.chg_sc, g_m7.chg_fl, g_m7.lines, g_m7.other_lines, g_m7.amin, g_m7.amax, g_m7.dmin,
+           g_m7.dmax, (unsigned)tiles);
+}
+
+static void M7Log(void) {
+  if (g_m7w.n == 0)
+    return;
+  PspLog("M7 n=%u const=%u abcd-per-line=%u scroll-only=%u | rot=%u large=%u charfill=%u flip=%u extbg=%u mosaic=%u obj=%u mixed=%u | tiles avg=%u max=%u",
+         (unsigned)g_m7w.n, (unsigned)g_m7w.constant, (unsigned)g_m7w.abcd, (unsigned)g_m7w.scroll, (unsigned)g_m7w.rot,
+         (unsigned)g_m7w.large, (unsigned)g_m7w.charfill, (unsigned)g_m7w.flip, (unsigned)g_m7w.extbg,
+         (unsigned)g_m7w.mosaic, (unsigned)g_m7w.obj, (unsigned)g_m7w.mixed, (unsigned)(g_m7w.tiles_sum / g_m7w.n),
+         (unsigned)g_m7w.tiles_max);
+  memset(&g_m7w, 0, sizeof(g_m7w));
+}
+#endif
+
 void PspRenderer_CaptureLine(const Ppu *p, int line) {
 #if SM_PSP_LOG
   uint32_t t = Now();
+  M7Probe(p, line);
   CaptureImpl(p, line);
   g_cap_us += Now() - t;
 #else
@@ -515,6 +674,43 @@ static void BuildClutObj(int b) {
   for (int pal = 0; pal < 8; pal++)
     for (int j = 0; j < 16; j++)
       g_clutobj[b][pal][j] = BakeColor(g_cgram[128 + pal * 16 + j], b, j == 0);
+}
+
+/* Mode 7 tiles: the pixel is the high byte of vram[tile * 64 + row * 8 + col]. Same scheme as EnsureTile.
+ * Returns true if the tile is empty (all pixels 0 = transparent). */
+static bool EnsureTile7(int t) {
+  if (g_seen7[t] == g_stamp)
+    return g_empty7[t];
+  g_seen7[t] = g_stamp;
+  const uint16_t *src = &g_vram[t * 64];
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < 64; i++)
+    h = (h ^ (src[i] >> 8)) * 16777619u;
+  if (g_hash7[t] == h)
+    return g_empty7[t];
+  g_hash7[t] = h;
+  uint32_t *dst = (uint32_t *)(g_atlas7 + (t >> 4) * 8 * 128 + (t & 15) * 8);
+  uint32_t any = 0;
+  for (int y = 0; y < 8; y++, dst += 128 / 4) {
+    uint32_t w0 = 0, w1 = 0;
+    for (int x = 0; x < 4; x++) {
+      w0 |= (uint32_t)(src[y * 8 + x] >> 8) << (8 * x);
+      w1 |= (uint32_t)(src[y * 8 + 4 + x] >> 8) << (8 * x);
+    }
+    dst[0] = w0;
+    dst[1] = w1;
+    any |= w0 | w1;
+  }
+  g_empty7[t] = any == 0;
+  return g_empty7[t];
+}
+
+static void BuildClut7(int b) {
+  if (g_clut7_stamp == g_stamp)
+    return;
+  g_clut7_stamp = g_stamp;
+  for (int i = 0; i < 256; i++)
+    g_clut7[i] = BakeColor(g_cgram[i], b, i == 0);
 }
 
 //BG layers
@@ -737,6 +933,97 @@ static bool SubObjHit(void) {
   return false;
 }
 
+/* Mode 7 frame as textured quads. With b = c = 0 the screen maps to the plane by
+ *   plane x = (X0 + a * x) >> 8                      (linear in x)
+ *   plane y = (Y0 + ((d * ry) & ~63)) >> 8           (constant along a row; ry = line, 1-based)
+ * exactly as ppu.c computes it. Rows are grouped by plane tile row when d is a multiple of 64 (the
+ * mapping is then exactly linear and one quad covers a whole tile band), otherwise by plane row (the
+ * quantisation to 64 makes the mapping stair-stepped) with a constant v. Texture coordinates are
+ * placed so that nearest sampling picks the same texel ppu.c does: target + 1/512 stays clear of
+ * texel boundaries, and g_uvh says whether the GE samples at the pixel centre or the corner. */
+static bool M7Prepare(void) {
+  g_m7_nq = 0;
+  if (g_frame_mode != 7 || !g_m7c.bg1)
+    return true;
+  const int16_t *m = g_m7c.m;
+  int a = m[0], d = m[3];
+  int xCenter = ((int16_t)(m[4] << 3)) >> 3, yCenter = ((int16_t)(m[5] << 3)) >> 3;
+  int hScroll = ((int16_t)(m[6] << 3)) >> 3, vScroll = ((int16_t)(m[7] << 3)) >> 3;
+  int clippedH = hScroll - xCenter, clippedV = vScroll - yCenter;
+  clippedH = (clippedH & 0x2000) ? (clippedH | ~1023) : (clippedH & 1023);
+  clippedV = (clippedV & 0x2000) ? (clippedV | ~1023) : (clippedV & 1023);
+  uint32_t X0 = (uint32_t)((a * clippedH) & ~63) + ((uint32_t)xCenter << 8);
+  uint32_t Yc = (uint32_t)((d * clippedV) & ~63) + ((uint32_t)yCenter << 8);
+  const float du = (float)a / 256.0f, dv = (float)d / 256.0f, eps = 1.0f / 512.0f;
+
+  struct { int xa, xb, tx; float u; } cs[160];
+  int ncs = 0;
+  for (int x = 0; x < kGameWidth; x++) {
+    uint32_t X = X0 + (uint32_t)a * (uint32_t)x;
+    if (X > 0x3ffff)
+      continue;
+    int tx = (int)(X >> 11);
+    if (ncs && cs[ncs - 1].xb == x && cs[ncs - 1].tx == tx) {
+      cs[ncs - 1].xb = x + 1;
+    } else {
+      if (ncs == 160)
+        return false;
+      cs[ncs].xa = x;
+      cs[ncs].xb = x + 1;
+      cs[ncs].tx = tx;
+      cs[ncs].u = (float)(X - ((uint32_t)tx << 11)) / 256.0f + eps;
+      ncs++;
+    }
+  }
+
+  bool band = (d % 64) == 0;
+  int r = 0;
+  while (r < g_line_count) {
+    uint32_t Y = (((uint32_t)d * (uint32_t)(r + 1)) & ~63u) + Yc;
+    if (g_lines[r].forced || Y > 0x3ffff) {
+      r++;
+      continue;
+    }
+    uint32_t key = band ? Y >> 11 : Y >> 8;
+    int r1 = r + 1;
+    while (r1 < g_line_count && !g_lines[r1].forced) {
+      uint32_t Y1 = (((uint32_t)d * (uint32_t)(r1 + 1)) & ~63u) + Yc;
+      if (Y1 > 0x3ffff || (band ? Y1 >> 11 : Y1 >> 8) != key)
+        break;
+      r1++;
+    }
+    int ty = (int)(Y >> 11);
+    float v0, v1;
+    if (band) {
+      float tv = (float)(Y - ((uint32_t)ty << 11)) / 256.0f + eps;
+      v0 = tv - g_uvh[1] * dv;
+      v1 = v0 + (float)(r1 - r) * dv;
+    } else {
+      v0 = v1 = (float)((Y >> 8) & 7) + 0.5f;
+    }
+    for (int k = 0; k < ncs; k++) {
+      int t = g_vram[ty * 128 + cs[k].tx] & 0xff;
+      if (EnsureTile7(t))
+        continue;
+      if (g_m7_nq >= kM7MaxQuads)
+        return false;
+      float ax = (float)((t & 15) * 8), ay = (float)((t >> 4) * 8);
+      float u0 = ax + cs[k].u - g_uvh[0] * du;
+      M7Quad *q = &g_m7q[g_m7_nq++];
+      q->x0 = (int16_t)cs[k].xa;
+      q->x1 = (int16_t)cs[k].xb;
+      q->y0 = (int16_t)r;
+      q->y1 = (int16_t)r1;
+      q->u0 = u0;
+      q->u1 = u0 + (float)(cs[k].xb - cs[k].xa) * du;
+      q->v0 = ay + v0;
+      q->v1 = ay + v1;
+    }
+    r = r1;
+  }
+  return true;
+}
+
 // Wait for the panel only if ahead
 static void Pace(void) {
   uint32_t t = Now();
@@ -749,14 +1036,48 @@ static void Pace(void) {
   g_vbwait_us = Now() - t;
 }
 
+/* Compares the GE image of a mode 7 frame with the software image (the software PPU drew this frame too).
+ * Only the first kM7Verify mode 7 frames; reads the draw buffer through the uncached VRAM mirror. */
+static void M7Verify(void) {
+  const uint16_t *ge = (const uint16_t *)(g_vram_u + g_draw_off);
+  uint32_t exact = 0, near = 0, bad = 0;
+  for (int y = 0; y < g_line_count; y++)
+    for (int x = 0; x < kGameWidth; x++) {
+      uint16_t sw = Rgb565(g_framebuffer + (y * kGameWidth + x) * 4), g = ge[(kTop + y) * 512 + kLeft + x];
+      if (sw == g) {
+        exact++;
+      } else {
+        int dr = (sw & 31) - (g & 31), dg = ((sw >> 5) & 63) - ((g >> 5) & 63), db = (sw >> 11) - (g >> 11);
+        if (dr >= -1 && dr <= 1 && dg >= -2 && dg <= 2 && db >= -1 && db <= 1)
+          near++;
+        else
+          bad++;
+      }
+    }
+  g_m7_vn++;
+  g_m7_vbad += bad;
+  g_m7_vnear += near;
+  PspLog("m7verify f=%u exact=%u near=%u bad=%u (quads=%d)", (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad,
+         g_m7_nq);
+  if (g_m7_vn >= 6 && g_m7_vbad / g_m7_vn > 600) {
+    g_m7_ok = false;
+    PspLog("m7verify: too many differences, GE mode 7 disabled");
+  }
+}
+
 static void Present(void) {
   uint32_t t = Now();
   g_build_us = t - g_t_list_start;
   sceGuFinish();
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
   g_gewait_us = Now() - t;
+  if (g_verify_now) {
+    g_verify_now = false;
+    M7Verify();
+  }
   Pace();
   sceGuSwapBuffers();
+  g_draw_off ^= 0x44000;
   g_vcount_last = sceDisplayGetVcount();
 }
 
@@ -914,10 +1235,23 @@ static void DrawObjSegs(int bright, bool only_excluded, int mathmask) {
   }
 }
 
+static void DrawM7(void) {
+  if (g_m7_nq == 0)
+    return;
+  PROF(g_c_clut++;)
+  sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+  sceGuClutLoad(32, g_clut7);
+  sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
+  sceGuTexImage(0, 128, 128, 128, g_atlas7);
+  GeDraw(kVtTile, g_m7_nq * 2, g_m7v);
+}
+
 // Returns false (nothing drawn, GE idle) if the frame must use the software image.
 static bool DrawGe(void) {
   g_t_draw_start = Now();
   g_ent_top = 0;
+  g_m7_nq = 0;
+  g_verify_now = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -926,6 +1260,8 @@ static bool DrawGe(void) {
   if (++g_stamp == 0) {
     memset(g_seen2, 0, sizeof(g_seen2));
     memset(g_seen4, 0, sizeof(g_seen4));
+    memset(g_seen7, 0, sizeof(g_seen7));
+    g_clut7_stamp = 0;
     memset(g_clut2_stamp, 0, sizeof(g_clut2_stamp));
     memset(g_clut4_stamp, 0, sizeof(g_clut4_stamp));
     memset(g_clutobj_stamp, 0, sizeof(g_clutobj_stamp));
@@ -1069,6 +1405,13 @@ static bool DrawGe(void) {
     else
       BuildClut2(g_lines[br->first].brightness);
   }
+  if (g_frame_mode == 7) {
+    if (!M7Prepare()) {
+      CountReasons(kReasonBudget);
+      return false;
+    }
+    BuildClut7(g_m7c.bright);
+  }
   if (total > kMaxTilesPerFrame) {  /* never draw a frame with holes */
     CountReasons(kReasonBudget);
     return false;
@@ -1115,6 +1458,7 @@ static bool DrawGe(void) {
   sceKernelDcacheWritebackRange(g_clut2, sizeof(g_clut2));
   sceKernelDcacheWritebackRange(g_clut4, sizeof(g_clut4));
   sceKernelDcacheWritebackRange(g_clutobj, sizeof(g_clutobj));
+  sceKernelDcacheWritebackRange(g_clut7, sizeof(g_clut7));
 
   g_zbg[0][0] = 8 * kZLevel;  g_zbg[0][1] = 12 * kZLevel;  /* BG1 low / high */
   g_zbg[1][0] = 7 * kZLevel;  g_zbg[1][1] = 11 * kZLevel;  /* BG2 */
@@ -1223,6 +1567,17 @@ static bool DrawGe(void) {
     }
   }
 
+  /* Mode 7 geometry (z = SNES level 5: above OBJ priority 0, below priorities 1-3). */
+  g_m7v = NULL;
+  if (g_m7_nq > 0) {
+    g_m7v = sceGuGetMemory(g_m7_nq * 2 * sizeof(TileVert));
+    for (int i = 0; i < g_m7_nq; i++) {
+      const M7Quad *q = &g_m7q[i];
+      g_m7v[2 * i] = (TileVert){q->u0, q->v0, (int16_t)(kLeft + q->x0), (int16_t)(kTop + q->y0), (int16_t)(5 * kZLevel)};
+      g_m7v[2 * i + 1] = (TileVert){q->u1, q->v1, (int16_t)(kLeft + q->x1), (int16_t)(kTop + q->y1), (int16_t)(5 * kZLevel)};
+    }
+  }
+
   /* Tint overlay: one colour rectangle per run of rows with the same fixed colour. */
   ColorVert *tv = NULL;
   if (tint) {
@@ -1247,6 +1602,7 @@ static bool DrawGe(void) {
   sceGuDepthFunc(GU_ALWAYS);
   DrawObjSegs(obj_bright, false, bmath);
   sceGuDepthFunc(GU_GEQUAL);
+  DrawM7();
   for (int l = 0; l < kLayers; l++)
     for (int pr = 0; pr < 2; pr++)
       DrawBgPass(l, pr);
@@ -1302,6 +1658,8 @@ static bool DrawGe(void) {
       sceGuEnable(GU_TEXTURE_2D);
       sceGuEnable(GU_ALPHA_TEST);
     }
+    if (!(bmath & 1))
+      DrawM7();
     for (int l = 0; l < kLayers; l++)
       if (!(bmath & (1 << l)))
         for (int pr = 0; pr < 2; pr++)
@@ -1314,6 +1672,7 @@ static bool DrawGe(void) {
     else
       g_frames_tint++;
   }
+  g_verify_now = g_m7_nq > 0 && !g_ppu_skip_draw && g_m7_vn < kM7Verify;
   Present();
   return true;
 }
@@ -1339,10 +1698,65 @@ bool PspRenderer_GeActive(void) {
   return g_ge_active;
 }
 
+/* Measures where the GE samples texture coordinates inside a pixel, because mode 7 quads depend on it:
+ * a sprite drawn 3 pixels per texel from u = 0.3 shows texel 1 at x = 2 if the GE samples at the pixel
+ * centre, texel 0 if it samples at the pixel corner (same test vertically). Anything else disables
+ * GE mode 7. Draws into the draw buffer before the first frame. */
+static void UvSelfTest(void) {
+  g_uvh[0] = g_uvh[1] = 0.5f;
+  uint16_t *tex = g_texture;
+  for (int k = 0; k < 8; k++) {
+    tex[k] = (uint16_t)k;
+    tex[k * kTexWidth] = (uint16_t)k;
+  }
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+  sceGuTexImage(0, kTexWidth, kTexHeight, kTexWidth, g_texture);
+  sceGuTexFlush();
+  TileVert *tv = sceGuGetMemory(4 * sizeof(TileVert));
+  tv[0] = (TileVert){0.3f, 0.5f, 0, 0, 0};
+  tv[1] = (TileVert){8.3f, 0.5f, 24, 1, 0};
+  tv[2] = (TileVert){0.5f, 0.3f, 40, 0, 0};
+  tv[3] = (TileVert){0.5f, 8.3f, 41, 24, 0};
+  GeDraw(kVtTile, 4, tv);
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  const uint16_t *px = (const uint16_t *)g_vram_u;  /* draw buffer 0, 5650, stride 512 */
+  int okc[2] = {1, 1}, okk[2] = {1, 1};
+  for (int axis = 0; axis < 2; axis++)
+    for (int i = 2; i < 22; i += 3) {  /* texels 1..7 only; texel 8 is not set */
+      int got = (axis == 0 ? px[i] : px[i * 512 + 40]) & 31;
+      int centre = (int)(0.3f + ((float)i + 0.5f) / 3.0f), corner = (int)(0.3f + (float)i / 3.0f);
+      if (got != centre) okc[axis] = 0;
+      if (got != corner) okk[axis] = 0;
+    }
+  bool ok = true;
+  for (int axis = 0; axis < 2; axis++) {
+    if (okc[axis])
+      g_uvh[axis] = 0.5f;
+    else if (okk[axis])
+      g_uvh[axis] = 0.0f;
+    else
+      ok = false;
+  }
+  if (!ok)
+    g_m7_ok = false;
+  PspLog("uvconv: x=%s y=%s (centre = 0.5, corner = 0) -> GE mode 7 %s", okc[0] ? "centre" : okk[0] ? "corner" : "?",
+         okc[1] ? "centre" : okk[1] ? "corner" : "?", ok ? "enabled" : "DISABLED");
+}
+
 static bool PspRenderer_Initialize(void) {
   uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
   g_atlas2 = (uint8_t *)(vram + kVramAtlas2);
   g_atlas4 = (uint8_t *)(vram + kVramAtlas4);
+  g_atlas7 = (uint8_t *)(vram + kVramAtlas7);
+  g_vram_u = (uint8_t *)vram;
   g_texture = (uint16_t *)(vram + kVramTexture);
   g_ge_ok = (unsigned)sceGeEdramGetSize() >= (unsigned)kVramNeeded;
   PspLog("edram size=%u needed=%u ge_ok=%d", (unsigned)sceGeEdramGetSize(),
@@ -1377,8 +1791,11 @@ static bool PspRenderer_Initialize(void) {
   if (g_ge_ok) {
     memset(g_hash2, 0xff, sizeof(g_hash2));
     memset(g_hash4, 0xff, sizeof(g_hash4));
+    memset(g_hash7, 0xff, sizeof(g_hash7));
     memset(g_atlas2, 0, kAtlas2Bytes);
     memset(g_atlas4, 0, kAtlas4Bytes);
+    memset(g_atlas7, 0, kAtlas7Bytes);
+    UvSelfTest();
   }
   g_ppu_line_hook = PspRenderer_CaptureLine;
 #if SM_PSP_LOG
@@ -1417,6 +1834,7 @@ typedef struct PspVertex { float u, v; float x, y, z; } PspVertex;
 
 #if SM_PSP_LOG
 static void ProfLog(void) {
+  M7Log();
   for (int c = 0; c < 3; c++) {
     const Prof *p = &g_prof[c];
     if (p->period.n == 0)
@@ -1527,6 +1945,7 @@ static void PspRenderer_EndDraw(void) {
 #if SM_PSP_LOG
   /* Per-frame timing. "game" is everything since the previous frame finished:
    * the game logic, input and the software PPU (its share is "ppu"). */
+  M7FrameEnd();
   uint32_t t_end = Now();
   if (g_t_prev_end != 0) {
     Prof *p = &g_prof[!g_ge_active ? 2 : (drew_ge ? 0 : 1)];
@@ -1574,9 +1993,9 @@ static void PspRenderer_EndDraw(void) {
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
            (unsigned)g_reason_counts[6], (unsigned)g_reason_counts[7], (unsigned)g_reason_counts[8],
            (unsigned)g_reason_counts[9]);
-    PspLog("  why2: objcfg=%u objlimit=%u subwin=%u submulti=%u mathbright=%u", (unsigned)g_reason_counts[10],
+    PspLog("  why2: objcfg=%u objlimit=%u subwin=%u submulti=%u mathbright=%u m7=%u", (unsigned)g_reason_counts[10],
            (unsigned)g_reason_counts[11], (unsigned)g_reason_counts[12], (unsigned)g_reason_counts[13],
-           (unsigned)g_reason_counts[14]);
+           (unsigned)g_reason_counts[14], (unsigned)g_reason_counts[15]);
   }
   if ((g_frame % 300) == 0)
     ProfLog();
@@ -1593,6 +2012,10 @@ static const struct RendererFuncs kPspRendererFuncs = {
   &PspRenderer_BeginDraw,
   &PspRenderer_EndDraw,
 };
+
+uint8_t *PspRenderer_FrameBuffer(void) {
+  return g_framebuffer;
+}
 
 void PspRenderer_Create(struct RendererFuncs *funcs) {
   *funcs = kPspRendererFuncs;

@@ -41,7 +41,6 @@ struct SpcPlayer *g_spc_player;
 Snes *g_snes;
 int g_got_mismatch_count;
 
-static uint8_t g_pixels[256 * 4 * 240] __attribute__((aligned(16)));
 static uint8_t g_my_pixels[256 * 4 * 240] __attribute__((aligned(16)));
 static struct RendererFuncs g_renderer_funcs;
 static volatile bool g_running = true;
@@ -215,7 +214,10 @@ void RtlApuQueueUnlock(void) {
 
 void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   (void)render_flags;
-  const uint8 *src = g_other_image ? g_my_pixels : g_pixels;
+  /* The software PPU draws straight into the renderer's frame buffer (no 245 KB copy per frame). */
+  const uint8 *src = g_other_image ? g_my_pixels : PspRenderer_FrameBuffer();
+  if (src == pixel_buffer)
+    return;
   for (int y = 0; y < 240; ++y)
     memcpy(pixel_buffer + y * pitch, src + y * 256 * 4, 256 * 4);
 }
@@ -300,7 +302,7 @@ int main(int argc, char **argv) {
   if (g_snes == NULL)
     Die("Unable to load sm.smc");
 
-  PpuBeginDrawing(g_snes->snes_ppu, g_pixels, 256 * 4, 0);
+  PpuBeginDrawing(g_snes->snes_ppu, PspRenderer_FrameBuffer(), 256 * 4, 0);
   PpuBeginDrawing(g_snes->my_ppu, g_my_pixels, 256 * 4, 0);
 
   PspLog("boot: ROM loaded, entering main loop");
