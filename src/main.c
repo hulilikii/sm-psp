@@ -84,6 +84,7 @@ void NORETURN Die(const char *error) {
 
 void Warning(const char *error) {
   fprintf(stderr, "Warning: %s\n", error);
+  PspLog("WARNING: %s", error);
 }
 
 #if PSP_AUDIO_ENABLED

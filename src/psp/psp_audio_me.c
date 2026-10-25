@@ -57,6 +57,7 @@ static int16_t g_me_output[ME_MAX_SAMPLES * ME_CHANNELS] __attribute__((aligned(
 static int16_t g_me_rs_work[ME_RS_PAD] __attribute__((aligned(ME_CACHE_LINE)));
 static SpcPlayer *g_me_player;
 static bool g_me_active;
+static int g_me_timeouts;  // consecutive render timeouts
 
 static void AlignRange(const void *a, uint32_t size, void **start, uint32_t *out) {
   uintptr_t s = (uintptr_t)a & ~(uintptr_t)(ME_CACHE_LINE - 1);
@@ -222,11 +223,13 @@ bool PspAudioMe_Render(int16_t *output, int samples, int channels, const uint8_t
 
   CpuInvalidate(g_me_output, bytes);  // output is only ever written by the ME
   memcpy(output, g_me_output, bytes);
+  g_me_timeouts = 0;
   return true;
 
 fail:
-  if (ME_SHARED[kShState] == kFault) {
-    // ME is dead: fall back to the CPU path. Drop stale CPU lines first.
+  // A fault, or 3 timeouts in a row (e.g. the ME was reset by sleep/resume): the ME is gone.
+  if (ME_SHARED[kShState] == kFault || ++g_me_timeouts >= 3) {
+    // Fall back to the CPU path. Drop stale CPU lines first.
     ME_STAT(g_st.faults++);
     g_me_active = false;
     CpuInvalidate(g_me_player, sizeof(*g_me_player));

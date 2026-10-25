@@ -703,6 +703,9 @@ void RtlSaveMusicStateToRam_Locked(void) {
   }
 }
 
+// Resampler history for the CPU path (the ME path keeps its own, inside psp_audio_me.c).
+static int16 g_cpu_rs_work[DSP_RS_WORK_SAMPLES];
+
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
   assert(channels == 2);
 
@@ -733,7 +736,7 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
     }
   } else {
     SpcPlayer_GenerateSamples(g_spc_player);
-    dsp_getSamples(g_spc_player->dsp, audio_buffer, samples);
+    dsp_getSamplesHQ(g_spc_player->dsp, audio_buffer, samples, g_cpu_rs_work);
   }
 
   RtlApuUnlock();
@@ -768,6 +771,8 @@ void RtlReadSram(void) {
 }
 
 void RtlWriteSram(void) {
+  // PSP rename() cannot overwrite an existing file, so drop the old backup first.
+  remove("saves/sm.srm.bak");
   rename("saves/sm.srm", "saves/sm.srm.bak");
   FILE *f = fopen("saves/sm.srm", "wb");
   if (f) {

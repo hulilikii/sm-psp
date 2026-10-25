@@ -184,7 +184,8 @@ static bool g_m7_set;
 static int g_frame_mode = -1;        /* BG mode of this frame (first line that is not forced blank) */
 static bool g_m7_ok = true;          /* cleared if the texture-coordinate self test or the verification fails */
 static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at the sample point (x, y) */
-static bool g_verify_now;
+static bool g_verify_now, g_audit_now;
+enum { kAuditFrames = 600 };  /* log builds: every this many frames the software PPU also draws, and the GE image is compared with it */
 static uint32_t g_m7_vn, g_m7_vbad, g_m7_vnear;
 enum { kM7Verify = 20, kM7MaxQuads = 4096 };
 typedef struct M7Quad { int16_t x0, x1, y0, y1; float u0, u1, v0, v1; } M7Quad;
@@ -806,6 +807,19 @@ static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2
 
 static void CountReasons(int mask);
 
+#if SM_PSP_LOG
+/* Why a frame went back to software with kReasonSubMulti (first few occurrences only). */
+static void NoteSubMulti(const char *what, int row, int x, int y) {
+  static unsigned n;
+  if (n++ < 12)
+    PspLog("submulti f=%u %s row=%d %d %d (blend runs=%d tint runs=%d)", (unsigned)g_frame, what, row, x, y, g_nbruns,
+           g_ntint);
+}
+#define NOTE_SUBMULTI(what, row, x, y) NoteSubMulti(what, row, x, y)
+#else
+#define NOTE_SUBMULTI(what, row, x, y) ((void)0)
+#endif
+
 //sprites
 
 static const uint8_t kSpriteSizes[8][2] = {
@@ -1038,9 +1052,11 @@ static void Pace(void) {
 
 /* Compares the GE image of a mode 7 frame with the software image (the software PPU drew this frame too).
  * Only the first kM7Verify mode 7 frames; reads the draw buffer through the uncached VRAM mirror. */
-static void M7Verify(void) {
+static void GeVerify(void) {
   const uint16_t *ge = (const uint16_t *)(g_vram_u + g_draw_off);
   uint32_t exact = 0, near = 0, bad = 0;
+  int bx = -1, by = -1;
+  uint16_t bsw = 0, bge = 0;
   for (int y = 0; y < g_line_count; y++)
     for (int x = 0; x < kGameWidth; x++) {
       uint16_t sw = Rgb565(g_framebuffer + (y * kGameWidth + x) * 4), g = ge[(kTop + y) * 512 + kLeft + x];
@@ -1048,18 +1064,30 @@ static void M7Verify(void) {
         exact++;
       } else {
         int dr = (sw & 31) - (g & 31), dg = ((sw >> 5) & 63) - ((g >> 5) & 63), db = (sw >> 11) - (g >> 11);
-        if (dr >= -1 && dr <= 1 && dg >= -2 && dg <= 2 && db >= -1 && db <= 1)
+        if (dr >= -1 && dr <= 1 && dg >= -2 && dg <= 2 && db >= -1 && db <= 1) {
           near++;
-        else
+        } else {
+          if (!bad) {
+            bx = x;
+            by = y;
+            bsw = sw;
+            bge = g;
+          }
           bad++;
+        }
       }
     }
-  g_m7_vn++;
-  g_m7_vbad += bad;
-  g_m7_vnear += near;
-  PspLog("m7verify f=%u exact=%u near=%u bad=%u (quads=%d)", (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad,
-         g_m7_nq);
-  if (g_m7_vn >= 6 && g_m7_vbad / g_m7_vn > 600) {
+  bool m7 = g_m7_nq > 0;
+  if (m7) {
+    g_m7_vn++;
+    g_m7_vbad += bad;
+    g_m7_vnear += near;
+  }
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
+         (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns, bx, by,
+         bsw, bge);
+  (void)bx; (void)by; (void)bsw; (void)bge;
+  if (m7 && g_m7_vn >= 6 && g_m7_vbad / g_m7_vn > 600) {
     g_m7_ok = false;
     PspLog("m7verify: too many differences, GE mode 7 disabled");
   }
@@ -1073,7 +1101,7 @@ static void Present(void) {
   g_gewait_us = Now() - t;
   if (g_verify_now) {
     g_verify_now = false;
-    M7Verify();
+    GeVerify();
   }
   Pace();
   sceGuSwapBuffers();
@@ -1297,6 +1325,7 @@ static bool DrawGe(void) {
       if (rc == 0)
         continue;
       if (sub_layer >= 0 && sub_layer != l) {
+        NOTE_SUBMULTI("two-sub-layers", g_subruns[i].r0, sub_layer, l);
         CountReasons(kReasonSubMulti);
         return false;
       }
@@ -1316,6 +1345,7 @@ static bool DrawGe(void) {
         bneg = g_lines[r].subneg;
         first = false;
       } else if (g_lines[r].mathmask != bmath || g_lines[r].subneg != bneg) {
+        NOTE_SUBMULTI("blend-mask-varies", r, bmath << 1 | bneg, g_lines[r].mathmask << 1 | g_lines[r].subneg);
         CountReasons(kReasonSubMulti);
         return false;
       }
@@ -1341,6 +1371,7 @@ static bool DrawGe(void) {
       bmath = ls->mathmask;
       bneg = ls->subneg;
     } else if (ls->mathmask != bmath || ls->subneg != bneg) {
+      NOTE_SUBMULTI("tint-mask-varies", r, bmath << 1 | bneg, ls->mathmask << 1 | ls->subneg);
       CountReasons(kReasonSubMulti);
       return false;
     }
@@ -1351,6 +1382,7 @@ static bool DrawGe(void) {
       g_tint[g_ntint++] = (TintRun){(uint16_t)r, (uint16_t)(r + 1), ls->tintfix, ls->tinthalf};
   }
   if (tint && blend) {  /* subscreen-layer blend and fixed-colour tint in one frame: not drawn */
+    NOTE_SUBMULTI("tint+blend", 0, g_nbruns, g_ntint);
     CountReasons(kReasonSubMulti);
     return false;
   }
@@ -1672,7 +1704,8 @@ static bool DrawGe(void) {
     else
       g_frames_tint++;
   }
-  g_verify_now = g_m7_nq > 0 && !g_ppu_skip_draw && g_m7_vn < kM7Verify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || g_audit_now);
+  g_audit_now = false;
   Present();
   return true;
 }
@@ -1941,6 +1974,12 @@ static void PspRenderer_EndDraw(void) {
 
   /* Decide for the NEXT frame whether the software PPU may skip its drawing. */
   g_ppu_skip_draw = g_ge_active && g_streak >= kSkipAfter;
+#if SM_PSP_LOG
+  if (g_ge_active && kAuditFrames && (g_frame + 1) % kAuditFrames == 0) {  /* next frame: software PPU draws too, GE image gets checked */
+    g_ppu_skip_draw = false;
+    g_audit_now = true;
+  }
+#endif
 
 #if SM_PSP_LOG
   /* Per-frame timing. "game" is everything since the previous frame finished:
