@@ -1146,8 +1146,8 @@ static void GeVerify(void) {
     if (g_ms_vn >= 3 && g_ms_vbad / g_ms_vn > 600) {
       g_multisub_ok = false;
       PspLog("geaudit: multi-layer subscreen differs too much, disabled");
-+    }
-+  }
+    }
+  }
   if (m7 && g_m7_vn >= 6 && g_m7_vbad / g_m7_vn > 600) {
     g_m7_ok = false;
     PspLog("m7verify: too many differences, GE mode 7 disabled");
