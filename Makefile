@@ -70,6 +70,23 @@ BUILD_PRX := 1
 EXTRA_TARGETS := EBOOT.PBP
 PSP_EBOOT_TITLE := スーパーメトロイド
 
+# XMB artwork and sound packed into EBOOT.PBP (pspsdk build.mak hands these to pack-pbp).
+# Each file is only used if it exists, so a missing asset never breaks the build.
+PSP_ASSET_DIR := assets/psp
+PSP_ASSET_FILES :=
+ifneq ($(wildcard $(PSP_ASSET_DIR)/ICON0.PNG),)
+PSP_EBOOT_ICON := $(PSP_ASSET_DIR)/ICON0.PNG
+PSP_ASSET_FILES += $(PSP_EBOOT_ICON)
+endif
+ifneq ($(wildcard $(PSP_ASSET_DIR)/PIC1.PNG),)
+PSP_EBOOT_PIC1 := $(PSP_ASSET_DIR)/PIC1.PNG
+PSP_ASSET_FILES += $(PSP_EBOOT_PIC1)
+endif
+ifneq ($(wildcard $(PSP_ASSET_DIR)/SND0.AT3),)
+PSP_EBOOT_SND0 := $(PSP_ASSET_DIR)/SND0.AT3
+PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
+endif
+
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
 BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
@@ -79,6 +96,9 @@ $(BUILD_STAMP):
 $(filter-out build/embedded_rom.o,$(OBJS)): $(BUILD_STAMP)
 
 include $(PSPSDK)/lib/build.mak
+
+# Rebuild the EBOOT when an asset changes.
+EBOOT.PBP: $(PSP_ASSET_FILES)
 
 .PHONY: all package
 

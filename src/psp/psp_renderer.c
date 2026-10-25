@@ -85,7 +85,11 @@ enum {
   kAtlas4Bytes = 256 * 512 / 2,
   kVramAtlas7 = kVramAtlas4 + kAtlas4Bytes,  /* mode 7: 256 tiles of 8x8, 8 bit, 16x16 tiles = 128x128 */
   kAtlas7Bytes = 128 * 128,
-  kVramNeeded = kVramAtlas7 + kAtlas7Bytes,
+  kVramSub = kVramAtlas7 + kAtlas7Bytes,      /* subscreen composite target: 256x256 8888 */
+  kSubBytes = 256 * 256 * 4,
+  kVramSubZ = kVramSub + kSubBytes,           /* its depth buffer: 256x256 16 bit */
+  kSubZBytes = 256 * 256 * 2,
+  kVramNeeded = kVramSubZ + kSubZBytes,
 };
 
 // Reasons a frame is handed back to the software renderer. 
@@ -185,6 +189,9 @@ static int g_frame_mode = -1;        /* BG mode of this frame (first line that i
 static bool g_m7_ok = true;          /* cleared if the texture-coordinate self test or the verification fails */
 static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at the sample point (x, y) */
 static bool g_verify_now, g_audit_now;
+static bool g_multisub_ok = true;   /* cleared if the first verified multi-layer subscreen frames differ from software */
+static bool g_frame_multisub, g_want_ms_verify;
+static uint32_t g_ms_vn, g_ms_vbad;
 enum { kAuditFrames = 600 };  /* log builds: every this many frames the software PPU also draws, and the GE image is compared with it */
 static uint32_t g_m7_vn, g_m7_vbad, g_m7_vnear;
 enum { kM7Verify = 20, kM7MaxQuads = 4096 };
@@ -794,7 +801,7 @@ static void CountList(const TileList *lst, int counts[2][8]) {
 
 /* Emits CPU-clipped quads for rows [r0,r1) into out[prio][pal] (no negative or
  * off-screen vertex ever reaches the GE). */
-static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8]) {
+static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8], int ox, int oy) {
   int cols = l < 2 ? 32 : 64;
   for (int i = 0; i < lst->n; i++) {
     const TileEnt *e = &g_ents[lst->first + i];
@@ -808,8 +815,8 @@ static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2
     if (e->fl & 2) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
     if (e->fl & 4) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
     TileVert *w = out[prio][pal];
-    w[0] = (TileVert){ul, vt, (int16_t)(kLeft + x0 + cl), (int16_t)(kTop + y0 + ct), (int16_t)g_zbg[l][prio]};
-    w[1] = (TileVert){ur, vb, (int16_t)(kLeft + x0 + 8 - cr), (int16_t)(kTop + y0 + 8 - cb), (int16_t)g_zbg[l][prio]};
+    w[0] = (TileVert){ul, vt, (int16_t)(ox + x0 + cl), (int16_t)(oy + y0 + ct), (int16_t)g_zbg[l][prio]};
+    w[1] = (TileVert){ur, vb, (int16_t)(ox + x0 + 8 - cr), (int16_t)(oy + y0 + 8 - cb), (int16_t)g_zbg[l][prio]};
     out[prio][pal] += 2;
   }
 }
@@ -980,9 +987,9 @@ static bool M7Prepare(void) {
   uint32_t X0 = (uint32_t)((a * clippedH) & ~63) + ((uint32_t)xCenter << 8);
   uint32_t Yc = (uint32_t)((d * clippedV) & ~63) + ((uint32_t)yCenter << 8);
   g_m7_yc = Yc;
-  const float du = (float)a / 256.0f, dv = (float)d / 256.0f, eps = 1.0f / 512.0f;
+  const float du = (float)a / 256.0f, dv = (float)d / 256.0f;
 
-  struct { int xa, xb, tx; float u; } cs[160];
+  struct { int xa, xb, tx, m0, m1; float u; } cs[160];
   int ncs = 0;
   for (int x = 0; x < kGameWidth; x++) {
     uint32_t X = X0 + (uint32_t)a * (uint32_t)x;
@@ -997,10 +1004,19 @@ static bool M7Prepare(void) {
       cs[ncs].xa = x;
       cs[ncs].xb = x + 1;
       cs[ncs].tx = tx;
-      cs[ncs].u = (float)(X - ((uint32_t)tx << 11)) / 256.0f + eps;
+      cs[ncs].u = (float)(X - ((uint32_t)tx << 11)) / 256.0f;
+      cs[ncs].m0 = cs[ncs].m1 = (int)(X & 255);
       ncs++;
     }
+    if ((int)(X & 255) < cs[ncs - 1].m0) cs[ncs - 1].m0 = (int)(X & 255);
+    if ((int)(X & 255) > cs[ncs - 1].m1) cs[ncs - 1].m1 = (int)(X & 255);
   }
+  /* Nearest sampling takes floor(u). The exact plane position of a pixel is a multiple of 1/256; shifting
+   * it by delta keeps the right texel as long as 0 <= m/256 + delta < 1 for every residue m (0..255) that
+   * occurs. Put delta in the middle of that range: the margin against GE rounding is then as large as the
+   * residues allow (a fixed 1/512 failed on hardware for scales that put pixels exactly on texel edges). */
+  for (int k = 0; k < ncs; k++)
+    cs[k].u += (float)(256 - cs[k].m0 - cs[k].m1) / 512.0f;
 
   bool band = (d % 64) == 0;
   int r = 0;
@@ -1021,7 +1037,13 @@ static bool M7Prepare(void) {
     int ty = (int)(Y >> 11);
     float v0, v1;
     if (band) {
-      float tv = (float)(Y - ((uint32_t)ty << 11)) / 256.0f + eps;
+      int m0 = (int)(Y & 255), m1 = m0;
+      for (int rr = r + 1; rr < r1; rr++) {
+        int m = (int)((((uint32_t)d * (uint32_t)(rr + 1)) & ~63u) + Yc) & 255;
+        if (m < m0) m0 = m;
+        if (m > m1) m1 = m;
+      }
+      float tv = (float)(Y - ((uint32_t)ty << 11)) / 256.0f + (float)(256 - m0 - m1) / 512.0f;
       v0 = tv - g_uvh[1] * dv;
       v1 = v0 + (float)(r1 - r) * dv;
     } else {
@@ -1118,6 +1140,14 @@ static void GeVerify(void) {
         }
       }
   }
+  if (g_frame_multisub) {
+    g_ms_vn++;
+    g_ms_vbad += bad;
+    if (g_ms_vn >= 3 && g_ms_vbad / g_ms_vn > 600) {
+      g_multisub_ok = false;
+      PspLog("geaudit: multi-layer subscreen differs too much, disabled");
++    }
++  }
   if (m7 && g_m7_vn >= 6 && g_m7_vbad / g_m7_vn > 600) {
     g_m7_ok = false;
     PspLog("m7verify: too many differences, GE mode 7 disabled");
@@ -1343,6 +1373,7 @@ static bool DrawGe(void) {
   g_ent_top = 0;
   g_m7_nq = 0;
   g_verify_now = false;
+  g_frame_multisub = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -1362,11 +1393,13 @@ static bool DrawGe(void) {
   /* Subscreen classification (fixed == 0, no half colour; see LineReasons).
    * Subscreen pixels only change the picture where a subscreen BG layer shows a
    * non-black pixel. No such layer: the add is a no-op. Exactly one such layer:
-   * real blending below. More than one would need priority compositing of the
-   * subscreen first, so those frames go back to software. */
+   * real blending below. More than one: the subscreen layers are composited by priority
+   * in an offscreen target first (multisub). */
   g_frame_subnoop = false;
   g_nbruns = 0;
   int sub_layer = -1;
+  bool multisub = false;
+  int sublayers = 0;
   for (int l = 0; l < kLayers; l++) {
     int n = 0;
     for (int r = 0; r < g_line_count; r++) {
@@ -1388,11 +1421,19 @@ static bool DrawGe(void) {
       if (rc == 0)
         continue;
       if (sub_layer >= 0 && sub_layer != l) {
-        NOTE_SUBMULTI("two-sub-layers", g_subruns[i].r0, sub_layer, l);
-        CountReasons(kReasonSubMulti);
+        if (!g_multisub_ok) {
+          NOTE_SUBMULTI("two-sub-layers", g_subruns[i].r0, sub_layer, l);
+          CountReasons(kReasonSubMulti);
+          return false;
+        }
+        multisub = true;  /* several subscreen layers: composite them (by priority) in an offscreen target first */
+      }
+      if (g_nbruns >= kMaxLines) {
+        CountReasons(kReasonBudget);
         return false;
       }
       sub_layer = l;
+      sublayers |= 1 << l;
       g_bruns[g_nbruns++] = (BRun){(uint8_t)l, g_subruns[i].first, g_subruns[i].r0, g_subruns[i].r1, kept};
     }
   }
@@ -1412,7 +1453,7 @@ static bool DrawGe(void) {
         CountReasons(kReasonSubMulti);
         return false;
       }
-      if (g_lines[r].subwin & (1 << sub_layer)) {
+      if (g_lines[r].subwin & sublayers) {
         CountReasons(kReasonSubWin);
         return false;
       }
@@ -1420,6 +1461,7 @@ static bool DrawGe(void) {
     blend = true;
     g_frame_subnoop = false;
   }
+  g_frame_multisub = blend && multisub;
 
   /* Tint rows: colour math with the fixed colour (no subscreen layer involved). All tint rows must
    * share the layer mask and add/subtract mode; the colour and halving may change per row. */
@@ -1631,7 +1673,7 @@ static bool DrawGe(void) {
         }
       }
       const Run *run = &g_runs[l][i];
-      EmitList(l, &g_mlist[l][i], run->r0, run->r1, w);
+      EmitList(l, &g_mlist[l][i], run->r0, run->r1, w, kLeft, kTop);
       for (int pr = 0; pr < 2; pr++)
         for (int p = 0; p < 8; p++)
           g_geom[l][i][pr][p].n = g_counts[l][i][pr][p] ? (int)(w[pr][p] - g_geom[l][i][pr][p].v) : 0;
@@ -1647,10 +1689,28 @@ static bool DrawGe(void) {
         g_bgeom[i][pr][p].v = w[pr][p] = c ? sceGuGetMemory(c * 2 * sizeof(TileVert)) : NULL;
       }
     }
-    EmitList(br->l, &br->lst, br->r0, br->r1, w);
+    EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop);
     for (int pr = 0; pr < 2; pr++)
       for (int p = 0; p < 8; p++)
         g_bgeom[i][pr][p].n = g_bcounts[i][pr][p] ? (int)(w[pr][p] - g_bgeom[i][pr][p].v) : 0;
+  }
+
+  /* Multi-layer subscreen: black clear rectangle for the offscreen target (also clears its depth) and the
+   * quad that adds the finished composite to the main image. */
+  ColorVert *subclear = NULL;
+  TileVert *subadd = NULL;
+  if (multisub) {
+    int rlo = g_line_count, rhi = 0;
+    for (int i = 0; i < g_nbruns; i++) {
+      if (g_bruns[i].r0 < rlo) rlo = g_bruns[i].r0;
+      if (g_bruns[i].r1 > rhi) rhi = g_bruns[i].r1;
+    }
+    subclear = sceGuGetMemory(2 * sizeof(ColorVert));
+    subclear[0] = (ColorVert){0xff000000u, 0, 0, 0};
+    subclear[1] = (ColorVert){0xff000000u, (int16_t)kGameWidth, (int16_t)g_line_count, 0};
+    subadd = sceGuGetMemory(2 * sizeof(TileVert));
+    subadd[0] = (TileVert){0.0f, (float)rlo, (int16_t)kLeft, (int16_t)(kTop + rlo), 0};
+    subadd[1] = (TileVert){(float)kGameWidth, (float)rhi, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + rhi), 0};
   }
 
   /* Sprite geometry: reverse precedence order, so the sprite that wins an overlap on hardware (lowest
@@ -1714,20 +1774,64 @@ static bool DrawGe(void) {
       DrawBgPass(l, pr);
 
   if (blend) {
-    sceGuDisable(GU_DEPTH_TEST);
-    sceGuEnable(GU_BLEND);
-    /* Blend the subscreen layer over everything it covers (colour math adds or subtracts the subscreen
-     * pixel; fixed colour is 0 so uncovered pixels are unchanged). */
-    sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
-    for (int i = 0; i < g_nbruns; i++) {
-      int b = g_lines[g_bruns[i].first].brightness;
-      for (int pr = 0; pr < 2; pr++) {
-        for (int p = 0; p < 8; p++) {
-          const Geom *g = &g_bgeom[i][pr][p];
-          if (g->n == 0)
-            continue;
-          BindBg(g_bruns[i].l, b, p);
-          GeDraw(kVtTile, g->n, g->v);
+    if (multisub) {
+      /* Composite the subscreen layers into the offscreen target: depth GEQUAL with the same level markers
+       * as the main screen decides which subscreen layer wins a pixel; uncovered pixels stay black. */
+      sceGuDrawBufferList(GU_PSM_8888, (void *)kVramSub, 256);
+      sceGuDepthBuffer((void *)kVramSubZ, 256);
+      sceGuEnable(GU_DEPTH_TEST);
+      sceGuDepthMask(GU_FALSE);
+      sceGuDepthFunc(GU_ALWAYS);
+      sceGuDisable(GU_TEXTURE_2D);
+      sceGuDisable(GU_ALPHA_TEST);
+      GeDraw(kVtColor, 2, subclear);
+      sceGuEnable(GU_TEXTURE_2D);
+      sceGuEnable(GU_ALPHA_TEST);
+      sceGuDepthFunc(GU_GEQUAL);
+      for (int i = 0; i < g_nbruns; i++) {
+        int b = g_lines[g_bruns[i].first].brightness;
+        for (int pr = 0; pr < 2; pr++) {
+          for (int p = 0; p < 8; p++) {
+            const Geom *g = &g_bgeom[i][pr][p];
+            if (g->n == 0)
+              continue;
+            BindBg(g_bruns[i].l, b, p);
+            GeDraw(kVtTile, g->n, g->v);
+          }
+        }
+      }
+      /* back to the main target; the composite is then added to (or subtracted from) the main image */
+      sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+      sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
+      sceGuDisable(GU_DEPTH_TEST);
+      sceGuEnable(GU_BLEND);
+      sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
+      sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+      sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+      sceGuTexImage(0, 256, 256, 256, g_vram_u + kVramSub);
+      sceGuTexFlush();
+      sceGuTexSync();
+      sceGuDisable(GU_ALPHA_TEST);
+      GeDraw(kVtTile, 2, subadd);
+      sceGuEnable(GU_ALPHA_TEST);
+      sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+      PROF(g_c_clut++;)
+    } else {
+      sceGuDisable(GU_DEPTH_TEST);
+      sceGuEnable(GU_BLEND);
+      /* Blend the subscreen layer over everything it covers (colour math adds or subtracts the subscreen
+       * pixel; fixed colour is 0 so uncovered pixels are unchanged). */
+      sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
+      for (int i = 0; i < g_nbruns; i++) {
+        int b = g_lines[g_bruns[i].first].brightness;
+        for (int pr = 0; pr < 2; pr++) {
+          for (int p = 0; p < 8; p++) {
+            const Geom *g = &g_bgeom[i][pr][p];
+            if (g->n == 0)
+              continue;
+            BindBg(g_bruns[i].l, b, p);
+            GeDraw(kVtTile, g->n, g->v);
+          }
         }
       }
     }
@@ -1765,7 +1869,9 @@ static bool DrawGe(void) {
       sceGuScissor(0, 0, kPspWidth, kPspHeight);
     g_frames_tint++;
   }
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || g_audit_now);
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || (g_frame_multisub && g_ms_vn < 6) || g_audit_now);
+  if (g_frame_multisub && g_ppu_skip_draw && g_ms_vn < 6)
+    g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   g_audit_now = false;
   Present();
   return true;
@@ -2059,6 +2165,11 @@ static void PspRenderer_EndDraw(void) {
 
   /* Decide for the NEXT frame whether the software PPU may skip its drawing. */
   g_ppu_skip_draw = g_ge_active && g_streak >= kSkipAfter;
+  if (g_want_ms_verify) {  /* the first multi-layer subscreen frames are checked against the software image */
+    g_want_ms_verify = false;
+    g_ppu_skip_draw = false;
+    g_audit_now = true;
+  }
 #if SM_PSP_LOG
   if (g_ge_active && kAuditFrames && (g_frame + 1) % kAuditFrames == 0) {  /* next frame: software PPU draws too, GE image gets checked */
     g_ppu_skip_draw = false;
