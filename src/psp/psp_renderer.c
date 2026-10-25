@@ -239,6 +239,9 @@ static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2
 static bool g_ge_ok;
 static bool g_ge_active;
 static int g_ge_level;  /* 0 software, 1 GE, 2 GE without tint (tint frames go back to software) */
+#ifndef SM_PSP_GE_DEFAULT
+#define SM_PSP_GE_DEFAULT 1  /* 1: boot into GE + tint (when VRAM allows), 0: boot into software */
+#endif
 static unsigned g_vcount_last;
 static uint32_t g_frame;
 static int g_swpath = SM_PSP_SW_PATH;  /* -1 calibrating, 0 CPU 565 convert, 1 GE copy to VRAM */
@@ -1904,6 +1907,15 @@ static bool PspRenderer_Initialize(void) {
     UvSelfTest();
   }
   g_ppu_line_hook = PspRenderer_CaptureLine;
+#if SM_PSP_GE_DEFAULT
+  // Start in GE + tint mode when the VRAM budget allows it. L+R+SELECT then cycles
+  // GE+tint -> GE without tint -> software -> GE+tint.
+  if (g_ge_ok) {
+    g_ge_level = 1;
+    g_ge_active = true;
+    PspLog("renderer: GE (BG1-3 + OBJ + tint) by default");
+  }
+#endif
 #if SM_PSP_LOG
   g_ppu_draw_begin = ProfPpuBegin;
   g_ppu_draw_end = ProfPpuEnd;
