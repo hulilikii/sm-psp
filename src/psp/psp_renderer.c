@@ -191,6 +191,7 @@ enum { kM7Verify = 20, kM7MaxQuads = 4096 };
 typedef struct M7Quad { int16_t x0, x1, y0, y1; float u0, u1, v0, v1; } M7Quad;
 static M7Quad g_m7q[kM7MaxQuads];
 static int g_m7_nq;
+static uint32_t g_m7_yc;  /* Y0 of the frame (for the verification log) */
 static TileVert *g_m7v;
 static uint16_t g_seen2[4096], g_seen4[2048];
 static uint8_t g_empty2[4096], g_empty4[2048];
@@ -227,6 +228,13 @@ enum { kZLevel = 256, kZBackdrop = 64 };
 typedef struct TintRun { uint16_t r0, r1, fix; uint8_t half; } TintRun;
 static TintRun g_tint[kMaxLines];
 static int g_ntint;
+/* Consecutive tint rows with the same layer mask and add/subtract mode (HDMA can change both inside a frame).
+ * Each range gets its own overlay and its own restore pass, limited to its rows with the scissor. */
+typedef struct TintRange { uint16_t r0, r1, first, n; uint8_t mask, neg; } TintRange;
+enum { kMaxTintRanges = 6 };
+static TintRange g_trange[kMaxTintRanges];
+static int g_ntr;
+static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2, y2), 2 = (x, y, w, h) */
 
 static bool g_ge_ok;
 static bool g_ge_active;
@@ -968,6 +976,7 @@ static bool M7Prepare(void) {
   clippedV = (clippedV & 0x2000) ? (clippedV | ~1023) : (clippedV & 1023);
   uint32_t X0 = (uint32_t)((a * clippedH) & ~63) + ((uint32_t)xCenter << 8);
   uint32_t Yc = (uint32_t)((d * clippedV) & ~63) + ((uint32_t)yCenter << 8);
+  g_m7_yc = Yc;
   const float du = (float)a / 256.0f, dv = (float)d / 256.0f, eps = 1.0f / 512.0f;
 
   struct { int xa, xb, tx; float u; } cs[160];
@@ -1057,6 +1066,8 @@ static void GeVerify(void) {
   uint32_t exact = 0, near = 0, bad = 0;
   int bx = -1, by = -1;
   uint16_t bsw = 0, bge = 0;
+  static uint16_t rowbad[kMaxLines];
+  memset(rowbad, 0, sizeof(rowbad));
   for (int y = 0; y < g_line_count; y++)
     for (int x = 0; x < kGameWidth; x++) {
       uint16_t sw = Rgb565(g_framebuffer + (y * kGameWidth + x) * 4), g = ge[(kTop + y) * 512 + kLeft + x];
@@ -1067,6 +1078,7 @@ static void GeVerify(void) {
         if (dr >= -1 && dr <= 1 && dg >= -2 && dg <= 2 && db >= -1 && db <= 1) {
           near++;
         } else {
+          rowbad[y]++;
           if (!bad) {
             bx = x;
             by = y;
@@ -1087,6 +1099,22 @@ static void GeVerify(void) {
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns, bx, by,
          bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
+  if (bad) {
+    int shown = 0;
+    for (int y = 0; y < g_line_count && shown < 8; y++)
+      if (rowbad[y]) {
+        shown++;
+        if (m7) {
+          uint32_t Y = (((uint32_t)g_m7c.m[3] * (uint32_t)(y + 1)) & ~63u) + g_m7_yc;
+          (void)Y;
+          PspLog("  badrow y=%d n=%u py=%u forced=%d bright=%d a=%d d=%d c=(%d,%d) s=(%d,%d)", y, (unsigned)rowbad[y], (unsigned)(Y >> 8),
+                 g_lines[y].forced, g_lines[y].brightness, g_m7c.m[0], g_m7c.m[3], g_m7c.m[4], g_m7c.m[5], g_m7c.m[6], g_m7c.m[7]);
+        } else {
+          PspLog("  badrow y=%d n=%u forced=%d bright=%d cg0=%04x", y, (unsigned)rowbad[y], g_lines[y].forced, g_lines[y].brightness,
+                 g_lines[y].cg0);
+        }
+      }
+  }
   if (m7 && g_m7_vn >= 6 && g_m7_vbad / g_m7_vn > 600) {
     g_m7_ok = false;
     PspLog("m7verify: too many differences, GE mode 7 disabled");
@@ -1274,6 +1302,38 @@ static void DrawM7(void) {
   GeDraw(kVtTile, g_m7_nq * 2, g_m7v);
 }
 
+static void ScissorRows(int r0, int r1) {
+  int y0 = kTop + r0, y1 = kTop + r1;
+  if (g_scissor_mode == 2)
+    sceGuScissor(0, y0, kPspWidth, y1 - y0);
+  else
+    sceGuScissor(0, y0, kPspWidth, y1);
+}
+
+/* Restore the layers whose colour-math bit is off: redraw them where their depth marker is still in the
+ * buffer (the overlay neither tests nor writes depth). */
+static void RestoreLayers(int mask, int obj_bright, const ColorVert *bd, int nbd) {
+  sceGuEnable(GU_DEPTH_TEST);
+  sceGuDepthFunc(GU_EQUAL);
+  sceGuDepthMask(GU_TRUE);  /* GU_TRUE masks depth writes */
+  if (!(mask & 0x20)) {
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
+    GeDraw(kVtColor, nbd, bd);
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuEnable(GU_ALPHA_TEST);
+  }
+  if (!(mask & 1))
+    DrawM7();
+  for (int l = 0; l < kLayers; l++)
+    if (!(mask & (1 << l)))
+      for (int pr = 0; pr < 2; pr++)
+        DrawBgPass(l, pr);
+  DrawObjSegs(obj_bright, true, mask);
+  sceGuDepthMask(GU_FALSE);
+  sceGuDisable(GU_DEPTH_TEST);
+}
+
 // Returns false (nothing drawn, GE idle) if the frame must use the software image.
 static bool DrawGe(void) {
   g_t_draw_start = Now();
@@ -1362,24 +1422,35 @@ static bool DrawGe(void) {
    * share the layer mask and add/subtract mode; the colour and halving may change per row. */
   bool tint = false;
   g_ntint = 0;
+  g_ntr = 0;
   for (int r = 0; r < g_line_count; r++) {
     const LineSnap *ls = &g_lines[r];
     if (!ls->tint)
       continue;
-    if (!tint) {
-      tint = true;
-      bmath = ls->mathmask;
-      bneg = ls->subneg;
-    } else if (ls->mathmask != bmath || ls->subneg != bneg) {
-      NOTE_SUBMULTI("tint-mask-varies", r, bmath << 1 | bneg, ls->mathmask << 1 | ls->subneg);
-      CountReasons(kReasonSubMulti);
-      return false;
+    TintRange *rg = g_ntr ? &g_trange[g_ntr - 1] : NULL;
+    bool newrange = false;
+    if (rg && rg->r1 == r && rg->mask == ls->mathmask && rg->neg == ls->subneg) {
+      rg->r1 = (uint16_t)(r + 1);
+    } else {
+      if (g_ntr == kMaxTintRanges || (g_ntr >= 1 && g_scissor_mode == 0)) {
+        NOTE_SUBMULTI("tint-mask-varies", r, g_trange[0].mask << 1 | g_trange[0].neg, ls->mathmask << 1 | ls->subneg);
+        CountReasons(kReasonSubMulti);
+        return false;
+      }
+      g_trange[g_ntr++] = (TintRange){(uint16_t)r, (uint16_t)(r + 1), (uint16_t)g_ntint, 0, ls->mathmask, ls->subneg};
+      newrange = true;
     }
     TintRun *tr = g_ntint ? &g_tint[g_ntint - 1] : NULL;
-    if (tr && tr->r1 == r && tr->fix == ls->tintfix && tr->half == ls->tinthalf)
+    if (!newrange && tr && tr->r1 == r && tr->fix == ls->tintfix && tr->half == ls->tinthalf)
       tr->r1 = (uint16_t)(r + 1);
     else
       g_tint[g_ntint++] = (TintRun){(uint16_t)r, (uint16_t)(r + 1), ls->tintfix, ls->tinthalf};
+    g_trange[g_ntr - 1].n = (uint16_t)(g_ntint - g_trange[g_ntr - 1].first);
+  }
+  if (g_ntr) {
+    tint = true;
+    bmath = g_trange[0].mask;
+    bneg = g_trange[0].neg;
   }
   if (tint && blend) {  /* subscreen-layer blend and fixed-colour tint in one frame: not drawn */
     NOTE_SUBMULTI("tint+blend", 0, g_nbruns, g_ntint);
@@ -1639,70 +1710,57 @@ static bool DrawGe(void) {
     for (int pr = 0; pr < 2; pr++)
       DrawBgPass(l, pr);
 
-  if (blend || tint) {
+  if (blend) {
     sceGuDisable(GU_DEPTH_TEST);
     sceGuEnable(GU_BLEND);
-    if (blend) {
-      /* Blend the subscreen layer over everything it covers (colour math adds or
-       * subtracts the subscreen pixel; fixed colour is 0 so uncovered pixels are
-       * unchanged). */
-      sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
-      for (int i = 0; i < g_nbruns; i++) {
-        int b = g_lines[g_bruns[i].first].brightness;
-        for (int pr = 0; pr < 2; pr++) {
-          for (int p = 0; p < 8; p++) {
-            const Geom *g = &g_bgeom[i][pr][p];
-            if (g->n == 0)
-              continue;
-            BindBg(g_bruns[i].l, b, p);
-            GeDraw(kVtTile, g->n, g->v);
-          }
+    /* Blend the subscreen layer over everything it covers (colour math adds or subtracts the subscreen
+     * pixel; fixed colour is 0 so uncovered pixels are unchanged). */
+    sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
+    for (int i = 0; i < g_nbruns; i++) {
+      int b = g_lines[g_bruns[i].first].brightness;
+      for (int pr = 0; pr < 2; pr++) {
+        for (int p = 0; p < 8; p++) {
+          const Geom *g = &g_bgeom[i][pr][p];
+          if (g->n == 0)
+            continue;
+          BindBg(g_bruns[i].l, b, p);
+          GeDraw(kVtTile, g->n, g->v);
         }
       }
-    } else {
-      /* Tint: dst = dst +/- fixed, or (dst +/- fixed) / 2 with half colour (factors 0.5 / 0.5). */
+    }
+    sceGuDisable(GU_BLEND);
+    RestoreLayers(bmath, obj_bright, bd, nbd);
+    g_frames_blend++;
+  } else if (tint) {
+    /* Tint: dst = dst +/- fixed, or (dst +/- fixed) / 2 with half colour (factors 0.5 / 0.5), per range of
+     * rows that share a layer mask and add/subtract mode. */
+    for (int k = 0; k < g_ntr; k++) {
+      const TintRange *rg = &g_trange[k];
+      if (g_ntr > 1)
+        sceGuScissor(0, 0, kPspWidth, kPspHeight);
+      sceGuDisable(GU_DEPTH_TEST);
+      sceGuEnable(GU_BLEND);
       sceGuDisable(GU_TEXTURE_2D);
       sceGuDisable(GU_ALPHA_TEST);
-      for (int i = 0; i < g_ntint;) {
+      for (int i = rg->first; i < rg->first + rg->n;) {
         int j = i;
-        while (j < g_ntint && g_tint[j].half == g_tint[i].half)
+        while (j < rg->first + rg->n && g_tint[j].half == g_tint[i].half)
           j++;
         unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
-        sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
+        sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
         GeDraw(kVtColor, (j - i) * 2, tv + 2 * i);
         i = j;
       }
       sceGuEnable(GU_TEXTURE_2D);
       sceGuEnable(GU_ALPHA_TEST);
+      sceGuDisable(GU_BLEND);
+      if (g_ntr > 1)
+        ScissorRows(rg->r0, rg->r1);
+      RestoreLayers(rg->mask, obj_bright, bd, nbd);
     }
-    sceGuDisable(GU_BLEND);
-
-    /* Restore the layers whose colour-math bit is off: redraw them where their depth marker is
-     * still in the buffer (the overlay neither tests nor writes depth). */
-
-    sceGuEnable(GU_DEPTH_TEST);
-    sceGuDepthFunc(GU_EQUAL);
-    sceGuDepthMask(GU_TRUE);  /* GU_TRUE masks depth writes */
-    if (!(bmath & 0x20)) {
-      sceGuDisable(GU_TEXTURE_2D);
-      sceGuDisable(GU_ALPHA_TEST);
-      GeDraw(kVtColor, nbd, bd);
-      sceGuEnable(GU_TEXTURE_2D);
-      sceGuEnable(GU_ALPHA_TEST);
-    }
-    if (!(bmath & 1))
-      DrawM7();
-    for (int l = 0; l < kLayers; l++)
-      if (!(bmath & (1 << l)))
-        for (int pr = 0; pr < 2; pr++)
-          DrawBgPass(l, pr);
-    DrawObjSegs(obj_bright, true, bmath);
-    sceGuDepthMask(GU_FALSE);
-    sceGuDisable(GU_DEPTH_TEST);
-    if (blend)
-      g_frames_blend++;
-    else
-      g_frames_tint++;
+    if (g_ntr > 1)
+      sceGuScissor(0, 0, kPspWidth, kPspHeight);
+    g_frames_tint++;
   }
   g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || g_audit_now);
   g_audit_now = false;
@@ -1758,6 +1816,15 @@ static void UvSelfTest(void) {
   tv[2] = (TileVert){0.5f, 0.3f, 40, 0, 0};
   tv[3] = (TileVert){0.5f, 8.3f, 41, 24, 0};
   GeDraw(kVtTile, 4, tv);
+  /* scissor semantics: sceGuScissor(0, 4, 480, 8) clips to rows 4..7 if the last two arguments are the
+   * right/bottom edge, to rows 4..11 if they are width/height. */
+  sceGuDisable(GU_TEXTURE_2D);
+  sceGuScissor(0, 4, kPspWidth, 8);
+  ColorVert *cv = sceGuGetMemory(2 * sizeof(ColorVert));
+  cv[0] = (ColorVert){0xffffffffu, 60, 0, 0};
+  cv[1] = (ColorVert){0xffffffffu, 64, 16, 0};
+  GeDraw(kVtColor, 2, cv);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuFinish();
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
   const uint16_t *px = (const uint16_t *)g_vram_u;  /* draw buffer 0, 5650, stride 512 */
@@ -1778,6 +1845,12 @@ static void UvSelfTest(void) {
     else
       ok = false;
   }
+  int white = 0;
+  for (int y = 0; y < 16; y++)
+    white += px[y * 512 + 62] == 0xffff;
+  g_scissor_mode = white == 4 ? 1 : white == 8 ? 2 : 0;
+  PspLog("scissor: %d rows -> mode %d (0 = unknown: tint frames with several colour-math ranges stay in software)", white,
+         g_scissor_mode);
   if (!ok)
     g_m7_ok = false;
   PspLog("uvconv: x=%s y=%s (centre = 0.5, corner = 0) -> GE mode 7 %s", okc[0] ? "centre" : okk[0] ? "corner" : "?",
