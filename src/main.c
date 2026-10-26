@@ -60,16 +60,22 @@ static int ExitCallback(int arg1, int arg2, void *common) {
   return 0;
 }
 
+/* Set by the power callback (callback thread), handled by the main loop. */
+static volatile bool g_power_suspended, g_power_resumed;
+static int PowerCallback(int unused, int flags, void *common);
+
 static int CallbackThread(SceSize args, void *argp) {
   (void)args; (void)argp;
   int cb = sceKernelCreateCallback("exit_cb", ExitCallback, NULL);
   sceKernelRegisterExitCallback(cb);
+  int pcb = sceKernelCreateCallback("power_cb", PowerCallback, NULL);
+  scePowerRegisterCallback(0, pcb);
   sceKernelSleepThreadCB();
   return 0;
 }
 
 static void SetupExitCallback(void) {
-  int thid = sceKernelCreateThread("exit_thread", CallbackThread, 0x11, 0xFA0, 0, NULL);
+  int thid = sceKernelCreateThread("exit_thread", CallbackThread, 0x11, 0x2000, 0, NULL);
   if (thid >= 0)
     sceKernelStartThread(thid, 0, NULL);
 }
@@ -191,6 +197,34 @@ static void Audio_Shutdown(void) {
   }
 }
 
+#ifndef SM_PSP_ME_RESTART
+#define SM_PSP_ME_RESTART 1  /* 0: after a resume keep using CPU audio */
+#endif
+
+/* Callback thread, before the PSP sleeps: park the ME while no job is running. The audio thread carries on
+ * with the CPU path (PspAudioMe_IsActive() is false). No PspLog here: it is not thread safe. */
+static void Audio_PowerSuspend(void) {
+#if PSP_AUDIO_ME
+  if (!PspAudioMe_IsActive())
+    return;
+  RtlApuLock();  /* waits out a running ME job and syncs the CPU view of the SPC/DSP state */
+  PspAudioMe_Shutdown();
+  RtlApuUnlock();
+#endif
+}
+
+/* Main thread, after resume: the sleep reset the ME, so start it again. On failure CPU audio stays. */
+static void Audio_PowerResume(void) {
+#if PSP_AUDIO_ME && SM_PSP_ME_RESTART
+  if (PspAudioMe_IsActive())
+    return;
+  RtlApuLockRaw();  /* the audio thread must not render while the state is handed to the ME */
+  bool ok = PspAudioMe_Init(g_spc_player);
+  RtlApuUnlockRaw();
+  PspLog("resume: ME audio %s", ok ? "restarted" : "unavailable, CPU audio");
+#endif
+}
+
 #else
 
 void RtlApuLock(void) {
@@ -211,7 +245,36 @@ void RtlApuQueueLock(void) {
 void RtlApuQueueUnlock(void) {
 }
 
+static void Audio_PowerSuspend(void) {
+}
+
+static void Audio_PowerResume(void) {
+}
+
 #endif
+
+/* Callback thread. Suspend: park ME audio. Resume: only raise a flag, the main loop does the work. */
+static int PowerCallback(int unused, int flags, void *common) {
+  (void)unused; (void)common;
+  bool waking = (flags & (PSP_POWER_CB_RESUMING | PSP_POWER_CB_RESUME_COMPLETE)) != 0;
+  if (!waking && (flags & (PSP_POWER_CB_POWER_SWITCH | PSP_POWER_CB_SUSPENDING))) {
+    Audio_PowerSuspend();
+    g_power_suspended = true;
+  }
+  if (flags & PSP_POWER_CB_RESUME_COMPLETE)
+    g_power_resumed = true;
+  return 0;
+}
+
+static void Power_Resume(void) {
+  scePowerSetClockFrequency(333, 333, 166);  /* the firmware may bring the PSP back at a lower clock */
+  PspLog("resume: suspended=%d clock cpu=%d bus=%d", (int)g_power_suspended, scePowerGetCpuClockFrequency(),
+         scePowerGetBusClockFrequency());
+  g_power_suspended = false;
+  PspRenderer_Resume();
+  Audio_PowerResume();
+  PspLog_Flush();
+}
 
 void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
   (void)render_flags;
@@ -320,6 +383,10 @@ int main(int argc, char **argv) {
 
   while (g_running) {
     SceCtrlData pad;
+    if (g_power_resumed) {
+      g_power_resumed = false;
+      Power_Resume();
+    }
     sceCtrlPeekBufferPositive(&pad, 1);
 
     /* Renderer toggle (software <-> GE): NOTE or SCREEN button, or L+R+SELECT.

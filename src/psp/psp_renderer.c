@@ -22,7 +22,11 @@
 #endif
 
 #ifndef SM_PSP_SW_PATH
-#define SM_PSP_SW_PATH -1
+#define SM_PSP_SW_PATH 1
+#endif
+
+#if !SM_PSP_LOG && SM_PSP_SW_PATH < 0
+#error "SM_PSP_SW_PATH=-1 calibrates with the log clock (Now() is 0 without it): use PSP_LOG=1 or PSP_SW_PATH=0/1"
 #endif
 
 #ifndef SM_PSP_GE_STRIPS
@@ -162,6 +166,8 @@ static bool g_verify_now, g_audit_now;
 static bool g_multisub_ok = true;   /* cleared if the first verified multi-layer subscreen frames differ from software */
 static bool g_frame_multisub, g_want_ms_verify;
 static uint32_t g_ms_vn, g_ms_vbad;
+static uint32_t g_bright_rows, g_br_vn;  /* rows drawn through the brightness multiply this frame; verified frames that had some */
+enum { kBrightVerify = 8 };
 enum { kAuditFrames = 600 };  /* log builds: every this many frames the software PPU also draws, and the GE image is compared with it */
 static uint32_t g_m7_vn, g_m7_vbad, g_m7_vnear;
 static uint32_t g_m7_bigv, g_m7_bigbad;  /* verified frames above kM7BaseQuads, and their bad pixels */
@@ -1233,9 +1239,11 @@ static void GeVerify(void) {
       PspLog("m7verify: large mode 7 frames differ, quad cap back to %d", (int)kM7BaseQuads);
     }
   }
-  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
-         (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns, bx, by,
-         bsw, bge);
+  if (g_bright_rows)
+    g_br_vn++;
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
+         (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
+         (unsigned)g_bright_rows, bx, by, bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
   if (bad) {
     int shown = 0;
@@ -1540,6 +1548,7 @@ static bool DrawGe(void) {
   g_rows_top = 0;
   g_m7_nq = 0;
   g_verify_now = false;
+  g_bright_rows = 0;
   g_frame_multisub = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
@@ -1983,6 +1992,7 @@ static bool DrawGe(void) {
     br_y0[nbr] = (int16_t)r;
     br_y1[nbr] = (int16_t)e;
     br_b[nbr++] = (uint8_t)b;
+    g_bright_rows += (uint32_t)(e - r);
     r = e;
   }
   ColorVert *brv = nbr ? sceGuGetMemory(nbr * 2 * sizeof(ColorVert)) : NULL;
@@ -2105,8 +2115,9 @@ static bool DrawGe(void) {
     sceGuEnable(GU_ALPHA_TEST);
   }
   bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || g_audit_now);
-  if (((g_frame_multisub && g_ms_vn < 6) || m7big) && g_ppu_skip_draw)
+  bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || brwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   g_audit_now = false;
   Present();
@@ -2132,6 +2143,19 @@ void PspRenderer_ToggleGe(void) {
 
 bool PspRenderer_GeActive(void) {
   return g_ge_active;
+}
+
+/* After a sleep VRAM is not trusted: forget what the atlases hold so every tile used is decoded again, and let
+ * the software PPU draw the next frames until the GE streak is rebuilt. Main thread, between frames. */
+void PspRenderer_Resume(void) {
+  memset(g_hash2, 0xff, sizeof(g_hash2));
+  memset(g_hash4, 0xff, sizeof(g_hash4));
+  memset(g_hash7, 0xff, sizeof(g_hash7));
+  g_line_count = 0;
+  g_streak = 0;
+  g_ppu_skip_draw = false;
+  g_vcount_last = sceDisplayGetVcount();
+  PspLog("resume: atlases invalidated");
 }
 
 /* Measures where the GE samples texture coordinates inside a pixel, because mode 7 quads depend on it:

@@ -158,6 +158,7 @@ bool PspAudioMe_Init(SpcPlayer *player) {
       ((uintptr_t)player->dsp & (ME_CACHE_LINE - 1)))
     return false;  // would share cache lines with unrelated heap data
 
+  g_me_timeouts = 0;  // a restart after resume must not inherit old timeouts
   // Clear the mailbox through the UNCACHED alias only. A cached memset would leave
   // dirty lines that could later overwrite the ME's uncached stores.
   for (int i = 0; i < kShCount; i++)

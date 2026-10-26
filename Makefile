@@ -14,7 +14,8 @@ PSP_LOG_FLUSH_FRAMES ?= 1800
 # PSP_GE_STRIPS=1 draws large 2D rectangles as 64-pixel-wide vertical strips (a PPSSPP docs suggestion). no gain, slightly more CPU, so it is off by default.
 PSP_GE_STRIPS ?= 0
 # How software frames reach the screen: -1 measures both paths at run time and keeps the faster one (logged), 0 = CPU conversion to a 565 VRAM texture, 1 = GE copies the 8888 frame to VRAM and samples it there.
-PSP_SW_PATH ?= -1
+# Default 1 (measured 4.1 ms vs 5.7 ms). -1 times its calibration with the log clock, so it needs PSP_LOG=1.
+PSP_SW_PATH ?= 1
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif

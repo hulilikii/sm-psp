@@ -17,3 +17,6 @@ void PspRenderer_CaptureLine(const struct Ppu *ppu, int line);
 // Cycle at runtime: software PPU blit -> GE (with tint) -> GE without tint -> software.
 void PspRenderer_ToggleGe(void);
 bool PspRenderer_GeActive(void);
+
+// After suspend/resume: VRAM atlases are rebuilt and the next frames are drawn by the software PPU.
+void PspRenderer_Resume(void);
