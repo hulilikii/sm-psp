@@ -164,7 +164,9 @@ static bool g_frame_multisub, g_want_ms_verify;
 static uint32_t g_ms_vn, g_ms_vbad;
 enum { kAuditFrames = 600 };  /* log builds: every this many frames the software PPU also draws, and the GE image is compared with it */
 static uint32_t g_m7_vn, g_m7_vbad, g_m7_vnear;
-enum { kM7Verify = 20, kM7MaxQuads = 4096 };
+static uint32_t g_m7_bigv, g_m7_bigbad;  /* verified frames above kM7BaseQuads, and their bad pixels */
+static bool g_m7big_ok = true;           /* cleared if those frames differ from software */
+enum { kM7Verify = 20, kM7MaxQuads = 7680, kM7BaseQuads = 4096, kM7BigVerify = 6 };
 typedef struct M7Quad { int16_t x0, x1, y0, y1; float u0, u1, v0, v1; } M7Quad;
 static M7Quad g_m7q[kM7MaxQuads];
 static int g_m7_nq;
@@ -1063,7 +1065,7 @@ static bool M7Prepare(void) {
       int t = g_vram[ty * 128 + cs[k].tx] & 0xff;
       if (EnsureTile7(t))
         continue;
-      if (g_m7_nq >= kM7MaxQuads)
+      if (g_m7_nq >= (g_m7big_ok ? kM7MaxQuads : kM7BaseQuads))
         return false;
       float ax = (float)((t & 15) * 8), ay = (float)((t >> 4) * 8);
       float u0 = ax + cs[k].u - g_uvh[0] * du;
@@ -1129,6 +1131,14 @@ static void GeVerify(void) {
     g_m7_vn++;
     g_m7_vbad += bad;
     g_m7_vnear += near;
+  }
+  if (m7 && g_m7_nq > kM7BaseQuads) {
+    g_m7_bigv++;
+    g_m7_bigbad += bad;
+    if (g_m7_bigv >= 3 && g_m7_bigbad / g_m7_bigv > 600) {
+      g_m7big_ok = false;
+      PspLog("m7verify: large mode 7 frames differ, quad cap back to %d", (int)kM7BaseQuads);
+    }
   }
   PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns, bx, by,
@@ -1916,8 +1926,9 @@ static bool DrawGe(void) {
       sceGuScissor(0, 0, kPspWidth, kPspHeight);
     g_frames_tint++;
   }
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || (g_frame_multisub && g_ms_vn < 6) || g_audit_now);
-  if (g_frame_multisub && g_ppu_skip_draw && g_ms_vn < 6)
+  bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   g_audit_now = false;
   Present();
