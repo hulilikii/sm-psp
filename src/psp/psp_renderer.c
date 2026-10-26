@@ -590,10 +590,104 @@ static void M7Log(void) {
          (unsigned)g_m7w.tiles_max);
   memset(&g_m7w, 0, sizeof(g_m7w));
 }
+
+/* Window probe (log only, no effect on drawing). Frames with a windowed layer go back to software
+ * (kReasonWindow). This reports which layers are windowed (main / sub / colour window), which windows
+ * they use, and whether the edges are a fixed box or change from line to line (HDMA). Every line,
+ * whether or not the GE path is on. */
+static struct {
+  int rows, on, first, last, chg1, chg2, chgsel;
+  int l1min, l1max, r1min, r1max, l2min, l2max, r2min, r2max;
+  int pl1, pr1, pl2, pr2;
+  uint32_t sel, psel, ml;
+  uint8_t mon, son, cw, w1use, w2use, tm, ts, math, add;
+} g_wp;
+static uint32_t g_wp_total;
+
+static void WinProbe(const Ppu *p, int line) {
+  if (line < 1 || line > kMaxLines)
+    return;
+  if (line == 1)
+    memset(&g_wp, 0, sizeof(g_wp));
+  if (p->forcedBlank)
+    return;
+  g_wp.rows++;
+  uint8_t m_on = 0, s_on = 0;
+  for (int l = 0; l < 5; l++) {  /* BG1-4, OBJ: one windowsel nibble each (colour window is nibble 5) */
+    if (!((p->windowsel >> (l * 4)) & 0xa))
+      continue;
+    if (p->screenWindowed[0] & (1 << l))
+      m_on |= (uint8_t)(1 << l);
+    if (p->screenWindowed[1] & (1 << l))
+      s_on |= (uint8_t)(1 << l);
+  }
+  bool cw = (p->clipMode == 1 || p->clipMode == 2 || p->preventMathMode == 1 || p->preventMathMode == 2) &&
+            ((p->windowsel >> 20) & 0xa);
+  if (!m_on && !s_on && !cw)
+    return;
+  int l1 = p->window1left, r1 = p->window1right, l2 = p->window2left, r2 = p->window2right;
+  if (g_wp.on == 0) {
+    g_wp.first = line - 1;
+    g_wp.l1min = g_wp.l1max = l1;
+    g_wp.r1min = g_wp.r1max = r1;
+    g_wp.l2min = g_wp.l2max = l2;
+    g_wp.r2min = g_wp.r2max = r2;
+    g_wp.sel = p->windowsel;
+    for (int l = 0; l < 6; l++) {
+      uint32_t n = (p->windowsel >> (l * 4)) & 0xf;
+      if (n & 2)
+        g_wp.w1use |= (uint8_t)(1 << l);
+      if (n & 8)
+        g_wp.w2use |= (uint8_t)(1 << l);
+      g_wp.ml |= (uint32_t)p->windowLayer[l].maskLogic << (2 * l);
+    }
+    g_wp.tm = p->screenEnabled[0];
+    g_wp.ts = p->screenEnabled[1];
+    for (int i = 0; i < 6; i++)
+      g_wp.math |= (uint8_t)((p->mathEnabled[i] ? 1 : 0) << i);
+    g_wp.add = p->addSubscreen ? 1 : 0;
+  } else {
+    if (l1 != g_wp.pl1 || r1 != g_wp.pr1)
+      g_wp.chg1++;
+    if (l2 != g_wp.pl2 || r2 != g_wp.pr2)
+      g_wp.chg2++;
+    if (p->windowsel != g_wp.psel)
+      g_wp.chgsel++;
+    if (l1 < g_wp.l1min) g_wp.l1min = l1;
+    if (l1 > g_wp.l1max) g_wp.l1max = l1;
+    if (r1 < g_wp.r1min) g_wp.r1min = r1;
+    if (r1 > g_wp.r1max) g_wp.r1max = r1;
+    if (l2 < g_wp.l2min) g_wp.l2min = l2;
+    if (l2 > g_wp.l2max) g_wp.l2max = l2;
+    if (r2 < g_wp.r2min) g_wp.r2min = r2;
+    if (r2 > g_wp.r2max) g_wp.r2max = r2;
+  }
+  g_wp.pl1 = l1; g_wp.pr1 = r1; g_wp.pl2 = l2; g_wp.pr2 = r2;
+  g_wp.psel = p->windowsel;
+  g_wp.mon |= m_on;
+  g_wp.son |= s_on;
+  g_wp.cw |= cw;
+  g_wp.on++;
+  g_wp.last = line - 1;
+}
+
+static void WinFrameEnd(void) {
+  if (g_wp.on == 0)
+    return;
+  g_wp_total++;
+  if (g_wp_total <= 4 || g_wp_total % 20 == 0)
+    PspLog("WIN f=%u n=%u rows=%d/%d (%d..%d) main=%02x sub=%02x cw=%d | sel=%06x ml=%03x w1=%02x w2=%02x selchg=%d | w1 L%d-%d R%d-%d chg=%d | w2 L%d-%d R%d-%d chg=%d | TM=%02x TS=%02x math=%02x add=%d",
+           (unsigned)g_frame, (unsigned)g_wp_total, g_wp.on, g_wp.rows, g_wp.first, g_wp.last, g_wp.mon, g_wp.son,
+           g_wp.cw, (unsigned)g_wp.sel, (unsigned)g_wp.ml, g_wp.w1use, g_wp.w2use, g_wp.chgsel, g_wp.l1min,
+           g_wp.l1max, g_wp.r1min, g_wp.r1max, g_wp.chg1, g_wp.l2min, g_wp.l2max, g_wp.r2min, g_wp.r2max,
+           g_wp.chg2, g_wp.tm, g_wp.ts, g_wp.math, g_wp.add);
+  g_wp.on = 0;
+}
 #endif
 
 void PspRenderer_CaptureLine(const Ppu *p, int line) {
 #if SM_PSP_LOG
+  WinProbe(p, line);
   uint32_t t = Now();
   M7Probe(p, line);
   CaptureImpl(p, line);
@@ -2441,6 +2535,7 @@ static void PspRenderer_EndDraw(void) {
   /* Per-frame timing. "game" is everything since the previous frame finished:
    * the game logic, input and the software PPU (its share is "ppu"). */
   M7FrameEnd();
+  WinFrameEnd();
   uint32_t t_end = Now();
   if (g_t_prev_end != 0) {
     Prof *p = &g_prof[!g_ge_active ? 2 : (drew_ge ? 0 : 1)];
