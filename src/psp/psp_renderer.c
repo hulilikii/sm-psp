@@ -210,7 +210,7 @@ static Geom g_bgeom[kMaxLines + 1][2][8];
 static int g_zbg[kLayers][2];  /* depth marker per BG layer/priority pass */
 static uint32_t g_frames_blend, g_frames_tint;
 /* Depth markers: z = SNES priority level * kZLevel (see DrawGe); sprites add 127-k; backdrop is below level 1. */
-enum { kZLevel = 256, kZBackdrop = 64 };
+enum { kZLevel = 256, kZBackdrop = 64, kClutBright = 15 };  /* kClutBright: all CLUTs/backdrop are baked at 15; brightness is a final multiply */
 /* Rows [r0,r1) whose main-screen pixels get the fixed colour added/subtracted (optionally halved). */
 typedef struct TintRun { uint16_t r0, r1, fix; uint8_t half; } TintRun;
 static TintRun g_tint[kMaxLines];
@@ -355,8 +355,6 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
       *tinthalf = p->halfColor;
      }
    }
-  if ((*submath || *tint) && p->brightness < 15)
-    r |= kReasonMathBright;
   return r;
 }
 
@@ -371,7 +369,6 @@ static uint16_t M7LineReasons(const Ppu *p) {
   memset(&c, 0, sizeof(c));
   memcpy(c.m, m, sizeof(c.m));
   c.fl = fl;
-  c.bright = (uint8_t)(p->brightness & 15);
   c.bg1 = (p->screenEnabled[0] & 1) ? 1 : 0;
   if (!g_m7_set) {
     g_m7c = c;
@@ -719,7 +716,7 @@ static void BuildClut7(int b) {
 static bool SameBg(const LineSnap *a, const LineSnap *b, int l) {
   const BgSnap *x = &a->bg[l], *y = &b->bg[l];
   return x->hscroll == y->hscroll && x->vscroll == y->vscroll && x->mapadr == y->mapadr &&
-         x->tileadr == y->tileadr && (x->flags & 7) == (y->flags & 7) && a->brightness == b->brightness;
+         x->tileadr == y->tileadr && (x->flags & 7) == (y->flags & 7);
 }
 
 static bool SameSub(const LineSnap *a, const LineSnap *b, int l) {
@@ -1430,18 +1427,17 @@ static void DrawBgPass(int l, int pr) {
         i++;
         continue;
       }
-      int b = g_lines[g_runs[l][i].first].brightness;
       const TileVert *v = g->v;
       int n = g->n, j = i + 1;
       for (; j < nr; j++) {
         const Geom *h = &g_geom[l][j][pr][p];
         if (h->n == 0)
           continue;
-        if (h->v != v + n || g_lines[g_runs[l][j].first].brightness != b)
+        if (h->v != v + n)
           break;
         n += h->n;
       }
-      BindBg(l, b, p);
+      BindBg(l, kClutBright, p);
       GeDraw(kVtTile, n, v);
       i = j;
     }
@@ -1459,18 +1455,17 @@ static void DrawBlendBgs(void) {
             i++;
             continue;
           }
-          int b = g_lines[g_bruns[i].first].brightness;
           const TileVert *v = g->v;
           int n = g->n, j = i + 1;
           for (; j < g_nbruns; j++) {
             const Geom *h = &g_bgeom[j][pr][p];
             if (g_bruns[j].l != l || h->n == 0)
               continue;
-            if (h->v != v + n || g_lines[g_bruns[j].first].brightness != b)
+            if (h->v != v + n)
               break;
             n += h->n;
           }
-          BindBg(l, b, p);
+          BindBg(l, kClutBright, p);
           GeDraw(kVtTile, n, v);
           i = j;
         }
@@ -1579,10 +1574,6 @@ static bool DrawGe(void) {
         ok = false;
       }
       s1 = r + 1;
-      if (g_lines[r].brightness != 15) {
-        CountReasons(kReasonMathBright);
-        return false;
-      }
     }
     if (!ok) {
       CountReasons(kReasonSubObj);
@@ -1737,9 +1728,9 @@ static bool DrawGe(void) {
         for (int p = 0; p < 8; p++)
           total += g_counts[l][i][pr][p];
       if (l < 2)
-        BuildClut4(g_lines[run->first].brightness);
+        BuildClut4(kClutBright);
       else
-        BuildClut2(g_lines[run->first].brightness);
+        BuildClut2(kClutBright);
     }
   }
   for (int i = 0; i < g_nbruns; i++) {
@@ -1750,16 +1741,16 @@ static bool DrawGe(void) {
       for (int p = 0; p < 8; p++)
         total += g_bcounts[i][pr][p];
     if (br->l < 2)
-      BuildClut4(g_lines[br->first].brightness);
+      BuildClut4(kClutBright);
     else
-      BuildClut2(g_lines[br->first].brightness);
+      BuildClut2(kClutBright);
   }
   if (g_frame_mode == 7) {
     if (!M7Prepare()) {
       BUDGET(4, "m7quads", g_m7_nq, kM7MaxQuads);
       return false;
     }
-    BuildClut7(g_m7c.bright);
+    BuildClut7(kClutBright);
   }
   if (total > kMaxTilesPerFrame) {  /* never draw a frame with holes */
     BUDGET(5, "tiles", total, kMaxTilesPerFrame);
@@ -1769,15 +1760,15 @@ static bool DrawGe(void) {
 
   /* Sprites: one contiguous range of rows [o0,o1) with OBJ enabled on the main
    * screen and one brightness (HUD rows have TM=4, so no sprites there). */
-  int o0 = 0, o1 = 0, obj_bright = 0;
+  int o0 = 0, o1 = 0;
+  const int obj_bright = kClutBright;
   bool obj_ok = true;
   for (int r = 0; r < g_line_count; r++) {
     if (!g_lines[r].objon)
       continue;
     if (o1 == 0) {
       o0 = r;
-      obj_bright = g_lines[r].brightness;
-    } else if (r != o1 || g_lines[r].brightness != obj_bright) {
+    } else if (r != o1) {
       obj_ok = false;
     }
     o1 = r + 1;
@@ -1813,9 +1804,9 @@ static bool DrawGe(void) {
       BuildClutObj(15);
   }
 
-  sceKernelDcacheWritebackRange(g_clut2, sizeof(g_clut2));
-  sceKernelDcacheWritebackRange(g_clut4, sizeof(g_clut4));
-  sceKernelDcacheWritebackRange(g_clutobj, sizeof(g_clutobj));
+  sceKernelDcacheWritebackRange(g_clut2[kClutBright], sizeof(g_clut2[0]));
+  sceKernelDcacheWritebackRange(g_clut4[kClutBright], sizeof(g_clut4[0]));
+  sceKernelDcacheWritebackRange(g_clutobj[kClutBright], sizeof(g_clutobj[0]));
   sceKernelDcacheWritebackRange(g_clut7, sizeof(g_clut7));
 
   g_zbg[0][0] = 8 * kZLevel;  g_zbg[0][1] = 12 * kZLevel;  /* BG1 low / high */
@@ -1854,11 +1845,10 @@ static bool DrawGe(void) {
   int nrect = 0;
   for (int r = 0; r < g_line_count;) {
     int e = r + 1;
-    while (e < g_line_count && g_lines[e].cg0 == g_lines[r].cg0 && g_lines[e].brightness == g_lines[r].brightness &&
-           g_lines[e].forced == g_lines[r].forced) e++;
+    while (e < g_line_count && g_lines[e].cg0 == g_lines[r].cg0 && g_lines[e].forced == g_lines[r].forced) e++;
     bd_y0[nrect] = (int16_t)r;
     bd_y1[nrect] = (int16_t)e;
-    bd_col[nrect++] = g_lines[r].forced ? 0xff000000u : BakeColor(g_lines[r].cg0, g_lines[r].brightness, false);
+    bd_col[nrect++] = g_lines[r].forced ? 0xff000000u : BakeColor(g_lines[r].cg0, kClutBright, false);
     r = e;
   }
   ColorVert *bd = sceGuGetMemory(nstrip * nrect * 2 * sizeof(ColorVert));
@@ -1976,6 +1966,31 @@ static bool DrawGe(void) {
     }
   }
 
+  /* Gate 4l: brightness is applied last, as dst *= b/15 (colour math is done at 15, as on the SNES).
+   * Runs of rows with the same brightness < 15; forced-blank rows are black anyway. */
+  static int16_t br_y0[kMaxLines], br_y1[kMaxLines];
+  static uint8_t br_b[kMaxLines];
+  int nbr = 0;
+  for (int r = 0; r < g_line_count;) {
+    int b = g_lines[r].brightness;
+    if (g_lines[r].forced || b >= 15) {
+      r++;
+      continue;
+    }
+    int e = r + 1;
+    while (e < g_line_count && !g_lines[e].forced && g_lines[e].brightness == b)
+      e++;
+    br_y0[nbr] = (int16_t)r;
+    br_y1[nbr] = (int16_t)e;
+    br_b[nbr++] = (uint8_t)b;
+    r = e;
+  }
+  ColorVert *brv = nbr ? sceGuGetMemory(nbr * 2 * sizeof(ColorVert)) : NULL;
+  for (int i = 0; i < nbr; i++) {
+    brv[2 * i] = (ColorVert){0xff000000u, (int16_t)kLeft, (int16_t)(kTop + br_y0[i]), 0};
+    brv[2 * i + 1] = (ColorVert){0xff000000u, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + br_y1[i]), 0};
+  }
+
   sceGuEnable(GU_TEXTURE_2D);
   sceGuEnable(GU_ALPHA_TEST);
   sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
@@ -2069,6 +2084,25 @@ static bool DrawGe(void) {
     if (g_ntr > 1)
       sceGuScissor(0, 0, kPspWidth, kPspHeight);
     g_frames_tint++;
+  }
+  if (nbr) {
+    /* src factor 0, dst factor b*17/255 per channel; no depth test, so no depth write either (as the tint overlay). */
+    sceGuDisable(GU_DEPTH_TEST);
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
+    sceGuEnable(GU_BLEND);
+    for (int i = 0; i < nbr;) {
+      int j = i;
+      while (j < nbr && br_b[j] == br_b[i])
+        j++;
+      unsigned f = (unsigned)br_b[i] * 0x00111111u;
+      sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x00000000u, f);
+      GeDraw(kVtColor, (j - i) * 2, brv + 2 * i);
+      i = j;
+    }
+    sceGuDisable(GU_BLEND);
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuEnable(GU_ALPHA_TEST);
   }
   bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
   g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || g_audit_now);
