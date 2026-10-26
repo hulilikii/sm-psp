@@ -191,6 +191,14 @@ typedef struct TileList { uint16_t first, n; } TileList;
 enum { kEntPool = 12288 };
 static TileEnt g_ents[kEntPool];
 static int g_ent_top;
+/* Tile-row cache (gate 4k): per frame, the non-empty tiles of one tilemap row (x set, y left 0), keyed by everything
+ * that selects them except vscroll. HDMA wave effects change vscroll every 2 rows, so short runs hit the same
+ * rows over and over. */
+typedef struct RowCache { uint16_t map, tile, hs, stamp, first, n; uint8_t l, wh, ty; } RowCache;
+enum { kRowPool = 4096, kRowSlots = 256, kRowMaxRun = 16 };
+static TileEnt g_rows[kRowPool];
+static int g_rows_top;
+static RowCache g_rc[kRowSlots];
 static TileList g_mlist[kLayers][kMaxLines];  /* per main run */
 
 // Subscreen blend: runs of the one contributing subscreen layer.
@@ -722,7 +730,7 @@ static bool SameSub(const LineSnap *a, const LineSnap *b, int l) {
 /* Walks the tilemap of layer l once for rows [r0,r1) and appends every non-empty
  * tile to the pool (decoding it into the atlas on the way). Consecutive equal
  * tilemap words reuse the previous lookup. Returns false if the pool is full. */
-static bool BuildTileList(int l, const LineSnap *snap, int r0, int r1, TileList *out) {
+static bool BuildTileListRaw(int l, const LineSnap *snap, int r0, int r1, TileList *out) {
   const BgSnap *s = &snap->bg[l];
   bool bpp4 = l < 2;
   int words = bpp4 ? 16 : 8, shift = bpp4 ? 4 : 3;
@@ -759,6 +767,94 @@ static bool BuildTileList(int l, const LineSnap *snap, int r0, int r1, TileList 
       e->pal = last_pal;
       e->fl = last_fl;
     }
+  }
+  g_ent_top = top;
+  out->first = (uint16_t)start;
+  out->n = (uint16_t)(top - start);
+  return true;
+}
+
+/* Non-empty tiles of tilemap row ty of layer l (x set, y 0) written to dst. Returns the count, or -1 if more
+ * than max would be needed. Same lookup as BuildTileListRaw. */
+static int BuildRow(int l, const BgSnap *s, int ty, TileEnt *dst, int max) {
+  bool bpp4 = l < 2;
+  int words = bpp4 ? 16 : 8, shift = bpp4 ? 4 : 3;
+  int tx0 = s->hscroll >> 3, tx1 = (s->hscroll + kGameWidth - 1) >> 3;
+  int wide = s->flags & 1, high = (s->flags >> 1) & 1;
+  int rowbase = s->mapadr + (ty & 31) * 32 + (((ty & 32) && high) ? (wide ? 0x800 : 0x400) : 0);
+  int n = 0, last_pt = 0;
+  unsigned last_t = 0x10000;  /* no tilemap word equals this */
+  bool last_empty = true;
+  uint8_t last_pal = 0, last_fl = 0;
+  for (int tx = tx0; tx <= tx1; tx++) {
+    int addr = (rowbase + (tx & 31) + (((tx & 32) && wide) ? 0x400 : 0)) & 0x7fff;
+    unsigned t = g_vram[addr];
+    if (t != last_t) {
+      last_t = t;
+      last_pt = (int)((s->tileadr + (t & 0x3ff) * words) & 0x7fff) >> shift;
+      last_pal = (uint8_t)((t >> 10) & 7);
+      last_fl = (uint8_t)(((t >> 13) & 1) | ((t >> 13) & 2) | ((t >> 13) & 4));
+      last_empty = EnsureTile(bpp4, last_pt);
+    }
+    if (last_empty)
+      continue;
+    if (n >= max)
+      return -1;
+    TileEnt *e = &dst[n++];
+    e->x = (int16_t)(tx * 8 - s->hscroll);
+    e->y = 0;
+    e->pt = (uint16_t)last_pt;
+    e->pal = last_pal;
+    e->fl = last_fl;
+  }
+  return n;
+}
+
+/* Cached tiles of row ty (built on first use this frame), or NULL if the row pool is full. The pool only grows
+ * within a frame, so returned pointers stay valid. Entries from earlier frames never match (stamp). */
+static const TileEnt *RowCached(int l, const BgSnap *s, int ty, int *count) {
+  unsigned t6 = (unsigned)ty & 63, wh = s->flags & 3;
+  unsigned h = (t6 * 5 + (unsigned)(s->hscroll >> 3) * 3 + (unsigned)l * 11 + (unsigned)(s->mapadr >> 10) * 7 +
+                (unsigned)(s->tileadr >> 12) * 13 + wh) & (kRowSlots - 1);
+  RowCache *rc = &g_rc[h];
+  if (rc->stamp == g_stamp && rc->l == l && rc->ty == t6 && rc->wh == wh && rc->map == s->mapadr &&
+      rc->tile == s->tileadr && rc->hs == s->hscroll) {
+    *count = rc->n;
+    return &g_rows[rc->first];
+  }
+  int n = BuildRow(l, s, ty, &g_rows[g_rows_top], kRowPool - g_rows_top);
+  if (n < 0)
+    return NULL;
+  *rc = (RowCache){s->mapadr, s->tileadr, s->hscroll, g_stamp, (uint16_t)g_rows_top, (uint16_t)n,
+                   (uint8_t)l, (uint8_t)wh, (uint8_t)t6};
+  g_rows_top += n;
+  *count = n;
+  return &g_rows[rc->first];
+}
+
+/* Same result as BuildTileListRaw. Short runs (a few rows, e.g. HDMA waves) copy cached rows and only set y. */
+static bool BuildTileList(int l, const LineSnap *snap, int r0, int r1, TileList *out) {
+  if (r1 - r0 > kRowMaxRun)
+    return BuildTileListRaw(l, snap, r0, r1, out);
+  const BgSnap *s = &snap->bg[l];
+  int ty0 = (s->vscroll + r0 + 1) >> 3, ty1 = (s->vscroll + r1) >> 3;
+  int start = g_ent_top, top = start;
+  for (int ty = ty0; ty <= ty1; ty++) {
+    int y0 = ty * 8 - s->vscroll - 1, n = 0;
+    const TileEnt *src = RowCached(l, s, ty, &n);
+    TileEnt *dst = &g_ents[top];
+    if (src) {
+      if (top + n > kEntPool)
+        return false;
+      memcpy(dst, src, (size_t)n * sizeof(TileEnt));
+    } else {
+      n = BuildRow(l, s, ty, dst, kEntPool - top);
+      if (n < 0)
+        return false;
+    }
+    for (int k = 0; k < n; k++)
+      dst[k].y = (int16_t)y0;
+    top += n;
   }
   g_ent_top = top;
   out->first = (uint16_t)start;
@@ -1324,14 +1420,61 @@ static void BindBg(int l, int b, int p) {
 }
 
 static void DrawBgPass(int l, int pr) {
-  for (int i = 0; i < g_nruns[l]; i++) {
-    int b = g_lines[g_runs[l][i].first].brightness;
-    for (int p = 0; p < 8; p++) {
+  /* One draw per palette: the vertices of a palette are contiguous across runs (see the geometry pass), so
+   * consecutive runs with the same brightness (same CLUT) merge. Runs cover disjoint rows: order is irrelevant. */
+  int nr = g_nruns[l];
+  for (int p = 0; p < 8; p++) {
+    for (int i = 0; i < nr;) {
       const Geom *g = &g_geom[l][i][pr][p];
-      if (g->n == 0)
+      if (g->n == 0) {
+        i++;
         continue;
+      }
+      int b = g_lines[g_runs[l][i].first].brightness;
+      const TileVert *v = g->v;
+      int n = g->n, j = i + 1;
+      for (; j < nr; j++) {
+        const Geom *h = &g_geom[l][j][pr][p];
+        if (h->n == 0)
+          continue;
+        if (h->v != v + n || g_lines[g_runs[l][j].first].brightness != b)
+          break;
+        n += h->n;
+      }
       BindBg(l, b, p);
-      GeDraw(kVtTile, g->n, g->v);
+      GeDraw(kVtTile, n, v);
+      i = j;
+    }
+  }
+}
+
+/* Same merging for the subscreen blend runs (grouped by layer; depth markers or disjoint rows decide overlaps). */
+static void DrawBlendBgs(void) {
+  for (int l = 0; l < kLayers; l++) {
+    for (int pr = 0; pr < 2; pr++) {
+      for (int p = 0; p < 8; p++) {
+        for (int i = 0; i < g_nbruns;) {
+          const Geom *g = &g_bgeom[i][pr][p];
+          if (g_bruns[i].l != l || g->n == 0) {
+            i++;
+            continue;
+          }
+          int b = g_lines[g_bruns[i].first].brightness;
+          const TileVert *v = g->v;
+          int n = g->n, j = i + 1;
+          for (; j < g_nbruns; j++) {
+            const Geom *h = &g_bgeom[j][pr][p];
+            if (g_bruns[j].l != l || h->n == 0)
+              continue;
+            if (h->v != v + n || g_lines[g_bruns[j].first].brightness != b)
+              break;
+            n += h->n;
+          }
+          BindBg(l, b, p);
+          GeDraw(kVtTile, n, v);
+          i = j;
+        }
+      }
     }
   }
 }
@@ -1399,6 +1542,7 @@ static void RestoreLayers(int mask, int obj_bright, const ColorVert *bd, int nbd
 static bool DrawGe(void) {
   g_t_draw_start = Now();
   g_ent_top = 0;
+  g_rows_top = 0;
   g_m7_nq = 0;
   g_verify_now = false;
   g_frame_multisub = false;
@@ -1415,6 +1559,7 @@ static bool DrawGe(void) {
     memset(g_clut2_stamp, 0, sizeof(g_clut2_stamp));
     memset(g_clut4_stamp, 0, sizeof(g_clut4_stamp));
     memset(g_clutobj_stamp, 0, sizeof(g_clutobj_stamp));
+    memset(g_rc, 0, sizeof(g_rc));
     g_stamp = 1;
   }
 
@@ -1727,37 +1872,58 @@ static bool DrawGe(void) {
   sceGuDisable(GU_TEXTURE_2D);
   GeDraw(kVtColor, nbd, bd);
 
-  /* Geometry for every layer/run. */
+  /* Geometry for every layer/run. One buffer per layer/priority/palette; the runs fill it one after another. */
   for (int l = 0; l < kLayers; l++) {
-    for (int i = 0; i < g_nruns[l]; i++) {
-      TileVert *w[2][8];
-      for (int pr = 0; pr < 2; pr++) {
-        for (int p = 0; p < 8; p++) {
-          int c = g_counts[l][i][pr][p];
-          g_geom[l][i][pr][p].v = w[pr][p] = c ? sceGuGetMemory(c * 2 * sizeof(TileVert)) : NULL;
-        }
-      }
-      const Run *run = &g_runs[l][i];
-      EmitList(l, &g_mlist[l][i], run->r0, run->r1, w, kLeft, kTop);
-      for (int pr = 0; pr < 2; pr++)
-        for (int p = 0; p < 8; p++)
-          g_geom[l][i][pr][p].n = g_counts[l][i][pr][p] ? (int)(w[pr][p] - g_geom[l][i][pr][p].v) : 0;
-    }
-  }
-  /* Subscreen overlay geometry. */
-  for (int i = 0; i < g_nbruns; i++) {
-    const BRun *br = &g_bruns[i];
     TileVert *w[2][8];
     for (int pr = 0; pr < 2; pr++) {
       for (int p = 0; p < 8; p++) {
-        int c = g_bcounts[i][pr][p];
-        g_bgeom[i][pr][p].v = w[pr][p] = c ? sceGuGetMemory(c * 2 * sizeof(TileVert)) : NULL;
+        int c = 0;
+        for (int i = 0; i < g_nruns[l]; i++)
+          c += g_counts[l][i][pr][p];
+        w[pr][p] = c ? sceGuGetMemory(c * 2 * sizeof(TileVert)) : NULL;
+       }
+    }
+    for (int i = 0; i < g_nruns[l]; i++) {
+      TileVert *v0[2][8];
+      memcpy(v0, w, sizeof(v0));
+      const Run *run = &g_runs[l][i];
+      EmitList(l, &g_mlist[l][i], run->r0, run->r1, w, kLeft, kTop);
+      for (int pr = 0; pr < 2; pr++) {
+        for (int p = 0; p < 8; p++) {
+          int c = g_counts[l][i][pr][p];
+          g_geom[l][i][pr][p].v = c ? v0[pr][p] : NULL;
+          g_geom[l][i][pr][p].n = c ? (int)(w[pr][p] - v0[pr][p]) : 0;
+        }
       }
     }
-    EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop);
-    for (int pr = 0; pr < 2; pr++)
-      for (int p = 0; p < 8; p++)
-        g_bgeom[i][pr][p].n = g_bcounts[i][pr][p] ? (int)(w[pr][p] - g_bgeom[i][pr][p].v) : 0;
+  }
+  /* Subscreen overlay geometry. */
+  for (int l = 0; l < kLayers; l++) {
+    TileVert *w[2][8];
+    for (int pr = 0; pr < 2; pr++) {
+      for (int p = 0; p < 8; p++) {
+        int c = 0;
+        for (int i = 0; i < g_nbruns; i++)
+          if (g_bruns[i].l == l)
+            c += g_bcounts[i][pr][p];
+        w[pr][p] = c ? sceGuGetMemory(c * 2 * sizeof(TileVert)) : NULL;
+      }
+    }
+    for (int i = 0; i < g_nbruns; i++) {
+      const BRun *br = &g_bruns[i];
+      if (br->l != l)
+        continue;
+      TileVert *v0[2][8];
+      memcpy(v0, w, sizeof(v0));
+      EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop);
+      for (int pr = 0; pr < 2; pr++) {
+        for (int p = 0; p < 8; p++) {
+          int c = g_bcounts[i][pr][p];
+          g_bgeom[i][pr][p].v = c ? v0[pr][p] : NULL;
+          g_bgeom[i][pr][p].n = c ? (int)(w[pr][p] - v0[pr][p]) : 0;
+        }
+      }
+    }
   }
 
   /* Multi-layer subscreen: black clear rectangle for the offscreen target (also clears its depth) and the
@@ -1845,18 +2011,7 @@ static bool DrawGe(void) {
       if (g_nsobjseg)
         DrawObjSegs(g_sobjseg, g_nsobjseg, g_sobjbase, 15, false, 0);
       sceGuDepthFunc(GU_GEQUAL);
-      for (int i = 0; i < g_nbruns; i++) {
-        int b = g_lines[g_bruns[i].first].brightness;
-        for (int pr = 0; pr < 2; pr++) {
-          for (int p = 0; p < 8; p++) {
-            const Geom *g = &g_bgeom[i][pr][p];
-            if (g->n == 0)
-              continue;
-            BindBg(g_bruns[i].l, b, p);
-            GeDraw(kVtTile, g->n, g->v);
-          }
-        }
-      }
+      DrawBlendBgs();
       /* back to the main target; the composite is then added to (or subtracted from) the main image */
       sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
       sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
@@ -1879,18 +2034,7 @@ static bool DrawGe(void) {
       /* Blend the subscreen layer over everything it covers (colour math adds or subtracts the subscreen
        * pixel; fixed colour is 0 so uncovered pixels are unchanged). */
       sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
-      for (int i = 0; i < g_nbruns; i++) {
-        int b = g_lines[g_bruns[i].first].brightness;
-        for (int pr = 0; pr < 2; pr++) {
-          for (int p = 0; p < 8; p++) {
-            const Geom *g = &g_bgeom[i][pr][p];
-            if (g->n == 0)
-              continue;
-            BindBg(g_bruns[i].l, b, p);
-            GeDraw(kVtTile, g->n, g->v);
-          }
-        }
-      }
+      DrawBlendBgs();
     }
     sceGuDisable(GU_BLEND);
     RestoreLayers(bmath, obj_bright, bd, nbd);
