@@ -47,6 +47,7 @@ enum {
   kListWords = 128 * 1024,   /* 512 KB */
   kMaxTilesPerFrame = 7000,  /* 7000 * 2 * 16 B = 224 KB; sprites (2 x 64 KB) and the rest fit in 512 KB */
   kMaxSpriteQuads = 2000,    /* 2000 * 2 * 16 B = 64 KB */
+  kMaxObjBands = 4,          /* OBJ window: row bands of one window state per frame */
   kLeft = (kPspWidth - kGameWidth) / 2,
   kTop = (kPspHeight - kGameHeight) / 2,
 
@@ -87,6 +88,7 @@ enum {
 typedef struct BgSnap {
   uint16_t hscroll, vscroll, mapadr, tileadr;
   uint8_t flags;  /* 1 wider, 2 higher, 4 drawn on main, 8 enabled on subscreen */
+  uint8_t wm, wl, wr;  /* main-screen window 1: wm 0 none, 1 visible only inside [wl,wr], 2 hidden inside [wl,wr] */
 } BgSnap;
 
 typedef struct LineSnap {
@@ -100,6 +102,7 @@ typedef struct LineSnap {
   uint8_t tint, tinthalf;                          /* fixed-colour math on this row; result halved */
   uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
   uint8_t subobj;                                  /* OBJ on the subscreen and added by colour math */
+  uint8_t owm, owl, owr;                           /* OBJ window on the main screen (as BgSnap.wm) */
 } LineSnap;
 
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
@@ -139,10 +142,13 @@ static uint16_t g_obj_adr1, g_obj_adr2;
 static bool g_obj_rot;
 typedef struct Sprite { int16_t x; uint8_t y, size; uint16_t attr; } Sprite;
 typedef struct ObjSeg { uint8_t pal; uint16_t first, n; } ObjSeg;  /* first/n in vertices */
+typedef struct ObjBand { uint16_t r0, r1; uint8_t wm, wl, wr; } ObjBand;  /* rows of one OBJ window state */
 static Sprite g_spr[128];                 /* in precedence order (index k wins over k+1) */
 static int g_nspr, g_spr_quads;
-static ObjSeg g_objseg[128];              /* runs of consecutive sprites with one palette */
+static ObjSeg g_objseg[128 * kMaxObjBands * 2];  /* runs of consecutive sprites with one palette (per band and span) */
 static int g_nobjseg;
+static ObjBand g_objband[kMaxObjBands];
+static int g_nobjband;
 static TileVert *g_objbase;
 static uint32_t g_clutobj[16][8][16] __attribute__((aligned(64)));
 static uint16_t g_clutobj_stamp[16];
@@ -161,6 +167,12 @@ static M7Cfg g_m7c;
 static bool g_m7_set;
 static int g_frame_mode = -1;        /* BG mode of this frame (first line that is not forced blank) */
 static bool g_m7_ok = true;          /* cleared if the texture-coordinate self test or the verification fails */
+#ifndef SM_PSP_GE_WIN
+#define SM_PSP_GE_WIN 1  /* 1: window-1 masks on BG1-3 / OBJ are drawn by the GE, 0: those frames stay in software */
+#endif
+static bool g_win_ok = SM_PSP_GE_WIN;  /* cleared if the first verified window frames differ from software */
+static uint32_t g_win_vn, g_win_vbad, g_win_rows;
+enum { kWinVerify = 8 };
 static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at the sample point (x, y) */
 static bool g_verify_now, g_audit_now;
 static bool g_multisub_ok = true;   /* cleared if the first verified multi-layer subscreen frames differ from software */
@@ -312,6 +324,58 @@ static void PspRenderer_Convert(void) {
 
 //capture
 
+/* Window 1 mask of layer l (0-2 BG, 4 OBJ) on the main screen, for the GE path. wm: 0 no effect, 1 the layer is
+ * visible only inside [wl,wr], 2 hidden inside [wl,wr]. As in ppu.c an empty window (left > right) masks
+ * nothing, and an inverted empty window masks everything. Returns false for setups the GE path does not draw
+ * (window 2, mode 7, or after the run-time check failed): the frame stays in software. */
+static bool LayerWin(const Ppu *p, int l, uint8_t *wm, uint8_t *wl, uint8_t *wr) {
+  *wm = *wl = *wr = 0;
+  if (!(p->screenWindowed[0] & (1 << l)))
+    return true;
+  uint32_t n = (p->windowsel >> (l * 4)) & 0xf;  /* 1 inverse 1, 2 enable 1, 4 inverse 2, 8 enable 2 */
+  if (!(n & 0xa))
+    return true;
+  if (!g_win_ok || p->mode == 7 || (n & 8))
+    return false;
+  bool ena = p->window1left <= p->window1right;
+  if (n & 1) {
+    *wm = 1;
+    *wl = ena ? p->window1left : 1;
+    *wr = ena ? p->window1right : 0;
+  } else if (ena) {
+    *wm = 2;
+    *wl = p->window1left;
+    *wr = p->window1right;
+  }
+  return true;
+}
+
+/* Visible x spans [a,b) of a layer window state (see LayerWin): 0, 1 or 2 spans. */
+static int WinSpans(int wm, int wl, int wr, int a[2], int b[2]) {
+  int n = 0;
+  if (wm == 0) {
+    a[0] = 0;
+    b[0] = kGameWidth;
+    return 1;
+  }
+  if (wm == 1) {
+    if (wl > wr)
+      return 0;
+    a[0] = wl;
+    b[0] = wr + 1;
+    return 1;
+  }
+  if (wl > 0) {
+    a[n] = 0;
+    b[n++] = wl;
+  }
+  if (wr + 1 < kGameWidth) {
+    a[n] = wr + 1;
+    b[n++] = kGameWidth;
+  }
+  return n;
+}
+
 static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool *tint, uint16_t *tintfix,
                            bool *tinthalf) {
   *submath = false;
@@ -327,7 +391,8 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
       r |= kReasonBigTile;
     if (p->bgLayer[l].mosaicEnabled && p->mosaicSize > 1)
       r |= kReasonMosaic;
-    if ((p->screenWindowed[0] & (1 << l)) && ((p->windowsel >> (l * 4)) & 0xa))
+    uint8_t wm, wl, wr;
+    if (!LayerWin(p, l, &wm, &wl, &wr))
       r |= kReasonWindow;
   }
   if (p->clipMode != 0)
@@ -417,6 +482,9 @@ static void CaptureImpl(const Ppu *p, int line) {
     bool drawn = !forced && p->mode == 1 && (p->screenEnabled[0] & (1 << l)) && !bg->bigTiles;
     b->flags = (uint8_t)((bg->tilemapWider ? 1 : 0) | (bg->tilemapHigher ? 2 : 0) | (drawn ? 4 : 0) |
                          ((p->screenEnabled[1] & (1 << l)) ? 8 : 0));
+     b->wm = b->wl = b->wr = 0;
+    if (drawn)
+      LayerWin(p, l, &b->wm, &b->wl, &b->wr);  /* setups it cannot draw are flagged by LineReasons */
   }
   s->brightness = p->brightness & 15;
   s->bg3prio = p->bg3priority ? 1 : 0;
@@ -455,13 +523,14 @@ static void CaptureImpl(const Ppu *p, int line) {
   }
   bool objon = !forced && (p->mode == 1 || p->mode == 7) && (p->screenEnabled[0] & 16);
   s->objon = objon;
+  s->owm = s->owl = s->owr = 0;
   if (objon || s->subobj) {
     uint16_t r2 = 0;
     if (p->objInterlace || p->objSize != g_obj_size || p->objTileAdr1 != g_obj_adr1 ||
         p->objTileAdr2 != g_obj_adr2 || (bool)p->objPriority != g_obj_rot ||
         (g_obj_rot && (uint8_t)((p->oamAdr & 0xfe) >> 1) != g_obj_start))
       r2 |= kReasonObjCfg;
-    if (objon && (p->screenWindowed[0] & 16) && ((p->windowsel >> 16) & 0xa))
+    if (objon && !LayerWin(p, 4, &s->owm, &s->owl, &s->owr))
       r2 |= kReasonWindow;
     s->reasons |= r2;
   }
@@ -816,7 +885,8 @@ static void BuildClut7(int b) {
 static bool SameBg(const LineSnap *a, const LineSnap *b, int l) {
   const BgSnap *x = &a->bg[l], *y = &b->bg[l];
   return x->hscroll == y->hscroll && x->vscroll == y->vscroll && x->mapadr == y->mapadr &&
-         x->tileadr == y->tileadr && (x->flags & 7) == (y->flags & 7);
+         x->tileadr == y->tileadr && (x->flags & 7) == (y->flags & 7) && x->wm == y->wm &&
+         x->wl == y->wl && x->wr == y->wr;
 }
 
 static bool SameSub(const LineSnap *a, const LineSnap *b, int l) {
@@ -967,13 +1037,14 @@ static void CountList(const TileList *lst, int counts[2][8]) {
 }
 
 /* Emits CPU-clipped quads for rows [r0,r1) into out[prio][pal] (no negative or
- * off-screen vertex ever reaches the GE). */
-static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8], int ox, int oy) {
+ * off-screen vertex ever reaches the GE) and for x in [vx0,vx1) (a window span). */
+static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8], int ox, int oy, int vx0,
+                     int vx1) {
   int cols = l < 2 ? 32 : 64;
   for (int i = 0; i < lst->n; i++) {
     const TileEnt *e = &g_ents[lst->first + i];
     int x0 = e->x, y0 = e->y, prio = e->fl & 1, pal = e->pal, pt = e->pt;
-    int cl = x0 < 0 ? -x0 : 0, cr = x0 + 8 > kGameWidth ? x0 + 8 - kGameWidth : 0;
+    int cl = x0 < vx0 ? vx0 - x0 : 0, cr = x0 + 8 > vx1 ? x0 + 8 - vx1 : 0;
     int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
     if (cl + cr >= 8 || ct + cb >= 8)
       continue;
@@ -1022,8 +1093,9 @@ static const uint8_t kSpriteSizes[8][2] = {
   {8, 16}, {8, 32}, {8, 64}, {16, 32}, {16, 64}, {32, 64}, {16, 32}, {16, 32}
 };
 
-static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf, int z) {
-  int cl = x0 < 0 ? -x0 : 0, cr = x0 + 8 > kGameWidth ? x0 + 8 - kGameWidth : 0;
+static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf, int z,
+                      int vx0, int vx1) {
+  int cl = x0 < vx0 ? vx0 - x0 : 0, cr = x0 + 8 > vx1 ? x0 + 8 - vx1 : 0;
   int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
   if (cl + cr >= 8 || ct + cb >= 8)
     return;
@@ -1041,7 +1113,7 @@ static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int 
  * open). Otherwise emit CPU-clipped quads for rows [o0,o1). Tile selection
  * mirrors ppu.c: 16x16-page wrap for the low nibble, row offset added to the
  * high nibble, hflip mirrors columns, vflip mirrors rows. */
-static void WalkSprite(const Sprite *sp, int o0, int o1, TileVert **w, int z, int ox, int oy) {
+static void WalkSprite(const Sprite *sp, int o0, int o1, TileVert **w, int z, int ox, int oy, int vx0, int vx1) {
   int n = sp->size >> 3;
   bool hf = (sp->attr & 0x4000) != 0, vf = (sp->attr & 0x8000) != 0;
   int adr = (sp->attr & 0x100) ? g_obj_adr2 : g_obj_adr1;
@@ -1057,7 +1129,7 @@ static void WalkSprite(const Sprite *sp, int o0, int o1, TileVert **w, int z, in
         continue;
       int x0 = sp->x + tc * 8;
       for (int c = 0; c < ycopies; c++)
-        EmitQuad8(w, ox, oy, x0, (c ? sp->y - 256 : sp->y) + tr * 8, o0, o1, pt, hf, vf, z);
+        EmitQuad8(w, ox, oy, x0, (c ? sp->y - 256 : sp->y) + tr * 8, o0, o1, pt, hf, vf, z, vx0, vx1);
     }
   }
 }
@@ -1111,7 +1183,7 @@ static bool PrepareObj(int o0, int o1) {
     return false;
   }
   for (int i = 0; i < g_nspr; i++)
-    WalkSprite(&g_spr[i], o0, o1, NULL, 0, 0, 0);
+    WalkSprite(&g_spr[i], o0, o1, NULL, 0, 0, 0, 0, kGameWidth);
   return true;
 }
 
@@ -1119,25 +1191,39 @@ static ObjSeg g_sobjseg[128];
 static int g_nsobjseg;
 static TileVert *g_sobjbase;
 
-/* Emits the sprite quads for rows [r0,r1) at offset (ox,oy); returns the number of palette segments. */
-static int BuildObjGeom(int r0, int r1, int ox, int oy, ObjSeg *segs, TileVert **base_out) {
-  int nseg = 0;
+/* Emits the sprite quads of every window band at offset (ox,oy); returns the number of palette segments.
+ * Per band the visible spans are clipped on the CPU. Bands and spans never overlap, so their order does not
+ * matter; inside one the sprite with the lowest OAM index is still drawn last. */
+static int BuildObjGeom(const ObjBand *bands, int nb, int ox, int oy, ObjSeg *segs, TileVert **base_out) {
+  int nseg = 0, npairs = 0;
+  int sa[kMaxObjBands][2], sb[kMaxObjBands][2], ns[kMaxObjBands];
   *base_out = NULL;
-  if (g_spr_quads <= 0 || r1 <= r0)
+  if (g_spr_quads <= 0 || nb <= 0)
     return 0;
-  TileVert *base = sceGuGetMemory(g_spr_quads * 2 * sizeof(TileVert));
+  for (int b = 0; b < nb; b++) {
+    ns[b] = WinSpans(bands[b].wm, bands[b].wl, bands[b].wr, sa[b], sb[b]);
+    npairs += ns[b];
+  }
+  if (npairs == 0)
+    return 0;
+  TileVert *base = sceGuGetMemory(g_spr_quads * npairs * 2 * sizeof(TileVert));
   TileVert *w = base;
   *base_out = base;
-  for (int k = g_nspr - 1; k >= 0; k--) {
-    const Sprite *sp = &g_spr[k];
-    int pal = (sp->attr >> 9) & 7, prio = (sp->attr >> 12) & 3;
-    TileVert *start = w;
-    WalkSprite(sp, r0, r1, &w, (prio * 4 + 2) * kZLevel + 127 - k, ox, oy);
-    if (w == start)
-      continue;
-    if (nseg == 0 || segs[nseg - 1].pal != pal)
-      segs[nseg++] = (ObjSeg){(uint8_t)pal, (uint16_t)(start - base), 0};
-    segs[nseg - 1].n = (uint16_t)(segs[nseg - 1].n + (w - start));
+  for (int b = 0; b < nb; b++) {
+    for (int s = 0; s < ns[b]; s++) {
+      for (int k = g_nspr - 1; k >= 0; k--) {
+        const Sprite *sp = &g_spr[k];
+        int pal = (sp->attr >> 9) & 7, prio = (sp->attr >> 12) & 3;
+        TileVert *start = w;
+        WalkSprite(sp, bands[b].r0, bands[b].r1, &w, (prio * 4 + 2) * kZLevel + 127 - k, ox, oy, sa[b][s],
+                   sb[b][s]);
+        if (w == start)
+          continue;
+        if (nseg == 0 || segs[nseg - 1].pal != pal)
+          segs[nseg++] = (ObjSeg){(uint8_t)pal, (uint16_t)(start - base), 0};
+        segs[nseg - 1].n = (uint16_t)(segs[nseg - 1].n + (w - start));
+      }
+    }
   }
   return nseg;
 }
@@ -1335,9 +1421,17 @@ static void GeVerify(void) {
   }
   if (g_bright_rows)
     g_br_vn++;
-  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
+  if (g_win_rows) {
+    g_win_vn++;
+    g_win_vbad += bad;
+    if (g_win_vn >= 3 && g_win_vbad / g_win_vn > 600) {
+      g_win_ok = false;
+      PspLog("geaudit: window frames differ too much, GE windows disabled");
+    }
+  }
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
-         (unsigned)g_bright_rows, bx, by, bsw, bge);
+         (unsigned)g_bright_rows, (unsigned)g_win_rows, bx, by, bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
   if (bad) {
     int shown = 0;
@@ -1643,6 +1737,7 @@ static bool DrawGe(void) {
   g_m7_nq = 0;
   g_verify_now = false;
   g_bright_rows = 0;
+  g_win_rows = 0;
   g_frame_multisub = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
@@ -1827,6 +1922,17 @@ static bool DrawGe(void) {
         return false;
       }
       CountList(&g_mlist[l][i], g_counts[l][i]);
+      {
+        const BgSnap *wb = &g_lines[run->first].bg[l];
+        int wa[2], we[2];
+        int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+        if (wb->wm)
+          g_win_rows += (uint32_t)(run->r1 - run->r0);
+        if (ns != 1)  /* 0: masked completely; 2: a tile may be emitted once per span */
+          for (int pr = 0; pr < 2; pr++)
+            for (int p = 0; p < 8; p++)
+              g_counts[l][i][pr][p] *= ns;
+      }
       for (int pr = 0; pr < 2; pr++)
         for (int p = 0; p < 8; p++)
           total += g_counts[l][i][pr][p];
@@ -1882,6 +1988,24 @@ static bool DrawGe(void) {
   g_objbase = NULL;
   g_nsobjseg = 0;
   g_sobjbase = NULL;
+  g_nobjband = 0;
+  if (obj_ok) {  /* OBJ window: row bands of one window state */
+    for (int r = o0; r < o1; r++) {
+      const LineSnap *ls = &g_lines[r];
+      ObjBand *ob = g_nobjband ? &g_objband[g_nobjband - 1] : NULL;
+      if (ob && ob->wm == ls->owm && ob->wl == ls->owl && ob->wr == ls->owr) {
+        ob->r1 = (uint16_t)(r + 1);
+      } else if (g_nobjband == kMaxObjBands) {
+        CountReasons(kReasonWindow);
+        return false;
+      } else {
+        g_objband[g_nobjband++] = (ObjBand){(uint16_t)r, (uint16_t)(r + 1), ls->owm, ls->owl, ls->owr};
+      }
+    }
+    for (int b = 0; b < g_nobjband; b++)
+      if (g_objband[b].wm)
+        g_win_rows += (uint32_t)(g_objband[b].r1 - g_objband[b].r0);
+  }
   if (!obj_ok) {
     CountReasons(kReasonObjCfg);
     return false;
@@ -1901,6 +2025,13 @@ static bool DrawGe(void) {
   if (u1 > u0) {
     if (!PrepareObj(u0, u1))
       return false;
+    int np = 0, wa[2], we[2];
+    for (int b = 0; b < g_nobjband; b++)
+      np += WinSpans(g_objband[b].wm, g_objband[b].wl, g_objband[b].wr, wa, we);
+    if (np > 1 && g_spr_quads * np > 2 * kMaxSpriteQuads) {  /* window bands/spans multiply the sprite quads */
+      BUDGET(6, "sprquads*win", g_spr_quads * np, 2 * kMaxSpriteQuads);
+      return false;
+    }
     if (o1 > o0)
       BuildClutObj(obj_bright);
     if (sobj)
@@ -1980,7 +2111,11 @@ static bool DrawGe(void) {
       TileVert *v0[2][8];
       memcpy(v0, w, sizeof(v0));
       const Run *run = &g_runs[l][i];
-      EmitList(l, &g_mlist[l][i], run->r0, run->r1, w, kLeft, kTop);
+      const BgSnap *wb = &g_lines[run->first].bg[l];
+      int wa[2], we[2];
+      int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+      for (int k = 0; k < ns; k++)
+        EmitList(l, &g_mlist[l][i], run->r0, run->r1, w, kLeft, kTop, wa[k], we[k]);
       for (int pr = 0; pr < 2; pr++) {
         for (int p = 0; p < 8; p++) {
           int c = g_counts[l][i][pr][p];
@@ -2008,7 +2143,7 @@ static bool DrawGe(void) {
         continue;
       TileVert *v0[2][8];
       memcpy(v0, w, sizeof(v0));
-      EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop);
+      EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop, 0, kGameWidth);
       for (int pr = 0; pr < 2; pr++) {
         for (int p = 0; p < 8; p++) {
           int c = g_bcounts[i][pr][p];
@@ -2044,8 +2179,9 @@ static bool DrawGe(void) {
   /* Sprite geometry: reverse precedence order, so the sprite that wins an overlap on hardware (lowest
    * OAM index) is drawn last. Every sprite carries its own depth marker; consecutive sprites that
    * share a palette share one draw. */
-  g_nobjseg = BuildObjGeom(o0, o1, kLeft, kTop, g_objseg, &g_objbase);
-  g_nsobjseg = sobj ? BuildObjGeom(s0, s1, 0, 0, g_sobjseg, &g_sobjbase) : 0;
+  g_nobjseg = BuildObjGeom(g_objband, g_nobjband, kLeft, kTop, g_objseg, &g_objbase);
+  ObjBand sband = {(uint16_t)s0, (uint16_t)s1, 0, 0, 0};
+  g_nsobjseg = sobj ? BuildObjGeom(&sband, 1, 0, 0, g_sobjseg, &g_sobjbase) : 0;
 
   /* Mode 7 geometry (z = SNES level 5: above OBJ priority 0, below priorities 1-3). */
   g_m7v = NULL;
@@ -2210,8 +2346,9 @@ static bool DrawGe(void) {
   }
   bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
   bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || g_audit_now);
-  if (((g_frame_multisub && g_ms_vn < 6) || m7big || brwant) && g_ppu_skip_draw)
+  bool winwant = g_win_rows != 0 && g_win_vn < kWinVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || brwant || winwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   g_audit_now = false;
   Present();

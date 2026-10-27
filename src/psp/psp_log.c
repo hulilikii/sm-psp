@@ -43,7 +43,7 @@ void PspLog_Flush(void) {
 
 void PspLog_Init(void) {
   char hdr[128];
-  int n = snprintf(hdr, sizeof(hdr), "smpsp gate4np build %s %s (log flush every %d frames; 0 = every line)\n",
+  int n = snprintf(hdr, sizeof(hdr), "smpsp gate4n build %s %s (log flush every %d frames; 0 = every line)\n",
                    __DATE__, __TIME__, (int)SM_PSP_LOG_FLUSH_FRAMES);
   if (n > 0)
     Append(PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, hdr, (unsigned)n);

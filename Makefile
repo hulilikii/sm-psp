@@ -16,6 +16,8 @@ PSP_GE_STRIPS ?= 0
 # How software frames reach the screen: -1 measures both paths at run time and keeps the faster one (logged), 0 = CPU conversion to a 565 VRAM texture, 1 = GE copies the 8888 frame to VRAM and samples it there.
 # Default 1 (measured 4.1 ms vs 5.7 ms). -1 times its calibration with the log clock, so it needs PSP_LOG=1.
 PSP_SW_PATH ?= 1
+# PSP_GE_WIN=1 draws frames with window-1 masks (BG1-3, OBJ) on the GE, checked against software at run time. 0: they stay in software.
+PSP_GE_WIN ?= 1
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
@@ -47,7 +49,7 @@ build/embedded_rom.o: sm.smc
 CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 CFLAGS += -DSM_PSP_LOG=$(PSP_LOG) -DSM_PSP_LOG_FLUSH_FRAMES=$(PSP_LOG_FLUSH_FRAMES)
-CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS) -DSM_PSP_SW_PATH=$(PSP_SW_PATH)
+CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS) -DSM_PSP_SW_PATH=$(PSP_SW_PATH) -DSM_PSP_GE_WIN=$(PSP_GE_WIN)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
 
 # SPC/DSP code runs on the Media Engine, which has no libc/syscalls: an assert()
@@ -89,7 +91,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
