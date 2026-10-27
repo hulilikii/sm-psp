@@ -89,6 +89,7 @@ typedef struct BgSnap {
   uint16_t hscroll, vscroll, mapadr, tileadr;
   uint8_t flags;  /* 1 wider, 2 higher, 4 drawn on main, 8 enabled on subscreen */
   uint8_t wm, wl, wr;  /* main-screen window 1: wm 0 none, 1 visible only inside [wl,wr], 2 hidden inside [wl,wr] */
+  uint8_t sm, sl, sr;  /* the same for the subscreen (TSW) */
 } BgSnap;
 
 typedef struct LineSnap {
@@ -328,9 +329,9 @@ static void PspRenderer_Convert(void) {
  * visible only inside [wl,wr], 2 hidden inside [wl,wr]. As in ppu.c an empty window (left > right) masks
  * nothing, and an inverted empty window masks everything. Returns false for setups the GE path does not draw
  * (window 2, mode 7, or after the run-time check failed): the frame stays in software. */
-static bool LayerWin(const Ppu *p, int l, uint8_t *wm, uint8_t *wl, uint8_t *wr) {
+static bool LayerWin(const Ppu *p, int l, int sub, uint8_t *wm, uint8_t *wl, uint8_t *wr) {
   *wm = *wl = *wr = 0;
-  if (!(p->screenWindowed[0] & (1 << l)))
+  if (!(p->screenWindowed[sub] & (1 << l)))
     return true;
   uint32_t n = (p->windowsel >> (l * 4)) & 0xf;  /* 1 inverse 1, 2 enable 1, 4 inverse 2, 8 enable 2 */
   if (!(n & 0xa))
@@ -392,7 +393,7 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
     if (p->bgLayer[l].mosaicEnabled && p->mosaicSize > 1)
       r |= kReasonMosaic;
     uint8_t wm, wl, wr;
-    if (!LayerWin(p, l, &wm, &wl, &wr))
+    if (!LayerWin(p, l, 0, &wm, &wl, &wr))
       r |= kReasonWindow;
   }
   if (p->clipMode != 0)
@@ -484,7 +485,10 @@ static void CaptureImpl(const Ppu *p, int line) {
                          ((p->screenEnabled[1] & (1 << l)) ? 8 : 0));
      b->wm = b->wl = b->wr = 0;
     if (drawn)
-      LayerWin(p, l, &b->wm, &b->wl, &b->wr);  /* setups it cannot draw are flagged by LineReasons */
+      LayerWin(p, l, 0, &b->wm, &b->wl, &b->wr);  /* setups it cannot draw are flagged by LineReasons */
+    b->sm = b->sl = b->sr = 0;
+    if (!forced && p->mode == 1 && (p->screenEnabled[1] & (1 << l)) && !bg->bigTiles)
+      LayerWin(p, l, 1, &b->sm, &b->sl, &b->sr);  /* unsupported setups are flagged through subwin */
   }
   s->brightness = p->brightness & 15;
   s->bg3prio = p->bg3priority ? 1 : 0;
@@ -514,9 +518,11 @@ static void CaptureImpl(const Ppu *p, int line) {
   s->subneg = p->subtractColor ? 1 : 0;
   {
     uint8_t sw = 0;
-    for (int l = 0; l < kLayers; l++)
-      if ((p->screenWindowed[1] & (1 << l)) && ((p->windowsel >> (l * 4)) & 0xa))
+    for (int l = 0; l < kLayers; l++) {  /* only setups the GE path cannot draw (window 2, mode 7, audit failed) */
+      uint8_t m, a, e;
+      if (!LayerWin(p, l, 1, &m, &a, &e))
         sw |= (uint8_t)(1 << l);
+    }
     if ((p->screenWindowed[1] & 16) && ((p->windowsel >> 16) & 0xa))
       sw |= 8;  /* OBJ on the subscreen is windowed */
     s->subwin = sw;
@@ -882,16 +888,21 @@ static void BuildClut7(int b) {
 
 //BG layers
 
-static bool SameBg(const LineSnap *a, const LineSnap *b, int l) {
+static bool SameGeom(const LineSnap *a, const LineSnap *b, int l) {
   const BgSnap *x = &a->bg[l], *y = &b->bg[l];
   return x->hscroll == y->hscroll && x->vscroll == y->vscroll && x->mapadr == y->mapadr &&
-         x->tileadr == y->tileadr && (x->flags & 7) == (y->flags & 7) && x->wm == y->wm &&
-         x->wl == y->wl && x->wr == y->wr;
+         x->tileadr == y->tileadr && (x->flags & 7) == (y->flags & 7);
+}
+
+static bool SameBg(const LineSnap *a, const LineSnap *b, int l) {
+  const BgSnap *x = &a->bg[l], *y = &b->bg[l];
+  return SameGeom(a, b, l) && x->wm == y->wm && x->wl == y->wl && x->wr == y->wr;
 }
 
 static bool SameSub(const LineSnap *a, const LineSnap *b, int l) {
-  return SameBg(a, b, l) && a->bg[l].flags == b->bg[l].flags && a->mathmask == b->mathmask &&
-         a->bg3prio == b->bg3prio;
+  const BgSnap *x = &a->bg[l], *y = &b->bg[l];
+  return SameGeom(a, b, l) && x->flags == y->flags && x->sm == y->sm && x->sl == y->sl && x->sr == y->sr &&
+         a->mathmask == b->mathmask && a->bg3prio == b->bg3prio;
 }
 
 /* Walks the tilemap of layer l once for rows [r0,r1) and appends every non-empty
@@ -1809,6 +1820,12 @@ static bool DrawGe(void) {
       }
       if (rc == 0)
         continue;
+      {
+        const BgSnap *sb = &g_lines[g_subruns[i].first].bg[l];
+        int wa[2], we[2];
+        if (WinSpans(sb->sm, sb->sl, sb->sr, wa, we) == 0)
+          continue;  /* masked completely on the subscreen: adds nothing (its tile list stays unused in the pool) */
+      }
       if (sub_layer >= 0 && sub_layer != l) {
         if (!g_multisub_ok) {
           NOTE_SUBMULTI("two-sub-layers", g_subruns[i].r0, sub_layer, l);
@@ -1946,6 +1963,17 @@ static bool DrawGe(void) {
     const BRun *br = &g_bruns[i];
     memset(g_bcounts[i], 0, sizeof(g_bcounts[i]));
     CountList(&br->lst, g_bcounts[i]);
+    {
+      const BgSnap *sb = &g_lines[br->first].bg[br->l];
+      int wa[2], we[2];
+      int ns = WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
+      if (sb->sm)
+        g_win_rows += (uint32_t)(br->r1 - br->r0);
+      if (ns != 1)  /* a tile may be emitted once per span */
+        for (int pr = 0; pr < 2; pr++)
+          for (int p = 0; p < 8; p++)
+            g_bcounts[i][pr][p] *= ns;
+    }
     for (int pr = 0; pr < 2; pr++)
       for (int p = 0; p < 8; p++)
         total += g_bcounts[i][pr][p];
@@ -2143,7 +2171,13 @@ static bool DrawGe(void) {
         continue;
       TileVert *v0[2][8];
       memcpy(v0, w, sizeof(v0));
-      EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop, 0, kGameWidth);
+      {
+        const BgSnap *sb = &g_lines[br->first].bg[l];
+        int wa[2], we[2];
+        int ns = WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
+        for (int k = 0; k < ns; k++)
+          EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop, wa[k], we[k]);
+      }
       for (int pr = 0; pr < 2; pr++) {
         for (int p = 0; p < 8; p++) {
           int c = g_bcounts[i][pr][p];
