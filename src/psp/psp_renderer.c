@@ -174,6 +174,15 @@ static bool g_m7_ok = true;          /* cleared if the texture-coordinate self t
 static bool g_win_ok = SM_PSP_GE_WIN;  /* cleared if the first verified window frames differ from software */
 static uint32_t g_win_vn, g_win_vbad, g_win_rows;
 enum { kWinVerify = 8 };
+/* Gate 4p: lines with more than 32 sprites or 34 slivers are drawn on the GE with the hardware drop rule (ppu.c). */
+static bool g_ovf_ok = true;  /* cleared if the first verified overflow frames differ from software */
+static int g_ovf_rows;        /* rows of the sprite range this frame that exceed the limits */
+static uint32_t g_ovf_vn, g_ovf_vbad, g_frames_ovf, g_ovf_watch;
+enum { kOvfVerify = 8, kOvfWatch = 30 };
+static int16_t g_row_lastk[256];  /* per row: last kept sprite (index in g_spr), 32767 = row not limited */
+static uint8_t g_row_lastc[256];  /* per row: slivers kept of that sprite, in screen column order */
+static bool g_obj_dry;           /* EmitQuad8 only counts (ObjCountQuads) */
+static int g_obj_dry_n;
 static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at the sample point (x, y) */
 static bool g_verify_now, g_audit_now;
 static bool g_multisub_ok = true;   /* cleared if the first verified multi-layer subscreen frames differ from software */
@@ -1110,6 +1119,10 @@ static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int 
   int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
   if (cl + cr >= 8 || ct + cb >= 8)
     return;
+  if (g_obj_dry) {
+    g_obj_dry_n++;
+    return;
+  }
   float u = (float)((pt % 32) * 8), v = (float)((pt / 32) * 8);
   float ul, ur, vt, vb;
   if (hf) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
@@ -1118,6 +1131,45 @@ static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int 
   o[0] = (TileVert){ul, vt, (int16_t)(ox + x0 + cl), (int16_t)(oy + y0 + ct), (int16_t)z};
   o[1] = (TileVert){ur, vb, (int16_t)(ox + x0 + 8 - cr), (int16_t)(oy + y0 + 8 - cb), (int16_t)z};
   *w += 2;
+}
+
+/* Visible 8-pixel columns of a sprite: the ones ppu.c counts as slivers (col + x in (-8, 256)). *first = first one. */
+static int ObjVisCols(const Sprite *sp, int *first) {
+  int n = sp->size >> 3, f = -1, c = 0;
+  for (int tc = 0; tc < n; tc++) {
+    int cx = tc * 8 + sp->x;
+    if (cx > -8 && cx < 256) {
+      if (f < 0)
+        f = tc;
+      c++;
+    }
+  }
+  *first = f < 0 ? 0 : f;
+  return c;
+}
+
+/* Sprite k (index in g_spr) still has its column vi (visible-column index) on row r. */
+static inline bool ObjRowKeeps(int k, int r, int vi) {
+  int lk = g_row_lastk[r];
+  return lk > k || (lk == k && vi < (int)g_row_lastc[r]);
+}
+
+/* EmitQuad8 for the rows of the tile on which sprite k keeps this column (hardware sprite/sliver limit). */
+static void EmitQuad8Rows(TileVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf,
+                          int z, int vx0, int vx1, int k, int vi) {
+  int b = y0 + 8 < r1 ? y0 + 8 : r1;
+  int r = y0 > r0 ? y0 : r0;
+  while (r < b) {
+    if (!ObjRowKeeps(k, r, vi)) {
+      r++;
+      continue;
+    }
+    int e = r + 1;
+    while (e < b && ObjRowKeeps(k, e, vi))
+      e++;
+    EmitQuad8(w, ox, oy, x0, y0, r, e, pt, hf, vf, z, vx0, vx1);
+    r = e;
+  }
 }
 
 /* w == NULL: decode every tile the sprite uses (atlas fill, before the list is
@@ -1129,6 +1181,9 @@ static void WalkSprite(const Sprite *sp, int o0, int o1, TileVert **w, int z, in
   bool hf = (sp->attr & 0x4000) != 0, vf = (sp->attr & 0x8000) != 0;
   int adr = (sp->attr & 0x100) ? g_obj_adr2 : g_obj_adr1;
   int ycopies = (sp->y + sp->size > 256) ? 2 : 1;  /* rows wrap modulo 256 (uint8 row in ppu.c) */
+  int k = (int)(sp - g_spr), tc0 = 0;
+  if (g_ovf_rows && w)
+    ObjVisCols(sp, &tc0);
   for (int tr = 0; tr < n; tr++) {
     for (int tc = 0; tc < n; tc++) {
       int sr = vf ? n - 1 - tr : tr, sc = hf ? n - 1 - tc : tc;
@@ -1139,9 +1194,46 @@ static void WalkSprite(const Sprite *sp, int o0, int o1, TileVert **w, int z, in
       if (w == NULL)
         continue;
       int x0 = sp->x + tc * 8;
-      for (int c = 0; c < ycopies; c++)
-        EmitQuad8(w, ox, oy, x0, (c ? sp->y - 256 : sp->y) + tr * 8, o0, o1, pt, hf, vf, z, vx0, vx1);
+      for (int c = 0; c < ycopies; c++) {
+        int y0 = (c ? sp->y - 256 : sp->y) + tr * 8;
+        if (g_ovf_rows)
+          EmitQuad8Rows(w, ox, oy, x0, y0, o0, o1, pt, hf, vf, z, vx0, vx1, k, tc - tc0);
+        else
+          EmitQuad8(w, ox, oy, x0, y0, o0, o1, pt, hf, vf, z, vx0, vx1);
+      }
     }
+  }
+}
+
+/* Rows over 32 sprites / 34 slivers (ppu.c): sprites after the 32nd in-range one are dropped, and so is every
+ * sliver after the 34th (counted per sprite in screen column order). Records, per such row, the last kept
+ * sprite and how many of its slivers are kept. */
+static void ObjLimitRows(int r0, int r1, const uint8_t *cs, const uint16_t *ct) {
+  for (int r = 0; r < 256; r++) {
+    g_row_lastk[r] = 32767;
+    g_row_lastc[r] = 255;
+  }
+  for (int r = r0; r < r1; r++) {
+    if (cs[r] <= 32 && ct[r] <= 34)
+      continue;
+    int nsp = 0, nt = 0, lk = -1, lc = 0;
+    for (int k = 0; k < g_nspr; k++) {
+      const Sprite *sp = &g_spr[k];
+      if (((unsigned)(r - sp->y) & 255u) >= sp->size)
+        continue;
+      if (++nsp > 32)
+        break;
+      int first, vis = ObjVisCols(sp, &first);
+      lk = k;
+      if (nt + vis > 34) {
+        lc = 34 - nt;
+        break;
+      }
+      nt += vis;
+      lc = vis;
+    }
+    g_row_lastk[r] = (int16_t)lk;
+    g_row_lastc[r] = (uint8_t)lc;
   }
 }
 
@@ -1184,11 +1276,18 @@ static bool PrepareObj(int o0, int o1) {
     int q = (size >> 3) * (size >> 3) * ((y + size > 256) ? 2 : 1);
     g_spr_quads += q;
   }
+  int nover = 0;
   for (int r = o0; r < o1; r++)
-    if (cs[r] > 32 || ct[r] > 34) {
+    if (cs[r] > 32 || ct[r] > 34)
+      nover++;
+  if (nover) {
+    if (!g_ovf_ok) {
       CountReasons(kReasonObjLimit);
       return false;
     }
+    ObjLimitRows(o0, o1, cs, ct);
+    g_ovf_rows = nover;
+  }
   if (g_spr_quads > kMaxSpriteQuads) {
     BUDGET(0, "sprquads", g_spr_quads, kMaxSpriteQuads);
     return false;
@@ -1201,6 +1300,22 @@ static bool PrepareObj(int o0, int o1) {
 static ObjSeg g_sobjseg[128];
 static int g_nsobjseg;
 static TileVert *g_sobjbase;
+
+/* Number of quads BuildObjGeom will emit for these bands (limited rows split tiles, so g_spr_quads is no bound). */
+static int ObjCountQuads(const ObjBand *bands, int nb) {
+  int wa[2], we[2];
+  TileVert *w = NULL;  /* never written: EmitQuad8 only counts */
+  g_obj_dry = true;
+  g_obj_dry_n = 0;
+  for (int b = 0; b < nb; b++) {
+    int ns = WinSpans(bands[b].wm, bands[b].wl, bands[b].wr, wa, we);
+    for (int s = 0; s < ns; s++)
+      for (int k = g_nspr - 1; k >= 0; k--)
+        WalkSprite(&g_spr[k], bands[b].r0, bands[b].r1, &w, 0, 0, 0, wa[s], we[s]);
+  }
+  g_obj_dry = false;
+  return g_obj_dry_n;
+}
 
 /* Emits the sprite quads of every window band at offset (ox,oy); returns the number of palette segments.
  * Per band the visible spans are clipped on the CPU. Bands and spans never overlap, so their order does not
@@ -1217,7 +1332,12 @@ static int BuildObjGeom(const ObjBand *bands, int nb, int ox, int oy, ObjSeg *se
   }
   if (npairs == 0)
     return 0;
-  TileVert *base = sceGuGetMemory(g_spr_quads * npairs * 2 * sizeof(TileVert));
+  int cap = g_spr_quads * npairs;
+  if (g_ovf_rows)
+    cap = ObjCountQuads(bands, nb);  /* limited rows split tiles: count what is really emitted */
+  if (cap <= 0)
+    return 0;
+  TileVert *base = sceGuGetMemory(cap * 2 * sizeof(TileVert));
   TileVert *w = base;
   *base_out = base;
   for (int b = 0; b < nb; b++) {
@@ -1440,9 +1560,17 @@ static void GeVerify(void) {
       PspLog("geaudit: window frames differ too much, GE windows disabled");
     }
   }
-  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
+  if (g_ovf_rows) {
+    g_ovf_vn++;
+    g_ovf_vbad += bad;
+    if (g_ovf_vn >= 3 && g_ovf_vbad / g_ovf_vn > 64) {
+      g_ovf_ok = false;
+      PspLog("geaudit: sprite-limit frames differ, GE sprite limit disabled");
+    }
+  }
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
-         (unsigned)g_bright_rows, (unsigned)g_win_rows, bx, by, bsw, bge);
+         (unsigned)g_bright_rows, (unsigned)g_win_rows, g_ovf_rows, bx, by, bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
   if (bad) {
     int shown = 0;
@@ -1746,6 +1874,7 @@ static bool DrawGe(void) {
   g_ent_top = 0;
   g_rows_top = 0;
   g_m7_nq = 0;
+  g_ovf_rows = 0;
   g_verify_now = false;
   g_bright_rows = 0;
   g_win_rows = 0;
@@ -2059,6 +2188,15 @@ static bool DrawGe(void) {
     if (np > 1 && g_spr_quads * np > 2 * kMaxSpriteQuads) {  /* window bands/spans multiply the sprite quads */
       BUDGET(6, "sprquads*win", g_spr_quads * np, 2 * kMaxSpriteQuads);
       return false;
+    }
+    if (g_ovf_rows) {  /* limited rows split tiles: check the quads that will really be emitted */
+      ObjBand sbd = {(uint16_t)s0, (uint16_t)s1, 0, 0, 0};
+      int nm = ObjCountQuads(g_objband, g_nobjband);
+      int nsb = sobj ? ObjCountQuads(&sbd, 1) : 0;
+      if (nm > 2 * kMaxSpriteQuads || nsb > kMaxSpriteQuads) {
+        BUDGET(7, "sprquads*ovf", nm, nsb);
+        return false;
+      }
     }
     if (o1 > o0)
       BuildClutObj(obj_bright);
@@ -2381,9 +2519,14 @@ static bool DrawGe(void) {
   bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
   bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
   bool winwant = g_win_rows != 0 && g_win_vn < kWinVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || g_audit_now);
+  bool ovfwant = g_ovf_rows != 0 && g_ovf_vn < kOvfVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || g_audit_now);
   if (((g_frame_multisub && g_ms_vn < 6) || m7big || brwant || winwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
+  if (ovfwant && g_ppu_skip_draw)
+    g_ovf_watch = kOvfWatch;  /* no software image for this overflow frame: draw both for a while so later ones get audited */
+  if (g_ovf_rows)
+    g_frames_ovf++;
   g_audit_now = false;
   Present();
   return true;
@@ -2690,6 +2833,10 @@ static void PspRenderer_EndDraw(void) {
 
   /* Decide for the NEXT frame whether the software PPU may skip its drawing. */
   g_ppu_skip_draw = g_ge_active && g_streak >= kSkipAfter;
+  if (g_ovf_watch) {
+    g_ovf_watch--;
+    g_ppu_skip_draw = false;
+  }
   if (g_want_ms_verify) {  /* the first multi-layer subscreen frames are checked against the software image */
     g_want_ms_verify = false;
     g_ppu_skip_draw = false;
@@ -2746,9 +2893,9 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
            (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
-           (unsigned)g_capture_gaps);
+           (unsigned)g_capture_gaps, (unsigned)g_frames_ovf);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
