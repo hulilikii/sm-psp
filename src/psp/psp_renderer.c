@@ -536,7 +536,7 @@ static void CaptureImpl(const Ppu *p, int line) {
         p->objTileAdr2 != g_obj_adr2 || (bool)p->objPriority != g_obj_rot ||
         (g_obj_rot && (uint8_t)((p->oamAdr & 0xfe) >> 1) != g_obj_start))
       r2 |= kReasonObjCfg;
-    if (objon && !LayerWin(p, 4, &s->owm, &s->owl, &s->owr))
+    if (objon && !LayerWin(p, 4, 0, &s->owm, &s->owl, &s->owr))
       r2 |= kReasonWindow;
     s->reasons |= r2;
   }
