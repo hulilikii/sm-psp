@@ -104,6 +104,7 @@ typedef struct LineSnap {
   uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
   uint8_t subobj;                                  /* OBJ on the subscreen and added by colour math */
   uint8_t owm, owl, owr;                           /* OBJ window on the main screen (as BgSnap.wm) */
+  uint8_t mosmask, mossize, mosstart;              /* mosaic: BG1-3 mask (mode 1, size > 1), size, start line */
 } LineSnap;
 
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
@@ -183,6 +184,16 @@ static int16_t g_row_lastk[256];  /* per row: last kept sprite (index in g_spr),
 static uint8_t g_row_lastc[256];  /* per row: slivers kept of that sprite, in screen column order */
 static bool g_obj_dry;           /* EmitQuad8 only counts (ObjCountQuads) */
 static int g_obj_dry_n;
+/* Gate 4q: mosaic on BG1-3 (mode 1, main screen). The layer is sampled on the CPU at the block origins into a
+ * 128x128 8888 image per tile priority; the GE stretches it (nearest) over each run. */
+enum { kMosDim = 128, kMosVerify = 8 };
+typedef struct MosLayer { bool on, any[2]; int size, start; TileVert *v; } MosLayer;
+static MosLayer g_mos[kLayers];
+static uint32_t g_mosd[kLayers][2][kMosDim * kMosDim] __attribute__((aligned(64)));  /* 384 KB */
+static bool g_mos_ok = true;  /* cleared if the first verified mosaic frames differ from software */
+static bool g_mos_frame;      /* this frame has a mosaic layer on the GE */
+static int g_mos_size;
+static uint32_t g_mos_vn, g_mos_vbad, g_frames_mos;
 static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at the sample point (x, y) */
 static bool g_verify_now, g_audit_now;
 static bool g_multisub_ok = true;   /* cleared if the first verified multi-layer subscreen frames differ from software */
@@ -399,7 +410,7 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
   for (int l = 0; l < nl; l++) {
     if (p->bgLayer[l].bigTiles)
       r |= kReasonBigTile;
-    if (p->bgLayer[l].mosaicEnabled && p->mosaicSize > 1)
+    if (p->mode != 1 && p->bgLayer[l].mosaicEnabled && p->mosaicSize > 1)  /* mode 1 mosaic: see MosPrepare */
       r |= kReasonMosaic;
     uint8_t wm, wl, wr;
     if (!LayerWin(p, l, 0, &wm, &wl, &wr))
@@ -503,6 +514,16 @@ static void CaptureImpl(const Ppu *p, int line) {
   s->bg3prio = p->bg3priority ? 1 : 0;
   s->cg0 = p->cgram[0];
   s->forced = forced ? 1 : 0;
+  {  /* mosaic (mode 1): BG1-3 with the effect on; the GE path draws it from the layer geometry (MosPrepare) */
+    uint8_t mos = 0;
+    if (!forced && p->mode == 1 && p->mosaicSize > 1)
+      for (int l = 0; l < kLayers; l++)
+        if (p->bgLayer[l].mosaicEnabled)
+          mos |= (uint8_t)(1 << l);
+    s->mosmask = mos;
+    s->mossize = p->mosaicSize;
+    s->mosstart = p->mosaicStartLine;
+  }
   uint8_t mm = 0;
   for (int i = 0; i < 6; i++)
     mm |= (uint8_t)((p->mathEnabled[i] ? 1 : 0) << i);
@@ -1079,6 +1100,83 @@ static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2
   }
 }
 
+/* Gate 4q: samples layer l at the mosaic block origins into g_mosd[l][tile priority], as ppu.c does: column
++ * x - x % size, line y - (y - start) % size (1-based lines), then the scroll of the layer. */
+static void MosBuild(int l, const BgSnap *s, int size, int start) {
+  MosLayer *m = &g_mos[l];
+  bool bpp4 = l < 2;
+  int words = bpp4 ? 16 : 8;
+  int ncols = (kGameWidth + size - 1) / size, nrows = (kGameHeight - start) / size + 1;
+  int wide = s->flags & 1, high = (s->flags >> 1) & 1;
+  uint32_t *img0 = g_mosd[l][0], *img1 = g_mosd[l][1];
+  if (bpp4)
+    BuildClut4(kClutBright);
+  else
+    BuildClut2(kClutBright);
+  m->any[0] = m->any[1] = false;
+  for (int i = 0; i < nrows; i++) {
+    int by = start + i * size + s->vscroll, ty = by >> 3, row = by & 7;
+    int rowbase = s->mapadr + (ty & 31) * 32 + (((ty & 32) && high) ? (wide ? 0x800 : 0x400) : 0);
+    uint32_t *d0 = img0 + i * kMosDim, *d1 = img1 + i * kMosDim;
+    for (int j = 0; j < ncols; j++) {
+      int bx = j * size + s->hscroll;
+      unsigned t = g_vram[(rowbase + ((bx >> 3) & 31) + (((bx & 0x100) && wide) ? 0x400 : 0)) & 0x7fff];
+      int col = (t & 0x4000) ? (bx & 7) : 7 - (bx & 7);
+      int base = (s->tileadr + (int)(t & 0x3ff) * words + ((t & 0x8000) ? 7 - row : row)) & 0x7fff;
+      unsigned w0 = g_vram[base];
+      int px = (int)((w0 >> col) & 1) | (int)(((w0 >> (8 + col)) & 1) << 1);
+      if (bpp4) {
+        unsigned w1 = g_vram[(base + 8) & 0x7fff];
+        px |= (int)(((w1 >> col) & 1) << 2) | (int)(((w1 >> (8 + col)) & 1) << 3);
+      }
+      uint32_t c = 0;
+      int hp = (t & 0x2000) != 0;
+      if (px) {
+        int pal = (t >> 10) & 7;
+        c = bpp4 ? g_clut4[kClutBright][pal][px] : g_clut2[kClutBright][pal][px];
+        m->any[hp] = true;
+      }
+      d0[j] = hp ? 0 : c;
+      d1[j] = hp ? c : 0;
+    }
+  }
+  sceKernelDcacheWritebackRange(img0, (unsigned)nrows * kMosDim * 4);
+  sceKernelDcacheWritebackRange(img1, (unsigned)nrows * kMosDim * 4);
+}
+
+/* 0: layer l has no mosaic this frame, 1: image built (g_mos[l].on), -1: a setup the GE path cannot draw
+ * (geometry or mosaic changing inside the frame, mosaic on part of the rows, or the audit failed). */
+static int MosPrepare(int l) {
+  MosLayer *m = &g_mos[l];
+  const LineSnap *first = NULL;
+  int ndrawn = 0, nmos = 0;
+  m->on = false;
+  for (int r = 0; r < g_line_count; r++) {
+    const LineSnap *ls = &g_lines[r];
+    if (!(ls->bg[l].flags & 4))
+      continue;
+    ndrawn++;
+    if (!(ls->mosmask & (1 << l)))
+      continue;
+    nmos++;
+    if (!first)
+      first = ls;
+    else if (ls->mossize != first->mossize || ls->mosstart != first->mosstart || !SameGeom(first, ls, l))
+      return -1;
+  }
+  if (nmos == 0)
+    return 0;
+  if (nmos != ndrawn || !g_mos_ok || first->mossize < 2 || first->mossize > 16 || first->mosstart > 1)
+    return -1;
+  m->size = first->mossize;
+  m->start = first->mosstart;
+  MosBuild(l, &first->bg[l], m->size, m->start);
+  m->on = true;
+  g_mos_frame = true;
+  g_mos_size = m->size;
+  return 1;
+}
+
 //GE Frame
 
 static void CountReasons(int mask);
@@ -1568,9 +1666,17 @@ static void GeVerify(void) {
       PspLog("geaudit: sprite-limit frames differ, GE sprite limit disabled");
     }
   }
-  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
+  if (g_mos_frame) {
+    g_mos_vn++;
+    g_mos_vbad += bad;
+    if (g_mos_vn >= 3 && g_mos_vbad / g_mos_vn > 600) {
+      g_mos_ok = false;
+      PspLog("geaudit: mosaic frames differ too much, GE mosaic disabled");
+    }
+  }
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d) first bad (%d,%d) sw=%04x ge=%04x", m7 ? "m7verify" : "geaudit",
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
-         (unsigned)g_bright_rows, (unsigned)g_win_rows, g_ovf_rows, bx, by, bsw, bge);
+         (unsigned)g_bright_rows, (unsigned)g_win_rows, g_ovf_rows, g_mos_frame ? g_mos_size : 0, bx, by, bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
   if (bad) {
     int shown = 0;
@@ -1751,7 +1857,28 @@ static void BindBg(int l, int b, int p) {
   }
 }
 
+/* Mosaic layer: the stretched image of this priority, one nearest-sampled quad per run and window span. */
+static void DrawMosPass(int l, int pr) {
+  const MosLayer *m = &g_mos[l];
+  if (!m->any[pr])
+    return;
+  sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+  sceGuTexImage(0, kMosDim, kMosDim, kMosDim, g_mosd[l][pr]);
+  sceGuTexFlush();
+  for (int i = 0; i < g_nruns[l]; i++) {
+    const BgSnap *wb = &g_lines[g_runs[l][i].first].bg[l];
+    int wa[2], we[2];
+    int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+    for (int k = 0; k < ns; k++)
+      GeDraw(kVtTile, 2, m->v + ((i * 2 + k) * 2 + pr) * 2);
+  }
+}
+
 static void DrawBgPass(int l, int pr) {
+  if (g_mos[l].on) {
+    DrawMosPass(l, pr);
+    return;
+  }
   /* One draw per palette: the vertices of a palette are contiguous across runs (see the geometry pass), so
    * consecutive runs with the same brightness (same CLUT) merge. Runs cover disjoint rows: order is irrelevant. */
   int nr = g_nruns[l];
@@ -1879,6 +2006,7 @@ static bool DrawGe(void) {
   g_bright_rows = 0;
   g_win_rows = 0;
   g_frame_multisub = false;
+  g_mos_frame = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -1934,6 +2062,10 @@ static bool DrawGe(void) {
     for (int r = 0; r < g_line_count; r++) {
       if (!g_lines[r].submath || !(g_lines[r].bg[l].flags & 8))
         continue;
+      if (g_lines[r].mosmask & (1 << l)) {  /* mosaic on a subscreen layer: not drawn by the GE path */
+        CountReasons(kReasonMosaic);
+        return false;
+      }
       g_frame_subnoop = true;
       if (n && g_subruns[n - 1].r1 == r && SameSub(&g_lines[g_subruns[n - 1].first], &g_lines[r], l))
         g_subruns[n - 1].r1 = (uint16_t)(r + 1);
@@ -2060,9 +2192,17 @@ static bool DrawGe(void) {
         g_runs[l][n++] = (Run){(uint16_t)r, (uint16_t)(r + 1), (uint16_t)r};
     }
     g_nruns[l] = n;
+    if (MosPrepare(l) < 0) {
+      CountReasons(kReasonMosaic);
+      return false;
+    }
     for (int i = 0; i < n; i++) {
       memset(g_counts[l][i], 0, sizeof(g_counts[l][i]));
       const Run *run = &g_runs[l][i];
+      if (g_mos[l].on) {  /* drawn from the mosaic image, no tiles */
+        g_mlist[l][i] = (TileList){0, 0};
+        continue;
+      }
       if (!BuildTileList(l, &g_lines[run->first], run->r0, run->r1, &g_mlist[l][i])) {
         BUDGET(3, "mainpool", g_ent_top, l);
         return false;
@@ -2287,6 +2427,32 @@ static bool DrawGe(void) {
           int c = g_counts[l][i][pr][p];
           g_geom[l][i][pr][p].v = c ? v0[pr][p] : NULL;
           g_geom[l][i][pr][p].n = c ? (int)(w[pr][p] - v0[pr][p]) : 0;
+        }
+      }
+    }
+  }
+  /* Mosaic layers: the stretched image is one quad per run, window span and priority. u/v are placed so that
+   * nearest sampling picks column x / size and row (y + 1 - start) / size (see MosBuild); g_uvh as in M7Prepare. */
+  for (int l = 0; l < kLayers; l++) {
+    MosLayer *m = &g_mos[l];
+    if (!m->on)
+      continue;
+    const float inv = 1.0f / (float)m->size;
+    m->v = sceGuGetMemory(g_nruns[l] * 8 * sizeof(TileVert));
+    for (int i = 0; i < g_nruns[l]; i++) {
+      const Run *run = &g_runs[l][i];
+      const BgSnap *wb = &g_lines[run->first].bg[l];
+      int wa[2], we[2];
+      int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+      float vt = ((float)(run->r0 + 1 - m->start) + 0.5f - g_uvh[1]) * inv;
+      float vb = vt + (float)(run->r1 - run->r0) * inv;
+      for (int k = 0; k < ns; k++) {
+        float ul = ((float)wa[k] + 0.5f - g_uvh[0]) * inv;
+        float ur = ul + (float)(we[k] - wa[k]) * inv;
+        for (int pr = 0; pr < 2; pr++) {
+          TileVert *q = m->v + ((i * 2 + k) * 2 + pr) * 2;
+          q[0] = (TileVert){ul, vt, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + run->r0), (int16_t)g_zbg[l][pr]};
+          q[1] = (TileVert){ur, vb, (int16_t)(kLeft + we[k]), (int16_t)(kTop + run->r1), (int16_t)g_zbg[l][pr]};
         }
       }
     }
@@ -2520,13 +2686,16 @@ static bool DrawGe(void) {
   bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
   bool winwant = g_win_rows != 0 && g_win_vn < kWinVerify;
   bool ovfwant = g_ovf_rows != 0 && g_ovf_vn < kOvfVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || g_audit_now);
-  if (((g_frame_multisub && g_ms_vn < 6) || m7big || brwant || winwant) && g_ppu_skip_draw)
+  bool moswant = g_mos_frame && g_mos_vn < kMosVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || brwant || winwant || moswant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   if (ovfwant && g_ppu_skip_draw)
     g_ovf_watch = kOvfWatch;  /* no software image for this overflow frame: draw both for a while so later ones get audited */
   if (g_ovf_rows)
     g_frames_ovf++;
+  if (g_mos_frame)
+    g_frames_mos++;
   g_audit_now = false;
   Present();
   return true;
@@ -2893,9 +3062,9 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
            (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
-           (unsigned)g_capture_gaps, (unsigned)g_frames_ovf);
+           (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],

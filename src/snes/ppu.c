@@ -566,6 +566,45 @@ static void PpuDrawBackground_2bpp(Ppu *ppu, uint y, bool sub, uint layer, PpuZb
 #undef DO_PIXEL_HFLIP
 }
 
+// Mosaic BG layer (mode 1, same rule as ppu_getPixel): draw the layer unwindowed at the first line of the block
+// into a scratch buffer, then give every pixel the value at the first column of its block, inside the window spans.
+static void PpuDrawBgLayer(Ppu *ppu, uint y, bool sub, uint layer, bool bpp4, PpuZbufType zhi, PpuZbufType zlo) {
+  uint size = ppu->mosaicSize;
+  if (!ppu->bgLayer[layer].mosaicEnabled || size <= 1) {
+    if (bpp4)
+      PpuDrawBackground_4bpp(ppu, y, sub, layer, zhi, zlo);
+    else
+      PpuDrawBackground_2bpp(ppu, y, sub, layer, zhi, zlo);
+    return;
+  }
+  if (!IS_SCREEN_ENABLED(ppu, sub, layer))
+    return;
+  PpuPixelPrioBufs saved = ppu->bgBuffers[sub];
+  uint8 windowed = ppu->screenWindowed[sub];
+  uint sy = y - (y - ppu->mosaicStartLine) % size;
+  memset(&ppu->bgBuffers[sub], 0, sizeof(saved));
+  ppu->screenWindowed[sub] = (uint8)(windowed & ~(1 << layer));
+  if (bpp4)
+    PpuDrawBackground_4bpp(ppu, sy, sub, layer, zhi, zlo);
+  else
+    PpuDrawBackground_2bpp(ppu, sy, sub, layer, zhi, zlo);
+  ppu->screenWindowed[sub] = windowed;
+  PpuPixelPrioBufs tmp = ppu->bgBuffers[sub];
+  ppu->bgBuffers[sub] = saved;
+  PpuWindows win;
+  IS_SCREEN_WINDOWED(ppu, sub, layer) ? PpuWindows_Calc(&win, ppu, layer) : PpuWindows_Clear(&win, ppu, layer);
+  PpuZbufType *dst = ppu->bgBuffers[sub].data;
+  for (size_t w = 0; w < win.nr; w++) {
+    if (win.bits & (1 << w))
+      continue;  // layer is disabled for this window part
+    for (int x = win.edges[w]; x < win.edges[w + 1]; x++) {
+      PpuZbufType z = tmp.data[x - x % (int)size];
+      if (z > dst[x])
+        dst[x] = z;
+    }
+  }
+}
+
 // Assumes it's drawn on an empty backdrop
 static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
   int layer = 0;
@@ -583,9 +622,9 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
   int clippedV = vScroll - yCenter;
   clippedH = (clippedH & 0x2000) ? (clippedH | ~1023) : (clippedH & 1023);
   clippedV = (clippedV & 0x2000) ? (clippedV | ~1023) : (clippedV & 1023);
-  bool mosaic_enabled = IS_MOSAIC_ENABLED(ppu, 0);
+  bool mosaic_enabled = ppu->bgLayer[0].mosaicEnabled && ppu->mosaicSize > 1;
   if (mosaic_enabled)
-    y = ppu->mosaicModulo[y];
+    y -= (y - ppu->mosaicStartLine) % ppu->mosaicSize;
   uint32 ry = ppu->m7yFlip ? 255 - y : y;
   uint32 m7startX = (ppu->m7matrix[0] * clippedH & ~63) + (ppu->m7matrix[1] * ry & ~63) +
     (ppu->m7matrix[1] * clippedV & ~63) + (xCenter << 8);
@@ -605,7 +644,7 @@ static void PpuDrawBackground_mode7(Ppu *ppu, uint y, bool sub, PpuZbufType z) {
     uint32 outside_value = ppu->m7largeField ? 0x3ffff : 0xffffffff;
     bool char_fill = ppu->m7charFill;
     if (mosaic_enabled) {
-      int w = ppu->mosaicSize - (x - ppu->mosaicModulo[x]);
+      int w = ppu->mosaicSize - x % ppu->mosaicSize;
       do {
         w = IntMin(w, dstz_end - dstz);
         if ((uint32)(xpos | ypos) > outside_value) {
@@ -683,20 +722,9 @@ static void PpuDrawBackgrounds(Ppu *ppu, int y, bool sub) {
     if (ppu->lineHasSprites)
       PpuDrawSprites(ppu, y, sub, true);
 
-    if (IS_MOSAIC_ENABLED(ppu, 0))
-      assert(0);
-    else
-      PpuDrawBackground_4bpp(ppu, y, sub, 0, 0xc000, 0x8000);
-
-    if (IS_MOSAIC_ENABLED(ppu, 1))
-      assert(0);
-    else
-      PpuDrawBackground_4bpp(ppu, y, sub, 1, 0xb100, 0x7100);
-
-    if (IS_MOSAIC_ENABLED(ppu, 2))
-      assert(0);
-    else
-      PpuDrawBackground_2bpp(ppu, y, sub, 2, 0xf200, 0x1200);
+    PpuDrawBgLayer(ppu, y, sub, 0, true, 0xc000, 0x8000);
+    PpuDrawBgLayer(ppu, y, sub, 1, true, 0xb100, 0x7100);
+    PpuDrawBgLayer(ppu, y, sub, 2, false, 0xf200, 0x1200);
   } else {
     // mode 7
     PpuDrawBackground_mode7(ppu, y, sub, 0x5000);
