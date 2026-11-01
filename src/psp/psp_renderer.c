@@ -275,6 +275,13 @@ enum { kMaxTintRanges = 6 };
 static TintRange g_trange[kMaxTintRanges];
 static int g_ntr;
 static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2, y2), 2 = (x, y, w, h) */
+/* Gate 4s: rows of one subscreen colour-math mask. The blend is drawn once; each band restores its own layers. */
+typedef struct BlendBand { uint16_t r0, r1; uint8_t mask; } BlendBand;
+enum { kMaxBlendBands = 6, kBandVerify = 8 };
+static BlendBand g_bband[kMaxBlendBands];
+static int g_nbband;
+static bool g_band_ok = true;  /* cleared if the first verified multi-band frames differ from software */
+static uint32_t g_bnd_vn, g_bnd_vbad;
 
 static bool g_ge_ok;
 static bool g_ge_active;
@@ -1797,10 +1804,18 @@ static void GeVerify(void) {
       PspLog("geaudit: mosaic frames differ too much, GE mosaic disabled");
     }
   }
-  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d img=%d m7rows=%d) first bad (%d,%d) sw=%04x ge=%04x", (m7 || g_m7_img) ? "m7verify" : "geaudit",
+  if (g_nbband > 1) {
+    g_bnd_vn++;
+    g_bnd_vbad += bad;
+    if (g_bnd_vn >= 3 && g_bnd_vbad / g_bnd_vn > 600) {
+      g_band_ok = false;
+      PspLog("geaudit: multi-band subscreen blend differs too much, disabled");
+    }
+  }
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d img=%d m7rows=%d bands=%d) first bad (%d,%d) sw=%04x ge=%04x", (m7 || g_m7_img) ? "m7verify" : "geaudit",
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
          (unsigned)g_bright_rows, (unsigned)g_win_rows, g_ovf_rows, g_mos_frame ? g_mos_size : 0, g_m7_img ? 1 : 0,
-         g_m7_rows, bx, by, bsw, bge);
+         g_m7_rows, g_nbband, bx, by, bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
   if (bad) {
     int shown = 0;
@@ -2143,6 +2158,7 @@ static bool DrawGe(void) {
   g_win_rows = 0;
   g_frame_multisub = false;
   g_mos_frame = false;
+  g_nbband = 0;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -2249,13 +2265,25 @@ static bool DrawGe(void) {
       if (!on)
         continue;
       if (first) {
-        bmath = g_lines[r].mathmask;
         bneg = g_lines[r].subneg;
         first = false;
-      } else if (g_lines[r].mathmask != bmath || g_lines[r].subneg != bneg) {
-        NOTE_SUBMULTI("blend-mask-varies", r, bmath << 1 | bneg, g_lines[r].mathmask << 1 | g_lines[r].subneg);
+      } else if (g_lines[r].subneg != bneg) {
+        NOTE_SUBMULTI("blend-neg-varies", r, bneg, g_lines[r].subneg);
         CountReasons(kReasonSubMulti);
         return false;
+      }
+      {  /* band = rows of one colour-math mask; blend-free gap rows are absorbed into the band */
+        BlendBand *bb = g_nbband ? &g_bband[g_nbband - 1] : NULL;
+        if (bb && bb->mask == g_lines[r].mathmask) {
+          bb->r1 = (uint16_t)(r + 1);
+        } else {
+          if (g_nbband == kMaxBlendBands || (g_nbband >= 1 && (g_scissor_mode == 0 || !g_band_ok))) {
+            NOTE_SUBMULTI("blend-bands", r, g_nbband, g_lines[r].mathmask);
+            CountReasons(kReasonSubMulti);
+            return false;
+          }
+          g_bband[g_nbband++] = (BlendBand){(uint16_t)r, (uint16_t)(r + 1), g_lines[r].mathmask};
+        }
       }
       if (g_lines[r].subwin & (sublayers | ((sobj && g_lines[r].subobj) ? 8 : 0))) {
         CountReasons(kReasonSubWin);
@@ -2263,6 +2291,7 @@ static bool DrawGe(void) {
       }
     }
     blend = true;
+    bmath = g_nbband ? g_bband[0].mask : 0;  /* single-band restore; with several bands each uses its own */
     g_frame_subnoop = false;
   }
   g_frame_multisub = blend && multisub;
@@ -2776,7 +2805,15 @@ static bool DrawGe(void) {
       DrawBlendBgs();
     }
     sceGuDisable(GU_BLEND);
-    RestoreLayers(bmath, obj_bright, bd, nbd);
+    if (g_nbband > 1) {  /* each band restores the layers its own colour-math mask excludes */
+      for (int k = 0; k < g_nbband; k++) {
+        ScissorRows(g_bband[k].r0, g_bband[k].r1);
+        RestoreLayers(g_bband[k].mask, obj_bright, bd, nbd);
+      }
+      sceGuScissor(0, 0, kPspWidth, kPspHeight);
+    } else {
+      RestoreLayers(bmath, obj_bright, bd, nbd);
+    }
     g_frames_blend++;
   } else if (tint) {
     /* Tint: dst = dst +/- fixed, or (dst +/- fixed) / 2 with half colour (factors 0.5 / 0.5), per range of
@@ -2834,8 +2871,9 @@ static bool DrawGe(void) {
   bool ovfwant = g_ovf_rows != 0 && g_ovf_vn < kOvfVerify;
   bool moswant = g_mos_frame && g_mos_vn < kMosVerify;
   bool m7iwant = g_m7_img && g_m7i_vn < kM7IVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || g_audit_now);
-  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant) && g_ppu_skip_draw)
+  bool bandwant = g_nbband > 1 && g_bnd_vn < kBandVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   if (ovfwant && g_ppu_skip_draw && g_ovf_vn < kOvfArm && g_ovf_arms < kOvfArms) {
     g_ovf_arms++;
