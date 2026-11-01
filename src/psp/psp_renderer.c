@@ -100,6 +100,7 @@ typedef struct LineSnap {
   uint8_t brightness, bg3prio, mathmask, submath;  /* submath: subscreen add may matter */
   uint8_t objon;                                   /* OBJ enabled on the main screen */
   uint8_t subneg, subwin;                          /* subtract mode; subscreen layers (bit l) windowed */
+  uint8_t prevnoop;                                /* prevent-math mode set, but colour math has nothing to do (gate 4t-a) */
   uint8_t tint, tinthalf;                          /* fixed-colour math on this row; result halved */
   uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
   uint8_t subobj;                                  /* OBJ on the subscreen and added by colour math */
@@ -182,6 +183,11 @@ static bool g_m7_ok = true;          /* cleared if the texture-coordinate self t
 static bool g_win_ok = SM_PSP_GE_WIN;  /* cleared if the first verified window frames differ from software */
 static uint32_t g_win_vn, g_win_vbad, g_win_rows;
 enum { kWinVerify = 8 };
+/* Gate 4t-a: prevent-math modes 1/2 on rows where colour math has nothing to add are drawn by the GE. */
+static bool g_prev_ok = true;  /* cleared if the first verified such frames differ from software */
+static int g_prev_rows;        /* rows of this frame that rely on the no-op rule */
+static uint32_t g_prev_vn, g_prev_vbad, g_frames_prev;
+enum { kPrevVerify = 8 };
 /* Gate 4p: lines with more than 32 sprites or 34 slivers are drawn on the GE with the hardware drop rule (ppu.c). */
 static bool g_ovf_ok = true;  /* cleared if the first verified overflow frames differ from software */
 static int g_ovf_rows;        /* rows of the sprite range this frame that exceed the limits */
@@ -418,6 +424,15 @@ static int WinSpans(int wm, int wl, int wr, int a[2], int b[2]) {
   return n;
 }
 
+/* True when colour math cannot change a pixel: fixed colour 0, no half colour, and no subscreen layer to add
+ * (ppu.c no-math path). Prevent-math modes 1/2 only choose where math applies, so then they need no window. */
+static bool MathHasNoEffect(const Ppu *p) {
+bool fix = (p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0;
+  if (p->addSubscreen)
+    return p->screenEnabled[1] == 0 && !fix;
+  return !fix && !p->halfColor;
+}
+
 static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool *tint, uint16_t *tintfix,
                            bool *tinthalf) {
   *submath = false;
@@ -440,7 +455,7 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
   if (p->clipMode != 0)
     r |= kReasonMathClip;
   if (mathmask != 0 && p->preventMathMode != 3) {
-    if (p->preventMathMode != 0)
+    if (p->preventMathMode != 0 && !(g_prev_ok && MathHasNoEffect(p)))
       r |= kReasonMathClip;  /* prevent inside/outside the colour window: depends on the window */
     if (p->mode == 7 && p->addSubscreen && p->screenEnabled[1] != 0)
       r |= kReasonM7;  /* subscreen layers in mode 7 are not drawn */
@@ -574,6 +589,8 @@ static void CaptureImpl(const Ppu *p, int line) {
   /* only matters where the subscreen is added to the main screen with the fixed colour at 0 */
   s->subobj = (!forced && mm != 0 && p->preventMathMode != 3 && p->addSubscreen && (p->screenEnabled[1] & 16)) ? 1 : 0;
   s->subneg = p->subtractColor ? 1 : 0;
+  s->prevnoop = (!forced && mm != 0 && (p->preventMathMode == 1 || p->preventMathMode == 2) && g_prev_ok &&
+                 MathHasNoEffect(p)) ? 1 : 0;
   {
     uint8_t sw = 0;
     for (int l = 0; l < kLayers; l++) {  /* only setups the GE path cannot draw (window 2, mode 7, audit failed) */
@@ -1788,6 +1805,14 @@ static void GeVerify(void) {
       PspLog("geaudit: window frames differ too much, GE windows disabled");
     }
   }
+  if (g_prev_rows) {
+    g_prev_vn++;
+    g_prev_vbad += bad;
+    if (g_prev_vn >= 3 && g_prev_vbad / g_prev_vn > 600) {
+      g_prev_ok = false;
+      PspLog("geaudit: prevent-math no-op frames differ too much, GE no-op rule disabled");
+    }
+  }
   if (g_ovf_rows) {
     g_ovf_vn++;
     g_ovf_vbad += bad;
@@ -1812,10 +1837,10 @@ static void GeVerify(void) {
       PspLog("geaudit: multi-band subscreen blend differs too much, disabled");
     }
   }
-  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d img=%d m7rows=%d bands=%d) first bad (%d,%d) sw=%04x ge=%04x", (m7 || g_m7_img) ? "m7verify" : "geaudit",
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d img=%d m7rows=%d bands=%d prev=%u) first bad (%d,%d) sw=%04x ge=%04x", (m7 || g_m7_img) ? "m7verify" : "geaudit",
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
          (unsigned)g_bright_rows, (unsigned)g_win_rows, g_ovf_rows, g_mos_frame ? g_mos_size : 0, g_m7_img ? 1 : 0,
-         g_m7_rows, g_nbband, bx, by, bsw, bge);
+         g_m7_rows, g_nbband, (unsigned)g_prev_rows, bx, by, bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
   if (bad) {
     int shown = 0;
@@ -2159,10 +2184,13 @@ static bool DrawGe(void) {
   g_frame_multisub = false;
   g_mos_frame = false;
   g_nbband = 0;
+  g_prev_rows = 0;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
   }
+  for (int r = 0; r < g_line_count; r++)
+    g_prev_rows += g_lines[r].prevnoop;
 
   if (++g_stamp == 0) {
     memset(g_seen2, 0, sizeof(g_seen2));
@@ -2872,8 +2900,9 @@ static bool DrawGe(void) {
   bool moswant = g_mos_frame && g_mos_vn < kMosVerify;
   bool m7iwant = g_m7_img && g_m7i_vn < kM7IVerify;
   bool bandwant = g_nbband > 1 && g_bnd_vn < kBandVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || g_audit_now);
-  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant) && g_ppu_skip_draw)
+  bool prevwant = g_prev_rows != 0 && g_prev_vn < kPrevVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant || prevwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   if (ovfwant && g_ppu_skip_draw && g_ovf_vn < kOvfArm && g_ovf_arms < kOvfArms) {
     g_ovf_arms++;
@@ -2883,6 +2912,8 @@ static bool DrawGe(void) {
     g_frames_ovf++;
   if (g_mos_frame)
     g_frames_mos++;
+  if (g_prev_rows)
+    g_frames_prev++;
   if (g_m7_img)
     g_frames_m7i++;
   g_audit_now = false;
@@ -3255,9 +3286,10 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
            (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
-           (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos, (unsigned)g_frames_m7i);
+           (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos, (unsigned)g_frames_m7i,
+           (unsigned)g_frames_prev);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
