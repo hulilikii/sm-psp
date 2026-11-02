@@ -2814,8 +2814,8 @@ static bool DrawGe(void) {
       int ns = WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we);
       for (int k = 0; k < ns; k++) {
         ColorVert *c = &tv[g_tint[i].v0 + 2 * k];
-        c[0] = (ColorVert){col, (int16_t)(kLeft + wa[k]), (int16_t)(kTop  g_tint[i].r0), 0};
-        c[1] = (ColorVert){col, (int16_t)(kLeft + we[k]), (int16_t)(kTop  g_tint[i].r1), 0};
+        c[0] = (ColorVert){col, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + g_tint[i].r0), 0};
+        c[1] = (ColorVert){col, (int16_t)(kLeft + we[k]), (int16_t)(kTop + g_tint[i].r1), 0};
       }
     }
   }
