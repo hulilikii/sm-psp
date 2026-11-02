@@ -134,7 +134,7 @@ static bool g_frame_subnoop;
 static uint32_t g_frames_subnoop;
 static Run g_subruns[kMaxLines];
 #if SM_PSP_LOG
-typedef struct Note { int line; unsigned bits, mode, tm, ts, mathmask, add, sub, half, fixed, clip, prevent, tmw, wsel; } Note;
+typedef struct Note { int line; unsigned bits, mode, tm, ts, mathmask, add, sub, half, fixed, clip, prevent, tmw, wsel, tsw; } Note;
 static Note g_note;
 static bool g_note_pending;
 #endif
@@ -507,6 +507,8 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
   uint16_t r = 0;
   int nl = p->mode == 7 ? 1 : kLayers;  /* mode 7 has BG1 only */
   for (int l = 0; l < nl; l++) {
+    if (!((p->screenEnabled[0] | p->screenEnabled[1]) & (1 << l)))
+      continue;  /* shown on neither screen: tile size, mosaic and window cannot matter (X-ray HUD rows) */
     if (p->bgLayer[l].bigTiles)
       r |= kReasonBigTile;
     if (p->mode != 1 && p->mode != 7 && p->bgLayer[l].mosaicEnabled && p->mosaicSize > 1)  /* mode 1: MosPrepare, mode 7: image */
@@ -707,7 +709,7 @@ static void CaptureImpl(const Ppu *p, int line) {
     g_note = (Note){line, s->reasons, p->mode, p->screenEnabled[0], p->screenEnabled[1], mm,
                     p->addSubscreen, p->subtractColor, p->halfColor,
                     p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10,
-                    p->clipMode, p->preventMathMode, p->screenWindowed[0], p->windowsel};
+                    p->clipMode, p->preventMathMode, p->screenWindowed[0], p->windowsel, p->screenWindowed[1]};
     g_note_pending = true;
   }
 #endif
@@ -3537,9 +3539,9 @@ static void PspRenderer_EndDraw(void) {
   g_t_prev_end = t_end;
   if (g_note_pending) {
     g_note_pending = false;
-    PspLog("NEW reason bits=0x%x line=%d mode=%u TM=%02x TS=%02x math=%02x add=%u sub=%u half=%u fixed=%04x clip=%u prev=%u tmw=%02x wsel=%x",
+    PspLog("NEW reason bits=0x%x line=%d mode=%u TM=%02x TS=%02x math=%02x add=%u sub=%u half=%u fixed=%04x clip=%u prev=%u tmw=%02x tsw=%02x wsel=%x",
            g_note.bits, g_note.line, g_note.mode, g_note.tm, g_note.ts, g_note.mathmask, g_note.add,
-           g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.wsel);
+           g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.tsw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
     PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
