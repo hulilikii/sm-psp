@@ -101,6 +101,7 @@ typedef struct LineSnap {
   uint8_t objon;                                   /* OBJ enabled on the main screen */
   uint8_t subneg, subwin;                          /* subtract mode; subscreen layers (bit l) windowed */
   uint8_t prevnoop;                                /* prevent-math mode set, but colour math has nothing to do (gate 4t-a) */
+  uint8_t cwm, cwl, cwr;                           /* gate 4t-b: colour-window limit of the tint (as BgSnap.wm: 0 none, 1 math only inside [cwl,cwr], 2 only outside) */
   uint8_t tint, tinthalf;                          /* fixed-colour math on this row; result halved */
   uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
   uint8_t subobj;                                  /* OBJ on the subscreen and added by colour math */
@@ -188,6 +189,12 @@ static bool g_prev_ok = true;  /* cleared if the first verified such frames diff
 static int g_prev_rows;        /* rows of this frame that rely on the no-op rule */
 static uint32_t g_prev_vn, g_prev_vbad, g_frames_prev;
 enum { kPrevVerify = 8 };
+/* Gate 4t-b: a fixed-colour tint limited by one colour window (W1 or W2, prevent-math mode 1/2) is drawn by the GE as
+ * one rectangle per row span. */
+static bool g_cw_ok = true;  /* cleared if the first verified such frames differ from software */
+static int g_cw_rows;        /* rows of this frame whose tint is limited by the colour window */
+static uint32_t g_cw_vn, g_cw_vbad, g_frames_cw;
+enum { kCwVerify = 8 };
 /* Gate 4p: lines with more than 32 sprites or 34 slivers are drawn on the GE with the hardware drop rule (ppu.c). */
 static bool g_ovf_ok = true;  /* cleared if the first verified overflow frames differ from software */
 static int g_ovf_rows;        /* rows of the sprite range this frame that exceed the limits */
@@ -270,8 +277,9 @@ static int g_zbg[kLayers][2];  /* depth marker per BG layer/priority pass */
 static uint32_t g_frames_blend, g_frames_tint;
 /* Depth markers: z = SNES priority level * kZLevel (see DrawGe); sprites add 127-k; backdrop is below level 1. */
 enum { kZLevel = 256, kZBackdrop = 64, kClutBright = 15 };  /* kClutBright: all CLUTs/backdrop are baked at 15; brightness is a final multiply */
-/* Rows [r0,r1) whose main-screen pixels get the fixed colour added/subtracted (optionally halved). */
-typedef struct TintRun { uint16_t r0, r1, fix; uint8_t half; } TintRun;
+/* Rows [r0,r1) whose main-screen pixels get the fixed colour added/subtracted (optionally halved), limited to the
+ * colour-window state cwm/cwl/cwr (gate 4t-b). v0/vn: its ColorVerts in the tint vertex buffer. */
+typedef struct TintRun { uint16_t r0, r1, fix, v0; uint8_t half, cwm, cwl, cwr, vn; } TintRun;
 static TintRun g_tint[kMaxLines];
 static int g_ntint;
 /* Consecutive tint rows with the same layer mask and add/subtract mode (HDMA can change both inside a frame).
@@ -433,12 +441,46 @@ bool fix = (p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0;
   return !fix && !p->halfColor;
 }
 
+/* Colour-window limit of the math region for prevent-math mode 1 (math inside the window) or 2 (outside), for the GE
+ * tint path. Same model as PpuWindows_Calc in ppu.c: a window counts only if enabled, inverse flips the region, an
+ * empty (left > right) enabled window is empty, or everything when inverted. The result is a BgSnap-style state
+ * (wm 0 no limit, 1 only inside [wl,wr], 2 only outside). Returns false for W1 + W2 together (ppu.c ORs them) or if
+ * the audit failed. */
+static bool ColorWinMath(const Ppu *p, uint8_t *wm, uint8_t *wl, uint8_t *wr) {
+  enum { kEmpty, kAll, kIn, kOut };
+  uint32_t n = (p->windowsel >> 20) & 0xf;  /* 1 inverse 1, 2 enable 1, 4 inverse 2, 8 enable 2 */
+  bool e1 = (n & 2) != 0, e2 = (n & 8) != 0;
+  int k = kEmpty, l = 0, r = 0;  /* k: the window region */
+  *wm = *wl = *wr = 0;
+  if (!g_cw_ok || (e1 && e2))
+    return false;
+  if (e1 || e2) {
+    bool inv = e1 ? (n & 1) != 0 : (n & 4) != 0;
+    l = e1 ? p->window1left : p->window2left;
+    r = e1 ? p->window1right : p->window2right;
+    k = l <= r ? (inv ? kOut : kIn) : (inv ? kAll : kEmpty);
+  }
+  if (p->preventMathMode == 2)  /* math outside the window */
+    k = k == kEmpty ? kAll : k == kAll ? kEmpty : k == kIn ? kOut : kIn;
+  if (k == kEmpty) {
+    *wm = 1;  /* only inside an empty span */
+    *wl = 1;
+    *wr = 0;
+  } else if (k != kAll) {
+    *wm = k == kIn ? 1 : 2;
+    *wl = (uint8_t)l;
+    *wr = (uint8_t)r;
+  }
+  return true;
+}
+
 static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool *tint, uint16_t *tintfix,
-                           bool *tinthalf) {
+                           bool *tinthalf, uint8_t cw[3]) {
   *submath = false;
   *tint = false;
   *tintfix = 0;
   *tinthalf = false;
+  cw[0] = cw[1] = cw[2] = 0;
   if (p->forcedBlank)
     return 0;
   uint16_t r = 0;
@@ -455,8 +497,6 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
   if (p->clipMode != 0)
     r |= kReasonMathClip;
   if (mathmask != 0 && p->preventMathMode != 3) {
-    if (p->preventMathMode != 0 && !(g_prev_ok && MathHasNoEffect(p)))
-      r |= kReasonMathClip;  /* prevent inside/outside the colour window: depends on the window */
     if (p->mode == 7 && p->addSubscreen && p->screenEnabled[1] != 0)
       r |= kReasonM7;  /* subscreen layers in mode 7 are not drawn */
     uint16_t fix = (uint16_t)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10);
@@ -482,6 +522,9 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
       *tintfix = fix;
       *tinthalf = p->halfColor;
      }
+    if (p->preventMathMode != 0 && !(g_prev_ok && MathHasNoEffect(p)) &&
+        !(*tint && ColorWinMath(p, &cw[0], &cw[1], &cw[2])))
+      r |= kReasonMathClip;  /* prevent inside/outside the colour window: only a single-window fixed-colour tint is drawn (gate 4t-b) */
    }
   return r;
 }
@@ -571,7 +614,11 @@ static void CaptureImpl(const Ppu *p, int line) {
   s->mathmask = mm;
   bool submath, tint, tinthalf;
   uint16_t tintfix;
-  s->reasons = LineReasons(p, mm, &submath, &tint, &tintfix, &tinthalf);
+  uint8_t cw[3];
+  s->reasons = LineReasons(p, mm, &submath, &tint, &tintfix, &tinthalf, cw);
+  s->cwm = cw[0];
+  s->cwl = cw[1];
+  s->cwr = cw[2];
   s->submath = submath;
   s->tint = tint;
   s->tinthalf = tinthalf;
@@ -1813,6 +1860,14 @@ static void GeVerify(void) {
       PspLog("geaudit: prevent-math no-op frames differ too much, GE no-op rule disabled");
     }
   }
+  if (g_cw_rows) {
+    g_cw_vn++;
+    g_cw_vbad += bad;
+    if (g_cw_vn >= 3 && g_cw_vbad / g_cw_vn > 600) {
+      g_cw_ok = false;
+      PspLog("geaudit: colour-window tint frames differ too much, GE colour window disabled");
+    }
+  }
   if (g_ovf_rows) {
     g_ovf_vn++;
     g_ovf_vbad += bad;
@@ -1837,10 +1892,10 @@ static void GeVerify(void) {
       PspLog("geaudit: multi-band subscreen blend differs too much, disabled");
     }
   }
-  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d img=%d m7rows=%d bands=%d prev=%u) first bad (%d,%d) sw=%04x ge=%04x", (m7 || g_m7_img) ? "m7verify" : "geaudit",
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d img=%d m7rows=%d bands=%d prev=%u cw=%u) first bad (%d,%d) sw=%04x ge=%04x", (m7 || g_m7_img) ? "m7verify" : "geaudit",
          (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
          (unsigned)g_bright_rows, (unsigned)g_win_rows, g_ovf_rows, g_mos_frame ? g_mos_size : 0, g_m7_img ? 1 : 0,
-         g_m7_rows, g_nbband, (unsigned)g_prev_rows, bx, by, bsw, bge);
+         g_m7_rows, g_nbband, (unsigned)g_prev_rows, (unsigned)g_cw_rows, bx, by, bsw, bge);
   (void)bx; (void)by; (void)bsw; (void)bge;
   if (bad) {
     int shown = 0;
@@ -2185,6 +2240,7 @@ static bool DrawGe(void) {
   g_mos_frame = false;
   g_nbband = 0;
   g_prev_rows = 0;
+  g_cw_rows = 0;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -2347,10 +2403,14 @@ static bool DrawGe(void) {
       newrange = true;
     }
     TintRun *tr = g_ntint ? &g_tint[g_ntint - 1] : NULL;
-    if (!newrange && tr && tr->r1 == r && tr->fix == ls->tintfix && tr->half == ls->tinthalf)
+    if (!newrange && tr && tr->r1 == r && tr->fix == ls->tintfix && tr->half == ls->tinthalf &&
+        tr->cwm == ls->cwm && tr->cwl == ls->cwl && tr->cwr == ls->cwr)
       tr->r1 = (uint16_t)(r + 1);
     else
-      g_tint[g_ntint++] = (TintRun){(uint16_t)r, (uint16_t)(r + 1), ls->tintfix, ls->tinthalf};
+      g_tint[g_ntint++] = (TintRun){(uint16_t)r, (uint16_t)(r + 1), ls->tintfix, 0, ls->tinthalf, ls->cwm, ls->cwl,
+                                    ls->cwr, 0};
+    if (ls->cwm)
+      g_cw_rows++;
     g_trange[g_ntr - 1].n = (uint16_t)(g_ntint - g_trange[g_ntr - 1].first);
   }
   if (g_ntr) {
@@ -2735,14 +2795,28 @@ static bool DrawGe(void) {
     }
   }
 
-  /* Tint overlay: one colour rectangle per run of rows with the same fixed colour. */
+  /* Tint overlay: one rectangle per span of each run of rows with the same fixed colour and colour-window state
+   * (gate 4t-b: 0, 1 or 2 spans where the colour window lets the math apply; unlimited rows: the full width). */
   ColorVert *tv = NULL;
   if (tint) {
-    tv = sceGuGetMemory(g_ntint * 2 * sizeof(ColorVert));
+    int nv = 0;
+    for (int i = 0; i < g_ntint; i++) {
+      int wa[2], we[2];
+      int ns = WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we);
+      g_tint[i].v0 = (uint16_t)nv;
+      g_tint[i].vn = (uint8_t)(ns * 2);
+      nv += ns * 2;
+    }
+    tv = nv ? sceGuGetMemory(nv * sizeof(ColorVert)) : NULL;
     for (int i = 0; i < g_ntint; i++) {
       uint32_t col = BakeColor(g_tint[i].fix, 15, false);
-      tv[2 * i] = (ColorVert){col, (int16_t)kLeft, (int16_t)(kTop + g_tint[i].r0), 0};
-      tv[2 * i + 1] = (ColorVert){col, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + g_tint[i].r1), 0};
+      int wa[2], we[2];
+      int ns = WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we);
+      for (int k = 0; k < ns; k++) {
+        ColorVert *c = &tv[g_tint[i].v0 + 2 * k];
+        c[0] = (ColorVert){col, (int16_t)(kLeft + wa[k]), (int16_t)(kTop  g_tint[i].r0), 0};
+        c[1] = (ColorVert){col, (int16_t)(kLeft + we[k]), (int16_t)(kTop  g_tint[i].r1), 0};
+      }
     }
   }
 
@@ -2858,9 +2932,12 @@ static bool DrawGe(void) {
         int j = i;
         while (j < rg->first + rg->n && g_tint[j].half == g_tint[i].half)
           j++;
-        unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
-        sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
-        GeDraw(kVtColor, (j - i) * 2, tv + 2 * i);
+        int nvert = g_tint[j - 1].v0 + g_tint[j - 1].vn - g_tint[i].v0;
+        if (nvert > 0) {
+          unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
+          sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
+          GeDraw(kVtColor, nvert, tv + g_tint[i].v0);
+        }
         i = j;
       }
       sceGuEnable(GU_TEXTURE_2D);
@@ -2901,8 +2978,9 @@ static bool DrawGe(void) {
   bool m7iwant = g_m7_img && g_m7i_vn < kM7IVerify;
   bool bandwant = g_nbband > 1 && g_bnd_vn < kBandVerify;
   bool prevwant = g_prev_rows != 0 && g_prev_vn < kPrevVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || g_audit_now);
-  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant || prevwant) && g_ppu_skip_draw)
+  bool cwwant = g_cw_rows != 0 && g_cw_vn < kCwVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || cwwant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant || prevwant || cwwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   if (ovfwant && g_ppu_skip_draw && g_ovf_vn < kOvfArm && g_ovf_arms < kOvfArms) {
     g_ovf_arms++;
@@ -2914,6 +2992,8 @@ static bool DrawGe(void) {
     g_frames_mos++;
   if (g_prev_rows)
     g_frames_prev++;
+  if (g_cw_rows)
+    g_frames_cw++;
   if (g_m7_img)
     g_frames_m7i++;
   g_audit_now = false;
@@ -3286,10 +3366,10 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
            (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
            (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos, (unsigned)g_frames_m7i,
-           (unsigned)g_frames_prev);
+           (unsigned)g_frames_prev, (unsigned)g_frames_cw);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
