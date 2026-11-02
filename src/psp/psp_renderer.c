@@ -1415,7 +1415,7 @@ static int SubAddRows(int rlo, int rhi, TileVert *out) {
     for (int k = 0; k < ns; k++, nv += 2) {
       if (out) {
         out[nv] = (TileVert){(float)wa[k], (float)r, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + r), 0};
-        out[nv + 1] = (TileVert){(float)we[k], (float)e, (int16_t)(kLeft  we[k]), (int16_t)(kTop + e), 0};
+        out[nv + 1] = (TileVert){(float)we[k], (float)e, (int16_t)(kLeft + we[k]), (int16_t)(kTop + e), 0};
       }
     }
     r = e;
