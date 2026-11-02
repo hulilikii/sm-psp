@@ -94,6 +94,7 @@ typedef struct BgSnap {
 
 typedef struct LineSnap {
   BgSnap bg[kLayers];
+  uint16_t subfix;    /* gate 4t-c: fixed colour (5-5-5) added with a subscreen BG layer on this row, 0 = none */
   uint16_t cg0;       /* CGRAM entry 0 (backdrop); colour is baked per run in DrawGe */
   uint8_t forced;     /* forced blank: black */
   uint16_t reasons;
@@ -195,6 +196,13 @@ static bool g_cw_ok = true;  /* cleared if the first verified such frames differ
 static int g_cw_rows;        /* rows of this frame whose tint is limited by the colour window */
 static uint32_t g_cw_vn, g_cw_vbad, g_frames_cw;
 enum { kCwVerify = 8 };
+/* Gate 4t-c: subscreen BG layer added together with a non-zero fixed colour (X-ray visor), drawn via the multisub target. */
+static bool g_sf_ok = true;  /* cleared if the first verified such frames differ from software */
+static bool g_sf_frame;      /* this frame is drawn by that path */
+static uint32_t g_sf_vn, g_sf_vbad, g_frames_sf;
+static int g_sf_r0, g_sf_r1, g_sf_masks;  /* log only */
+static uint16_t g_sf_col;
+enum { kSfVerify = 8 };
 /* Gate 4p: lines with more than 32 sprites or 34 slivers are drawn on the GE with the hardware drop rule (ppu.c). */
 static bool g_ovf_ok = true;  /* cleared if the first verified overflow frames differ from software */
 static int g_ovf_rows;        /* rows of the sprite range this frame that exceed the limits */
@@ -380,6 +388,14 @@ static void PspRenderer_Convert(void) {
 
 //capture
 
+/* Gate 4t-c: subscreen BG layer added together with a non-zero fixed colour, no half colour. Such rows are drawn by
+ * the GE through the multisub target; window masks of the subscreen layers are painted over that target. */
+static bool SubFixMath(const Ppu *p) {
+  return g_sf_ok && p->mode == 1 && p->addSubscreen && !p->halfColor && p->preventMathMode != 3 &&
+         (p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0 && (p->screenEnabled[1] & 7) &&
+         !(p->screenEnabled[1] & 0x10);
+}
+
 /* Window 1 mask of layer l (0-2 BG, 4 OBJ) on the main screen, for the GE path. wm: 0 no effect, 1 the layer is
  * visible only inside [wl,wr], 2 hidden inside [wl,wr]. As in ppu.c an empty window (left > right) masks
  * nothing, and an inverted empty window masks everything. Returns false for setups the GE path does not draw
@@ -391,17 +407,21 @@ static bool LayerWin(const Ppu *p, int l, int sub, uint8_t *wm, uint8_t *wl, uin
   uint32_t n = (p->windowsel >> (l * 4)) & 0xf;  /* 1 inverse 1, 2 enable 1, 4 inverse 2, 8 enable 2 */
   if (!(n & 0xa))
     return true;
-  if (!g_win_ok || p->mode == 7 || (n & 8))
+  if (!g_win_ok || p->mode == 7 || (n & 0xa) == 0xa)  /* window 1 + 2 together (mask logic): not drawn */
     return false;
-  bool ena = p->window1left <= p->window1right;
-  if (n & 1) {
+  bool w2 = (n & 8) != 0;
+  if (w2 && !(sub && SubFixMath(p)))  /* gate 4t-c: window 2 only on the subscreen of a subfix row */
+    return false;
+  int left = w2 ? p->window2left : p->window1left, right = w2 ? p->window2right : p->window1right;
+  bool ena = left <= right;
+  if (w2 ? (n & 4) : (n & 1)) {
     *wm = 1;
-    *wl = ena ? p->window1left : 1;
-    *wr = ena ? p->window1right : 0;
+    *wl = ena ? left : 1;
+    *wr = ena ? right : 0;
   } else if (ena) {
     *wm = 2;
-    *wl = p->window1left;
-    *wr = p->window1right;
+    *wl = left;
+    *wr = right;
   }
   return true;
 }
@@ -475,8 +495,9 @@ static bool ColorWinMath(const Ppu *p, uint8_t *wm, uint8_t *wl, uint8_t *wr) {
 }
 
 static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool *tint, uint16_t *tintfix,
-                           bool *tinthalf, uint8_t cw[3]) {
+                           bool *tinthalf, uint8_t cw[3], uint16_t *subfix) {
   *submath = false;
+  *subfix = 0;
   *tint = false;
   *tintfix = 0;
   *tinthalf = false;
@@ -501,7 +522,10 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
       r |= kReasonM7;  /* subscreen layers in mode 7 are not drawn */
     uint16_t fix = (uint16_t)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10);
     if (p->addSubscreen && p->screenEnabled[1] != 0) {
-      if (fix || p->halfColor) {
+      if (SubFixMath(p)) {
+        *submath = true;
+        *subfix = fix;
+      } else if (fix || p->halfColor) {
         r |= kReasonMathTint;
       } else {
         /* fixed == 0 and no half: adding the subscreen only changes pixels where
@@ -615,7 +639,9 @@ static void CaptureImpl(const Ppu *p, int line) {
   bool submath, tint, tinthalf;
   uint16_t tintfix;
   uint8_t cw[3];
-  s->reasons = LineReasons(p, mm, &submath, &tint, &tintfix, &tinthalf, cw);
+  uint16_t subfix;
+  s->reasons = LineReasons(p, mm, &submath, &tint, &tintfix, &tinthalf, cw, &subfix);
+  s->subfix = subfix;
   s->cwm = cw[0];
   s->cwl = cw[1];
   s->cwr = cw[2];
@@ -1025,6 +1051,30 @@ static bool SameSub(const LineSnap *a, const LineSnap *b, int l) {
   const BgSnap *x = &a->bg[l], *y = &b->bg[l];
   return SameGeom(a, b, l) && x->flags == y->flags && x->sm == y->sm && x->sl == y->sl && x->sr == y->sr &&
          a->mathmask == b->mathmask && a->bg3prio == b->bg3prio;
+}
+
+/* Same as SameSub without the window state (gate 4t-c: windows are painted over the subscreen target per row). */
+static bool SameSubNoWin(const LineSnap *a, const LineSnap *b, int l) {
+  return SameGeom(a, b, l) && a->bg[l].flags == b->bg[l].flags && a->mathmask == b->mathmask &&
+         a->bg3prio == b->bg3prio;
+}
+
+/* Hidden x spans (up to 2) of a layer window state (see LayerWin): the complement of WinSpans. */
+static int HiddenSpans(int wm, int wl, int wr, int a[3], int b[3]) {
+  int va[2], vb[2];
+  int nv = WinSpans(wm, wl, wr, va, vb), n = 0, x = 0;
+  for (int k = 0; k < nv; k++) {
+    if (va[k] > x) {
+      a[n] = x;
+      b[n++] = va[k];
+    }
+    x = vb[k];
+  }
+  if (x < kGameWidth) {
+    a[n] = x;
+    b[n++] = kGameWidth;
+  }
+  return n;
 }
 
 /* Walks the tilemap of layer l once for rows [r0,r1) and appends every non-empty
@@ -1868,6 +1918,16 @@ static void GeVerify(void) {
       PspLog("geaudit: colour-window tint frames differ too much, GE colour window disabled");
     }
   }
+  if (g_sf_frame) {
+    g_sf_vn++;
+    g_sf_vbad += bad;
+    PspLog("subfix f=%u rows=%d..%d fix=%04x bruns=%d masks=%d", (unsigned)g_frame, g_sf_r0, g_sf_r1 - 1,
+           (unsigned)g_sf_col, g_nbruns, g_sf_masks);
+    if (g_sf_vn >= 3 && g_sf_vbad / g_sf_vn > 600) {
+      g_sf_ok = false;
+      PspLog("geaudit: subscreen + fixed colour frames differ too much, GE subfix disabled");
+    }
+  }
   if (g_ovf_rows) {
     g_ovf_vn++;
     g_ovf_vbad += bad;
@@ -1963,7 +2023,7 @@ static uint32_t g_subbg_diag, g_subbg_frame, g_subbg_n;
  * the main screen with math off) are covered by main-screen BG3 pixels and never
  * matter. Returns -1 if the tile pool is full, 1 if the layer contributes (its
  * tile list is kept in *keep for the blend pass), 0 if not (list discarded). */
-static int SubRunContributes(int l, const LineSnap *ls, int r0, int r1, TileList *keep) {
+static int SubRunContributes(int l, const LineSnap *ls, int r0, int r1, bool all, TileList *keep) {
 #if SM_PSP_LOG
   const BgSnap *s = &ls->bg[l];
 #endif
@@ -1972,6 +2032,14 @@ static int SubRunContributes(int l, const LineSnap *ls, int r0, int r1, TileList
   TileList lst;
   if (!BuildTileList(l, ls, r0, r1, &lst))
     return -1;
+  if (all) {  /* gate 4t-c: target is cleared to the fixed colour, so every non-empty tile matters (black ones too) */
+    if (lst.n == 0) {
+      g_ent_top = mark;
+      return 0;
+    }
+    *keep = lst;
+    return 1;
+  }
   bool harmless_hi = l == 2 && (ls->bg[2].flags & 4) && !(ls->mathmask & 4);  /* BG3 high is level 15 */
   uint16_t pm[8];
   uint8_t pm_ok = 0;
@@ -2241,6 +2309,7 @@ static bool DrawGe(void) {
   g_nbband = 0;
   g_prev_rows = 0;
   g_cw_rows = 0;
+  g_sf_frame = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -2283,6 +2352,42 @@ static bool DrawGe(void) {
     }
   }
 
+  /* Gate 4t-c: a subscreen BG layer added with a non-zero fixed colour (X-ray visor). In ppu.c every math pixel gets
+   * the subscreen pixel's colour where its index is non-zero (also black), the fixed colour everywhere else. So the
+   * target is cleared to the fixed colour, every non-empty tile matters, the colour goes onto every row of the blend,
+   * and layer windows are painted over the target in the fixed colour (only valid with one subscreen layer). */
+  bool subfix = false, sfseen = false;
+  uint16_t subfixc = 0;
+  int sf0 = -1, sf1 = 0;
+  for (int r = 0; r < g_line_count; r++) {
+    const LineSnap *ls = &g_lines[r];
+    if (!ls->submath)
+      continue;
+    if (!sfseen) {
+      sfseen = true;
+      subfixc = ls->subfix;
+      sf0 = r;
+    } else if (ls->subfix != subfixc) {
+      NOTE_SUBMULTI("subfix-varies", r, subfixc, ls->subfix);
+      CountReasons(kReasonSubMulti);
+      return false;
+    }
+    sf1 = r + 1;
+  }
+  if (subfixc != 0) {
+    subfix = true;
+    if (sobj || g_ge_level != 1 || !g_sf_ok) {  /* level 2 (hardware bisect): tint frames use the software image */
+      CountReasons(kReasonMathTint);
+      return false;
+    }
+    for (int r = sf0; r < sf1; r++)
+      if (!g_lines[r].submath) {
+        NOTE_SUBMULTI("subfix-gap", r, sf0, sf1);
+        CountReasons(kReasonSubMulti);
+        return false;
+      }
+  }
+
   /* Subscreen classification (fixed == 0, no half colour; see LineReasons).
    * Subscreen pixels only change the picture where a subscreen BG layer shows a
    * non-black pixel. No such layer: the add is a no-op. Exactly one such layer:
@@ -2291,7 +2396,7 @@ static bool DrawGe(void) {
   g_frame_subnoop = false;
   g_nbruns = 0;
   int sub_layer = -1;
-  bool multisub = sobj;
+  bool multisub = sobj || subfix;
   int sublayers = 0;
   for (int l = 0; l < kLayers; l++) {
     int n = 0;
@@ -2303,14 +2408,16 @@ static bool DrawGe(void) {
         return false;
       }
       g_frame_subnoop = true;
-      if (n && g_subruns[n - 1].r1 == r && SameSub(&g_lines[g_subruns[n - 1].first], &g_lines[r], l))
+      if (n && g_subruns[n - 1].r1 == r &&
+          (subfix ? SameSubNoWin(&g_lines[g_subruns[n - 1].first], &g_lines[r], l)
+                  : SameSub(&g_lines[g_subruns[n - 1].first], &g_lines[r], l)))
         g_subruns[n - 1].r1 = (uint16_t)(r + 1);
       else
         g_subruns[n++] = (Run){(uint16_t)r, (uint16_t)(r + 1), (uint16_t)r};
     }
     for (int i = 0; i < n; i++) {
       TileList kept;
-      int rc = SubRunContributes(l, &g_lines[g_subruns[i].first], g_subruns[i].r0, g_subruns[i].r1, &kept);
+      int rc = SubRunContributes(l, &g_lines[g_subruns[i].first], g_subruns[i].r0, g_subruns[i].r1, subfix, &kept);
       if (rc < 0) {
         BUDGET(1, "subpool", g_ent_top, kEntPool);
         return false;
@@ -2320,7 +2427,7 @@ static bool DrawGe(void) {
       {
         const BgSnap *sb = &g_lines[g_subruns[i].first].bg[l];
         int wa[2], we[2];
-        if (WinSpans(sb->sm, sb->sl, sb->sr, wa, we) == 0)
+        if (!subfix && WinSpans(sb->sm, sb->sl, sb->sr, wa, we) == 0)
           continue;  /* masked completely on the subscreen: adds nothing (its tile list stays unused in the pool) */
       }
       if (sub_layer >= 0 && sub_layer != l) {
@@ -2340,9 +2447,18 @@ static bool DrawGe(void) {
       g_bruns[g_nbruns++] = (BRun){(uint8_t)l, g_subruns[i].first, g_subruns[i].r0, g_subruns[i].r1, kept};
     }
   }
+  if (subfix && (sublayers & (sublayers - 1))) {  /* several subscreen layers: a window mask would erase the others */
+    for (int r = sf0; r < sf1; r++)
+      for (int l = 0; l < kLayers; l++)
+        if ((sublayers & (1 << l)) && g_lines[r].bg[l].sm) {
+          NOTE_SUBMULTI("subfix-win-multi", r, l, sublayers);
+          CountReasons(kReasonSubMulti);
+          return false;
+        }
+  }
   bool blend = false;
   int bmath = 0, bneg = 0;
-  if (g_nbruns || sobj) {
+  if (g_nbruns || sobj || subfix) {
     bool first = true;
     for (int r = 0; r < g_line_count; r++) {
       bool on = g_lines[r].submath || (sobj && g_lines[r].subobj);
@@ -2378,7 +2494,8 @@ static bool DrawGe(void) {
     bmath = g_nbband ? g_bband[0].mask : 0;  /* single-band restore; with several bands each uses its own */
     g_frame_subnoop = false;
   }
-  g_frame_multisub = blend && multisub;
+  g_frame_multisub = blend && multisub && !subfix;
+  g_sf_frame = blend && subfix;
 
   /* Tint rows: colour math with the fixed colour (no subscreen layer involved). All tint rows must
    * share the layer mask and add/subtract mode; the colour and halving may change per row. */
@@ -2488,8 +2605,8 @@ static bool DrawGe(void) {
     {
       const BgSnap *sb = &g_lines[br->first].bg[br->l];
       int wa[2], we[2];
-      int ns = WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
-      if (sb->sm)
+      int ns = subfix ? 1 : WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
+      if (sb->sm && !subfix)
         g_win_rows += (uint32_t)(br->r1 - br->r0);
       if (ns != 1)  /* a tile may be emitted once per span */
         for (int pr = 0; pr < 2; pr++)
@@ -2730,8 +2847,8 @@ static bool DrawGe(void) {
       memcpy(v0, w, sizeof(v0));
       {
         const BgSnap *sb = &g_lines[br->first].bg[l];
-        int wa[2], we[2];
-        int ns = WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
+        int wa[2] = {0, 0}, we[2] = {kGameWidth, kGameWidth};
+        int ns = subfix ? 1 : WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
         for (int k = 0; k < ns; k++)
           EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop, wa[k], we[k]);
       }
@@ -2749,6 +2866,8 @@ static bool DrawGe(void) {
    * quad that adds the finished composite to the main image. */
   ColorVert *subclear = NULL;
   TileVert *subadd = NULL;
+  ColorVert *submask = NULL;
+  int nsubmask = 0;
   if (multisub) {
     int rlo = g_line_count, rhi = 0;
     for (int i = 0; i < g_nbruns; i++) {
@@ -2759,12 +2878,53 @@ static bool DrawGe(void) {
       if (s0 < rlo) rlo = s0;
       if (s1 > rhi) rhi = s1;
     }
+    if (subfix) {  /* the fixed colour goes onto every row of the blend, with or without a subscreen tile */
+      rlo = sf0;
+      rhi = sf1;
+    }
+    uint32_t clrcol = subfix ? BakeColor(subfixc, kClutBright, false) : 0xff000000u;
     subclear = sceGuGetMemory(2 * sizeof(ColorVert));
-    subclear[0] = (ColorVert){0xff000000u, 0, 0, 0};
-    subclear[1] = (ColorVert){0xff000000u, (int16_t)kGameWidth, (int16_t)g_line_count, 0};
+    subclear[0] = (ColorVert){clrcol, 0, 0, 0};
+    subclear[1] = (ColorVert){clrcol, (int16_t)kGameWidth, (int16_t)g_line_count, 0};
     subadd = sceGuGetMemory(2 * sizeof(TileVert));
     subadd[0] = (TileVert){0.0f, (float)rlo, (int16_t)kLeft, (int16_t)(kTop + rlo), 0};
     subadd[1] = (TileVert){(float)kGameWidth, (float)rhi, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + rhi), 0};
+    if (subfix && sublayers) {  /* layer windows: hidden spans of every row are painted over the target in the fixed colour */
+      for (int pass = 0; pass < 2; pass++) {
+        int nv = 0;
+        for (int i = 0; i < g_nbruns; i++) {
+          const BRun *br = &g_bruns[i];
+          for (int r = br->r0; r < br->r1;) {
+            const BgSnap *s = &g_lines[r].bg[br->l];
+            int e = r + 1;
+            while (e < br->r1 && g_lines[e].bg[br->l].sm == s->sm && g_lines[e].bg[br->l].sl == s->sl &&
+                   g_lines[e].bg[br->l].sr == s->sr)
+              e++;
+            int ha[3], hb[3];
+            int nh = s->sm ? HiddenSpans(s->sm, s->sl, s->sr, ha, hb) : 0;
+            for (int k = 0; k < nh; k++, nv += 2) {
+              if (pass) {
+                submask[nv] = (ColorVert){clrcol, (int16_t)ha[k], (int16_t)r, 0};
+                submask[nv + 1] = (ColorVert){clrcol, (int16_t)hb[k], (int16_t)e, 0};
+              }
+            }
+            r = e;
+          }
+        }
+        if (pass)
+          nsubmask = nv;
+        else if (nv)
+          submask = sceGuGetMemory(nv * sizeof(ColorVert));
+        else
+          break;
+      }
+    }
+    if (subfix) {
+      g_sf_r0 = rlo;
+      g_sf_r1 = rhi;
+      g_sf_col = subfixc;
+      g_sf_masks = nsubmask / 2;
+    }
   }
 
   /* Sprite geometry: reverse precedence order, so the sprite that wins an overlap on hardware (lowest
@@ -2882,6 +3042,14 @@ static bool DrawGe(void) {
         DrawObjSegs(g_sobjseg, g_nsobjseg, g_sobjbase, 15, false, 0);
       sceGuDepthFunc(GU_GEQUAL);
       DrawBlendBgs();
+      if (nsubmask) {  /* window masks of the subscreen layer (gate 4t-c) */
+        sceGuDepthFunc(GU_ALWAYS);
+        sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
+        GeDraw(kVtColor, nsubmask, submask);
+        sceGuEnable(GU_TEXTURE_2D);
+        sceGuEnable(GU_ALPHA_TEST);
+      }
       /* back to the main target; the composite is then added to (or subtracted from) the main image */
       sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
       sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
@@ -2982,6 +3150,12 @@ static bool DrawGe(void) {
   g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || cwwant || g_audit_now);
   if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant || prevwant || cwwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
+  if (g_sf_frame && g_sf_vn < kSfVerify) {  /* gate 4t-c: first frames are checked against the software image */
+    if (g_ppu_skip_draw)
+      g_want_ms_verify = true;
+    else
+      g_verify_now = true;
+  }
   if (ovfwant && g_ppu_skip_draw && g_ovf_vn < kOvfArm && g_ovf_arms < kOvfArms) {
     g_ovf_arms++;
     g_ovf_watch = kOvfWatch;  /* no software image for this overflow frame: draw both for a while so later ones get audited */
@@ -2994,6 +3168,8 @@ static bool DrawGe(void) {
     g_frames_prev++;
   if (g_cw_rows)
     g_frames_cw++;
+  if (g_sf_frame)
+    g_frames_sf++;
   if (g_m7_img)
     g_frames_m7i++;
   g_audit_now = false;
@@ -3366,10 +3542,10 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
            (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
            (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos, (unsigned)g_frames_m7i,
-           (unsigned)g_frames_prev, (unsigned)g_frames_cw);
+           (unsigned)g_frames_prev, (unsigned)g_frames_cw, (unsigned)g_frames_sf);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
