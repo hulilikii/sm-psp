@@ -2075,7 +2075,7 @@ static void GeVerify(void) {
   }
   if (g_bright_rows)
     g_br_vn++;
-  if (g_win_rows) {
+  if (g_win_rows && !g_sh_frame) {  /* half-colour visor frames have their own audit (gate 4t-d) */
     g_win_vn++;
     g_win_vbad += bad;
     if (g_win_vn >= 3 && g_win_vbad / g_win_vn > 600) {
@@ -2114,7 +2114,7 @@ static void GeVerify(void) {
     g_sh_vbad += bad;
     PspLog("subhalf f=%u rows=%d..%d fix=%04x bruns=%d masks=%d winrows=%u bad=%u", (unsigned)g_frame, g_sf_r0,
            g_sf_r1 - 1, (unsigned)g_sf_col, g_nbruns, g_sf_masks, (unsigned)g_win_rows, (unsigned)bad);
-    if (g_sh_vn >= 3 && g_sh_vbad / g_sh_vn > 600) {
+    if ((g_sh_vn >= 3 && g_sh_vbad / g_sh_vn > 600) || bad > 8192) {
       g_sh_ok = false;
       PspLog("geaudit: half-colour visor frames differ too much, GE subhalf disabled");
     }
@@ -3284,15 +3284,28 @@ static bool DrawGe(void) {
       sceGuDepthFunc(GU_ALWAYS);
       sceGuDisable(GU_TEXTURE_2D);
       sceGuDisable(GU_ALPHA_TEST);
+      if (subhalf) {  /* gate 4t-d: the alpha channel of the target is its stencil value; 0 = no subscreen pixel */
+        sceGuEnable(GU_STENCIL_TEST);
+        sceGuStencilFunc(GU_ALWAYS, 0, 0xff);
+        sceGuStencilOp(GU_REPLACE, GU_REPLACE, GU_REPLACE);
+      }
       GeDraw(kVtColor, 2, subclear);
       sceGuEnable(GU_TEXTURE_2D);
       sceGuEnable(GU_ALPHA_TEST);
       if (g_nsobjseg)
         DrawObjSegs(g_sobjseg, g_nsobjseg, g_sobjbase, 15, false, 0);
       sceGuDepthFunc(GU_GEQUAL);
+      if (subhalf) {  /* BG3 pixels (CLUT alpha != 0 passes the alpha test) write 0x80 */
+        sceGuStencilFunc(GU_ALWAYS, 0x80, 0xff);
+        sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
+      }
       DrawBlendBgs(subhalf);
       if (nsubmask) {  /* window masks of the subscreen layer (gate 4t-c) */
         sceGuDepthFunc(GU_ALWAYS);
+        if (subhalf) {  /* hidden BG3 spans: no subscreen pixel again */
+          sceGuStencilFunc(GU_ALWAYS, 0, 0xff);
+          sceGuStencilOp(GU_REPLACE, GU_REPLACE, GU_REPLACE);
+        }
         sceGuDisable(GU_TEXTURE_2D);
         sceGuDisable(GU_ALPHA_TEST);
         GeDraw(kVtColor, nsubmask, submask);
@@ -3300,6 +3313,8 @@ static bool DrawGe(void) {
         sceGuEnable(GU_ALPHA_TEST);
       }
       /* back to the main target; the composite is then added to (or subtracted from) the main image */
+      if (subhalf)
+        sceGuDisable(GU_STENCIL_TEST);  /* the 5650 main target has no stencil bits */
       sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
       sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
       sceGuDisable(GU_DEPTH_TEST);
