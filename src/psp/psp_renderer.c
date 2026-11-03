@@ -95,7 +95,8 @@ typedef struct BgSnap {
 typedef struct LineSnap {
   BgSnap bg[kLayers];
   uint16_t subfix;    /* gate 4t-c: fixed colour (5-5-5) added with a subscreen BG layer on this row, 0 = none */
-  uint8_t subhalf;    /* gate 4t-d: this submath row uses half colour (BG3-only subscreen, alpha-coded target) */
+  uint8_t subhalf;    /* gate 4t-d: this submath row uses half colour (BG3/OBJ subscreen, alpha-coded target) */
+  uint8_t w2main;     /* gate 4u: a drawn main BG layer of this row is masked by window 2 */
   uint16_t cg0;       /* CGRAM entry 0 (backdrop); colour is baked per run in DrawGe */
   uint8_t forced;     /* forced blank: black */
   uint16_t reasons;
@@ -128,7 +129,28 @@ static LineSnap g_lines[kMaxLines];
 static int g_line_count;
 static uint16_t g_frame_reasons;
 #if SM_PSP_LOG
-static uint16_t g_logged_reasons;
+/* Every distinct register signature that sends a frame to software is logged once (up to 48). */
+typedef struct Sig { uint32_t a, b, c; } Sig;
+static Sig g_sigs[48];
+static int g_nsigs;
+static bool NewSig(const Ppu *p, uint16_t reasons) {
+  uint32_t mm = 0;
+  for (int i = 0; i < 6; i++)
+    mm |= (uint32_t)(p->mathEnabled[i] ? 1 : 0) << i;
+  Sig s;
+  s.a = reasons | (uint32_t)p->mode << 16 | (uint32_t)p->screenEnabled[0] << 20;
+  s.b = (uint32_t)p->screenEnabled[1] | (uint32_t)(p->addSubscreen ? 1 : 0) << 8 | (uint32_t)(p->halfColor ? 1 : 0) << 9 |
+        (uint32_t)(p->subtractColor ? 1 : 0) << 10 | (uint32_t)p->preventMathMode << 11 | (uint32_t)p->clipMode << 13 |
+        (uint32_t)p->screenWindowed[0] << 15 | (uint32_t)p->screenWindowed[1] << 23;
+  s.c = p->windowsel | mm << 24;
+  for (int i = 0; i < g_nsigs; i++)
+    if (g_sigs[i].a == s.a && g_sigs[i].b == s.b && g_sigs[i].c == s.c)
+      return false;
+  if (g_nsigs == 48)
+    return false;
+  g_sigs[g_nsigs++] = s;
+  return true;
+}
 #endif
 static bool g_frame_dead;  /* a fallback reason is already known: stop capturing this frame */
 static bool g_frame_subnoop;
@@ -210,6 +232,13 @@ static bool g_sh_ok = true;  /* cleared if the first verified such frames differ
 static bool g_sh_frame;      /* this frame is drawn by that path */
 static uint32_t g_sh_vn, g_sh_vbad, g_frames_sh;
 enum { kShVerify = 8 };
+/* Gate 4u: half colour with OBJ on the subscreen (own audit, so a failure keeps the visor path), and window 2 on
+ * main BG layers outside the half-colour frames (per-row spans of gate 4t-d). */
+static bool g_shobj_ok = true, g_shobj_frame;
+static uint32_t g_sho_vn, g_sho_vbad, g_frames_sho;
+static bool g_w2_ok = true, g_w2_frame;
+static uint32_t g_w2_vn, g_w2_vbad, g_frames_w2;
+enum { kW2Verify = 8 };
 /* Gate 4p: lines with more than 32 sprites or 34 slivers are drawn on the GE with the hardware drop rule (ppu.c). */
 static bool g_ovf_ok = true;  /* cleared if the first verified overflow frames differ from software */
 static int g_ovf_rows;        /* rows of the sprite range this frame that exceed the limits */
@@ -413,8 +442,9 @@ static bool SubFixMath(const Ppu *p) {
 /* Gate 4t-d: subscreen BG3 alone, added with half colour (add mode). Every non-empty BG3 tile matters (a black pixel
  * still halves the main pixel), the fixed colour goes where BG3 has no pixel. Fixed colour may be 0. */
 static bool SubHalfMath(const Ppu *p) {
+  uint8_t ts = p->screenEnabled[1];  /* gate 4u: BG3 and/or OBJ on the subscreen, no BG1/BG2 */
   return g_sh_ok && p->mode == 1 && p->addSubscreen && p->halfColor && !p->subtractColor &&
-         p->preventMathMode != 3 && (p->screenEnabled[1] & 0x1f) == 4;
+         p->preventMathMode != 3 && (ts & 0x0b) == 0 && (ts & 0x14) != 0 && ((ts & 0x10) ? g_shobj_ok : true);
 }
 
 /* Window 1 mask of layer l (0-2 BG, 4 OBJ) on the main screen, for the GE path. wm: 0 no effect, 1 the layer is
@@ -431,7 +461,7 @@ static bool LayerWin(const Ppu *p, int l, int sub, uint8_t *wm, uint8_t *wl, uin
   if (!g_win_ok || p->mode == 7 || (n & 0xa) == 0xa)  /* window 1 + 2 together (mask logic): not drawn */
     return false;
   bool w2 = (n & 8) != 0;
-  if (w2 && !(sub ? (SubFixMath(p) || SubHalfMath(p)) : SubHalfMath(p)))  /* gates 4t-c/d: window 2 on the subscreen of a subfix row; on both screens of a half row */
+  if (w2 && !(sub ? (SubFixMath(p) || SubHalfMath(p)) : (SubHalfMath(p) || (g_w2_ok && l < 3))))  /* gates 4t-c/d/u: window 2 on the subscreen of a subfix/half row; on main BG layers via per-row spans */
     return false;
   int left = w2 ? p->window2left : p->window1left, right = w2 ? p->window2right : p->window1right;
   bool ena = left <= right;
@@ -629,6 +659,7 @@ static void CaptureImpl(const Ppu *p, int line) {
   }
   LineSnap *s = &g_lines[line - 1];
   bool forced = p->forcedBlank;
+  s->w2main = 0;
   for (int l = 0; l < kLayers; l++) {
     const BgLayer *bg = &p->bgLayer[l];
     BgSnap *b = &s->bg[l];
@@ -642,6 +673,8 @@ static void CaptureImpl(const Ppu *p, int line) {
      b->wm = b->wl = b->wr = 0;
     if (drawn)
       LayerWin(p, l, 0, &b->wm, &b->wl, &b->wr);  /* setups it cannot draw are flagged by LineReasons */
+    if (drawn && b->wm && ((p->windowsel >> (l * 4)) & 8))
+      s->w2main = 1;
     b->sm = b->sl = b->sr = 0;
     if (!forced && p->mode == 1 && (p->screenEnabled[1] & (1 << l)) && !bg->bigTiles)
       LayerWin(p, l, 1, &b->sm, &b->sl, &b->sr);  /* unsupported setups are flagged through subwin */
@@ -731,8 +764,7 @@ static void CaptureImpl(const Ppu *p, int line) {
   if (g_frame_reasons)
     g_frame_dead = true;
 #if SM_PSP_LOG
-  if (s->reasons & ~g_logged_reasons) {  /* first time each reason is seen: remember the register state */
-    g_logged_reasons |= s->reasons;
+  if (s->reasons && NewSig(p, s->reasons)) {  /* first time each register signature is seen: remember the state */
     g_note = (Note){line, s->reasons, p->mode, p->screenEnabled[0], p->screenEnabled[1], mm,
                     p->addSubscreen, p->subtractColor, p->halfColor,
                     p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10,
@@ -2075,7 +2107,7 @@ static void GeVerify(void) {
   }
   if (g_bright_rows)
     g_br_vn++;
-  if (g_win_rows && !g_sh_frame) {  /* half-colour visor frames have their own audit (gate 4t-d) */
+  if (g_win_rows && !g_sh_frame && !g_w2_frame) {  /* half-colour and window-2 frames have their own audits (gates 4t-d/u) */
     g_win_vn++;
     g_win_vbad += bad;
     if (g_win_vn >= 3 && g_win_vbad / g_win_vn > 600) {
@@ -2110,13 +2142,29 @@ static void GeVerify(void) {
     }
   }
   if (g_sh_frame) {
-    g_sh_vn++;
-    g_sh_vbad += bad;
-    PspLog("subhalf f=%u rows=%d..%d fix=%04x bruns=%d masks=%d winrows=%u bad=%u", (unsigned)g_frame, g_sf_r0,
-           g_sf_r1 - 1, (unsigned)g_sf_col, g_nbruns, g_sf_masks, (unsigned)g_win_rows, (unsigned)bad);
-    if ((g_sh_vn >= 3 && g_sh_vbad / g_sh_vn > 600) || bad > 8192) {
-      g_sh_ok = false;
-      PspLog("geaudit: half-colour visor frames differ too much, GE subhalf disabled");
+    uint32_t *vn = g_shobj_frame ? &g_sho_vn : &g_sh_vn;
+    uint32_t *vbad = g_shobj_frame ? &g_sho_vbad : &g_sh_vbad;
+    (*vn)++;
+    *vbad += bad;
+    PspLog("%s f=%u rows=%d..%d fix=%04x bruns=%d masks=%d winrows=%u bad=%u", g_shobj_frame ? "subhobj" : "subhalf",
+           (unsigned)g_frame, g_sf_r0, g_sf_r1 - 1, (unsigned)g_sf_col, g_nbruns, g_sf_masks, (unsigned)g_win_rows,
+           (unsigned)bad);
+    if ((*vn >= 3 && *vbad / *vn > 600) || bad > 8192) {
+      if (g_shobj_frame)
+        g_shobj_ok = false;
+      else
+        g_sh_ok = false;
+      PspLog("geaudit: half-colour frames differ too much, GE %s disabled", g_shobj_frame ? "subhobj" : "subhalf");
+     }
+   }
+  if (g_w2_frame) {
+    g_w2_vn++;
+    g_w2_vbad += bad;
+    PspLog("w2rows f=%u winrows=%u cw=%u bad=%u", (unsigned)g_frame, (unsigned)g_win_rows, (unsigned)g_cw_rows,
+           (unsigned)bad);
+    if ((g_w2_vn >= 3 && g_w2_vbad / g_w2_vn > 600) || bad > 8192) {
+      g_w2_ok = false;
+      PspLog("geaudit: window-2 frames differ too much, GE window 2 disabled");
     }
   }
   if (g_ovf_rows) {
@@ -2514,6 +2562,8 @@ static bool DrawGe(void) {
   g_cw_rows = 0;
   g_sf_frame = false;
   g_sh_frame = false;
+  g_shobj_frame = false;
+  g_w2_frame = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -2587,11 +2637,17 @@ static bool DrawGe(void) {
       CountReasons(kReasonSubMulti);
       return false;
     }
+    for (int r = 0; r < g_line_count; r++)  /* gate 4u: subscreen OBJ rows must be half rows too */
+      if (g_lines[r].subobj && !g_lines[r].subhalf) {
+        NOTE_SUBMULTI("half-obj-row", r, 0, 0);
+        CountReasons(kReasonSubMulti);
+        return false;
+      }
     subhalf = true;
   }
   if (subfixc != 0 || subhalf) {
     subfix = true;
-    if (sobj || g_ge_level != 1 || !(subhalf ? g_sh_ok : g_sf_ok)) {  /* level 2 (hardware bisect): tint frames use the software image */
+    if ((sobj && !subhalf) || g_ge_level != 1 || !(subhalf ? g_sh_ok : g_sf_ok)) {  /* level 2 (hardware bisect): tint frames use the software image */
       CountReasons(kReasonMathTint);
       return false;
     }
@@ -2712,6 +2768,7 @@ static bool DrawGe(void) {
   g_frame_multisub = blend && multisub && !subfix;
   g_sf_frame = blend && subfix && !subhalf;
   g_sh_frame = blend && subhalf;
+  g_shobj_frame = g_sh_frame && sobj;
 
   /* Tint rows: colour math with the fixed colour (no subscreen layer involved). All tint rows must
    * share the layer mask and add/subtract mode; the colour and halving may change per row. */
@@ -2767,7 +2824,11 @@ static bool DrawGe(void) {
    * idle here (the previous frame was synced in Present), so CPU writes to the
    * atlases cannot race it. */
   int total = 0;
-  bool winrows = g_sh_frame;  /* gate 4t-d: runs by geometry only, window state per row at emission */
+  bool w2rows = false;
+  for (int r = 0; r < g_line_count && !w2rows; r++)
+    w2rows = g_lines[r].w2main != 0;
+  g_w2_frame = w2rows && !g_sh_frame;
+  bool winrows = g_sh_frame || w2rows;  /* gates 4t-d/u: runs by geometry only, window state per row at emission */
   for (int l = 0; l < kLayers; l++) {
     int n = 0;
     for (int r = 0; r < g_line_count; r++) {
@@ -3292,6 +3353,10 @@ static bool DrawGe(void) {
       GeDraw(kVtColor, 2, subclear);
       sceGuEnable(GU_TEXTURE_2D);
       sceGuEnable(GU_ALPHA_TEST);
+      if (subhalf) {  /* gate 4u: subscreen sprites write alpha 0x80 where opaque, like BG3 */
+        sceGuStencilFunc(GU_ALWAYS, 0x80, 0xff);
+        sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
+      }
       if (g_nsobjseg)
         DrawObjSegs(g_sobjseg, g_nsobjseg, g_sobjbase, 15, false, 0);
       sceGuDepthFunc(GU_GEQUAL);
@@ -3410,7 +3475,7 @@ static bool DrawGe(void) {
   }
   bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
   bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
-  bool winwant = g_win_rows != 0 && g_win_vn < kWinVerify;
+  bool winwant = g_win_rows != 0 && !g_sh_frame && !g_w2_frame && g_win_vn < kWinVerify;
   bool ovfwant = g_ovf_rows != 0 && g_ovf_vn < kOvfVerify;
   bool moswant = g_mos_frame && g_mos_vn < kMosVerify;
   bool m7iwant = g_m7_img && g_m7i_vn < kM7IVerify;
@@ -3426,7 +3491,13 @@ static bool DrawGe(void) {
     else
       g_verify_now = true;
   }
-  if (g_sh_frame && g_sh_vn < kShVerify) {  /* gate 4t-d: the same for the half-colour visor path */
+  if (g_sh_frame && (g_shobj_frame ? g_sho_vn : g_sh_vn) < kShVerify) {  /* gates 4t-d/u: the same for the half-colour paths */
+    if (g_ppu_skip_draw)
+      g_want_ms_verify = true;
+    else
+      g_verify_now = true;
+  }
+  if (g_w2_frame && g_w2_vn < kW2Verify) {  /* gate 4u: window 2 on main BG layers */
     if (g_ppu_skip_draw)
       g_want_ms_verify = true;
     else
@@ -3448,6 +3519,10 @@ static bool DrawGe(void) {
     g_frames_sf++;
   if (g_sh_frame)
     g_frames_sh++;
+  if (g_shobj_frame)
+    g_frames_sho++;
+  if (g_w2_frame)
+    g_frames_w2++;
   if (g_m7_img)
     g_frames_m7i++;
   g_audit_now = false;
@@ -3820,10 +3895,11 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.tsw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u shf=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u shf=%u sho=%u w2f=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
            (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
            (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos, (unsigned)g_frames_m7i,
-           (unsigned)g_frames_prev, (unsigned)g_frames_cw, (unsigned)g_frames_sf, (unsigned)g_frames_sh);
+           (unsigned)g_frames_prev, (unsigned)g_frames_cw, (unsigned)g_frames_sf, (unsigned)g_frames_sh,
+           (unsigned)g_frames_sho, (unsigned)g_frames_w2);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
