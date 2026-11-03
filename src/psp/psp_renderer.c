@@ -236,6 +236,10 @@ static bool g_sh_ok = true;  /* cleared if the first verified such frames differ
 static bool g_sh_frame;      /* this frame is drawn by that path */
 static uint32_t g_sh_vn, g_sh_vbad, g_frames_sh;
 enum { kShVerify = 8 };
+/* Gate 5c: the same in subtract mode (water-room visor): max(main - sub, 0) / 2 where BG3 has a pixel, main - fixed
+ * elsewhere. Own audit and switch, so a failure keeps the add-mode visor path. */
+static bool g_shn_ok = true, g_shn_frame;
+static uint32_t g_shn_vn, g_shn_vbad, g_frames_shn;
 /* Gate 4u: half colour with OBJ on the subscreen (own audit, so a failure keeps the visor path), and window 2 on
  * main BG layers outside the half-colour frames (per-row spans of gate 4t-d). */
 static bool g_shobj_ok = true, g_shobj_frame;
@@ -451,11 +455,11 @@ static bool SubFixMath(const Ppu *p) {
          (p->screenEnabled[1] & 7) && !(p->screenEnabled[1] & 0x10);
 }
 
-/* Gate 4t-d: subscreen BG3 alone, added with half colour (add mode). Every non-empty BG3 tile matters (a black pixel
- * still halves the main pixel), the fixed colour goes where BG3 has no pixel. Fixed colour may be 0. */
+/* Gate 4t-d/5c: subscreen BG3 alone, added (or subtracted) with half colour. Every non-empty BG3 tile matters (a black
+ * pixel still halves the main pixel), the fixed colour goes where BG3 has no pixel. Fixed colour may be 0. */
 static bool SubHalfMath(const Ppu *p) {
   uint8_t ts = p->screenEnabled[1];  /* gate 4u: BG3 and/or OBJ on the subscreen, no BG1/BG2 */
-  return g_sh_ok && p->mode == 1 && p->addSubscreen && p->halfColor && !p->subtractColor &&
+  return g_sh_ok && p->mode == 1 && p->addSubscreen && p->halfColor && (!p->subtractColor || g_shn_ok) &&
          p->preventMathMode != 3 && (ts & 0x0b) == 0 && (ts & 0x14) != 0 && ((ts & 0x10) ? g_shobj_ok : true);
 }
 
@@ -2167,19 +2171,23 @@ static void GeVerify(void) {
     }
   }
   if (g_sh_frame) {
-    uint32_t *vn = g_shobj_frame ? &g_sho_vn : &g_sh_vn;
-    uint32_t *vbad = g_shobj_frame ? &g_sho_vbad : &g_sh_vbad;
+    static const char *const kShName[3] = {"subhalf", "subhobj", "subhneg"};
+    int k = g_shn_frame ? 2 : g_shobj_frame ? 1 : 0;
+    uint32_t *vn = k == 2 ? &g_shn_vn : k == 1 ? &g_sho_vn : &g_sh_vn;
+    uint32_t *vbad = k == 2 ? &g_shn_vbad : k == 1 ? &g_sho_vbad : &g_sh_vbad;
     (*vn)++;
     *vbad += bad;
-    PspLog("%s f=%u rows=%d..%d fix=%04x bruns=%d masks=%d winrows=%u bad=%u", g_shobj_frame ? "subhobj" : "subhalf",
+    PspLog("%s f=%u rows=%d..%d fix=%04x bruns=%d masks=%d winrows=%u bad=%u", kShName[k],
            (unsigned)g_frame, g_sf_r0, g_sf_r1 - 1, (unsigned)g_sf_col, g_nbruns, g_sf_masks, (unsigned)g_win_rows,
            (unsigned)bad);
     if ((*vn >= 3 && *vbad / *vn > 600) || bad > 8192) {
-      if (g_shobj_frame)
+      if (k == 2)
+        g_shn_ok = false;
+      else if (k == 1)
         g_shobj_ok = false;
       else
         g_sh_ok = false;
-      PspLog("geaudit: half-colour frames differ too much, GE %s disabled", g_shobj_frame ? "subhobj" : "subhalf");
+      PspLog("geaudit: half-colour frames differ too much, GE %s disabled", kShName[k]);
      }
    }
   if (g_w2_frame) {
@@ -2589,6 +2597,7 @@ static bool DrawGe(void) {
   g_sf_zero = false;
   g_sh_frame = false;
   g_shobj_frame = false;
+  g_shn_frame = false;
   g_w2_frame = false;
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
@@ -2796,6 +2805,7 @@ static bool DrawGe(void) {
   g_sf_zero = g_sf_frame && (subfixc & 0x7fff) == 0;  /* bit 15 only marks a subfix row */
   g_sh_frame = blend && subhalf;
   g_shobj_frame = g_sh_frame && sobj;
+  g_shn_frame = g_sh_frame && bneg != 0;
 
   /* Tint rows: colour math with the fixed colour (no subscreen layer involved). All tint rows must
    * share the layer mask and add/subtract mode; the colour and halving may change per row. */
@@ -3411,8 +3421,8 @@ static bool DrawGe(void) {
       sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
       sceGuDisable(GU_DEPTH_TEST);
       sceGuEnable(GU_BLEND);
-      if (subhalf) {  /* alpha 0: main + fixed; alpha 0x80: (main + sub) / 2 */
-        sceGuBlendFunc(GU_ADD, GU_ONE_MINUS_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+      if (subhalf) {  /* alpha 0: main +/- fixed; alpha 0x80: (main +/- sub) / 2 (gate 5c: reverse subtract = dst - src) */
+        sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_ONE_MINUS_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
         sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
       } else {
         sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
@@ -3518,7 +3528,7 @@ static bool DrawGe(void) {
     else
       g_verify_now = true;
   }
-  if (g_sh_frame && (g_shobj_frame ? g_sho_vn : g_sh_vn) < kShVerify) {  /* gates 4t-d/u: the same for the half-colour paths */
+  if (g_sh_frame && (g_shn_frame ? g_shn_vn : g_shobj_frame ? g_sho_vn : g_sh_vn) < kShVerify) {  /* gates 4t-d/u/5c: the same for the half-colour paths */
     if (g_ppu_skip_draw)
       g_want_ms_verify = true;
     else
@@ -3548,6 +3558,8 @@ static bool DrawGe(void) {
     g_frames_sh++;
   if (g_shobj_frame)
     g_frames_sho++;
+  if (g_shn_frame)
+    g_frames_shn++;
   if (g_w2_frame)
     g_frames_w2++;
   if (g_m7_img)
@@ -3922,11 +3934,11 @@ static void PspRenderer_EndDraw(void) {
            g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.tsw, g_note.wsel);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
-    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u shf=%u sho=%u w2f=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u shf=%u sho=%u w2f=%u shn=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
            (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
            (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos, (unsigned)g_frames_m7i,
            (unsigned)g_frames_prev, (unsigned)g_frames_cw, (unsigned)g_frames_sf, (unsigned)g_frames_sh,
-           (unsigned)g_frames_sho, (unsigned)g_frames_w2);
+           (unsigned)g_frames_sho, (unsigned)g_frames_w2, (unsigned)g_frames_shn);
     PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
            (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
            (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
