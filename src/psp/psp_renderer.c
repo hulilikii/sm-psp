@@ -433,9 +433,17 @@ static void PspRenderer_Convert(void) {
 
 /* Gate 4t-c: subscreen BG layer added together with a non-zero fixed colour, no half colour. Such rows are drawn by
  * the GE through the multisub target; window masks of the subscreen layers are painted over that target. */
+/* Gate 4v: a BG layer shown on the subscreen is masked by window 2 (TSW). */
+static bool SubW2Layer(const Ppu *p) {
+  for (int l = 0; l < kLayers; l++)
+    if ((p->screenEnabled[1] & (1 << l)) && (p->screenWindowed[1] & (1 << l)) && ((p->windowsel >> (l * 4)) & 8))
+      return true;
+  return false;
+}
+
 static bool SubFixMath(const Ppu *p) {
   return g_sf_ok && p->mode == 1 && p->addSubscreen && !p->halfColor && p->preventMathMode != 3 &&
-         (p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0 && (p->screenEnabled[1] & 7) &&
+         ((p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0 || SubW2Layer(p)) && (p->screenEnabled[1] & 7) &&
          !(p->screenEnabled[1] & 0x10);
 }
 
@@ -578,7 +586,7 @@ static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool 
     if (p->addSubscreen && p->screenEnabled[1] != 0) {
       if (SubFixMath(p)) {
         *submath = true;
-        *subfix = fix;
+        *subfix = (uint16_t)(fix | 0x8000);  /* bit 15 marks a subfix row, also when the fixed colour is 0 (gate 4v) */
       } else if (SubHalfMath(p)) {
         *submath = true;
         *subfix = fix;
@@ -736,6 +744,13 @@ static void CaptureImpl(const Ppu *p, int line) {
     if ((p->screenWindowed[1] & 16) && ((p->windowsel >> 16) & 0xa))
       sw |= 8;  /* OBJ on the subscreen is windowed */
     s->subwin = sw;
+#if SM_PSP_LOG
+    if (sw && submath && NewSig(p, 0))  /* gate 4v: which setup still makes a subscreen window unsupported */
+      PspLog("SUBWIN line=%d sw=%02x TM=%02x TS=%02x tsw=%02x wsel=%06x w1=%d-%d w2=%d-%d math=%02x half=%d fixed=%04x neg=%d",
+             line, sw, p->screenEnabled[0], p->screenEnabled[1], p->screenWindowed[1], (unsigned)p->windowsel,
+             p->window1left, p->window1right, p->window2left, p->window2right, mm, p->halfColor ? 1 : 0,
+             (unsigned)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10), p->subtractColor ? 1 : 0);
+#endif
   }
   bool objon = !forced && (p->mode == 1 || p->mode == 7) && (p->screenEnabled[0] & 16);
   s->objon = objon;
