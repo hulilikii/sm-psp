@@ -223,6 +223,10 @@ enum { kCwVerify = 8 };
 static bool g_sf_ok = true;  /* cleared if the first verified such frames differ from software */
 static bool g_sf_frame;      /* this frame is drawn by that path */
 static uint32_t g_sf_vn, g_sf_vbad, g_frames_sf;
+/* Gate 5b: subfix frames whose fixed colour is 0 (subscreen layer masked by window 2) have their own audit budget and
+ * switch, so the first frames with a real fixed colour cannot use up their verification. */
+static bool g_sf0_ok = true, g_sf_zero;
+static uint32_t g_sf0_vn, g_sf0_vbad;
 static int g_sf_r0, g_sf_r1, g_sf_masks;  /* log only */
 static uint16_t g_sf_col;
 enum { kSfVerify = 8 };
@@ -443,8 +447,8 @@ static bool SubW2Layer(const Ppu *p) {
 
 static bool SubFixMath(const Ppu *p) {
   return g_sf_ok && p->mode == 1 && p->addSubscreen && !p->halfColor && p->preventMathMode != 3 &&
-         ((p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0 || SubW2Layer(p)) && (p->screenEnabled[1] & 7) &&
-         !(p->screenEnabled[1] & 0x10);
+         ((p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0 || (g_sf0_ok && SubW2Layer(p))) &&
+         (p->screenEnabled[1] & 7) && !(p->screenEnabled[1] & 0x10);
 }
 
 /* Gate 4t-d: subscreen BG3 alone, added with half colour (add mode). Every non-empty BG3 tile matters (a black pixel
@@ -2147,13 +2151,19 @@ static void GeVerify(void) {
     }
   }
   if (g_sf_frame) {
-    g_sf_vn++;
-    g_sf_vbad += bad;
-    PspLog("subfix f=%u rows=%d..%d fix=%04x bruns=%d masks=%d", (unsigned)g_frame, g_sf_r0, g_sf_r1 - 1,
-           (unsigned)g_sf_col, g_nbruns, g_sf_masks);
-    if (g_sf_vn >= 3 && g_sf_vbad / g_sf_vn > 600) {
-      g_sf_ok = false;
-      PspLog("geaudit: subscreen + fixed colour frames differ too much, GE subfix disabled");
+    uint32_t *vn = g_sf_zero ? &g_sf0_vn : &g_sf_vn;
+    uint32_t *vbad = g_sf_zero ? &g_sf0_vbad : &g_sf_vbad;
+    (*vn)++;
+    *vbad += bad;
+    PspLog("subfix f=%u rows=%d..%d fix=%04x bruns=%d masks=%d bad=%u", (unsigned)g_frame, g_sf_r0, g_sf_r1 - 1,
+           (unsigned)g_sf_col, g_nbruns, g_sf_masks, (unsigned)bad);
+    if (*vn >= 3 && *vbad / *vn > 600) {
+      if (g_sf_zero)
+        g_sf0_ok = false;
+      else
+        g_sf_ok = false;
+      PspLog("geaudit: subscreen + %s fixed colour frames differ too much, GE %s disabled",
+             g_sf_zero ? "zero" : "non-zero", g_sf_zero ? "subfix0" : "subfix");
     }
   }
   if (g_sh_frame) {
@@ -2576,6 +2586,7 @@ static bool DrawGe(void) {
   g_prev_rows = 0;
   g_cw_rows = 0;
   g_sf_frame = false;
+  g_sf_zero = false;
   g_sh_frame = false;
   g_shobj_frame = false;
   g_w2_frame = false;
@@ -2782,6 +2793,7 @@ static bool DrawGe(void) {
   }
   g_frame_multisub = blend && multisub && !subfix;
   g_sf_frame = blend && subfix && !subhalf;
+  g_sf_zero = g_sf_frame && (subfixc & 0x7fff) == 0;  /* bit 15 only marks a subfix row */
   g_sh_frame = blend && subhalf;
   g_shobj_frame = g_sh_frame && sobj;
 
@@ -3500,7 +3512,7 @@ static bool DrawGe(void) {
   g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || cwwant || g_audit_now);
   if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant || prevwant || cwwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
-  if (g_sf_frame && g_sf_vn < kSfVerify) {  /* gate 4t-c: first frames are checked against the software image */
+  if (g_sf_frame && (g_sf_zero ? g_sf0_vn : g_sf_vn) < kSfVerify) {  /* gates 4t-c/5b: first frames of each class are checked */
     if (g_ppu_skip_draw)
       g_want_ms_verify = true;
     else
