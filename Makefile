@@ -18,8 +18,9 @@ PSP_GE_STRIPS ?= 0
 PSP_SW_PATH ?= 1
 # PSP_GE_WIN=1 draws frames with window-1 masks (BG1-3, OBJ) on the GE, checked against software at run time. 0: they stay in software.
 PSP_GE_WIN ?= 1
-# PSP_VTX_POOL=1: big vertex buffers are built in a cached pool and written back once. 0: inside the (uncached) display list, for A/B.
-PSP_VTX_POOL ?= 1
+# PSP_VTX_POOL=1: big vertex buffers are built in a cached pool and written back once. 0: inside the display list.
+# Gate 5f hardware A/B: the pool was ~20% slower per vertex (0.45 vs 0.37 us), so it is off by default.
+PSP_VTX_POOL ?= 0
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif

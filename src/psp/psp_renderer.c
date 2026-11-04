@@ -126,7 +126,7 @@ static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
  * of inside the display list (sceGuStart maps the list uncached: every vertex there is four uncached stores).
  * Commands and the small colour buffers stay in the list. SM_PSP_VTX_POOL=0 restores the old behaviour. */
 #ifndef SM_PSP_VTX_POOL
-#define SM_PSP_VTX_POOL 1
+#define SM_PSP_VTX_POOL 0
 #endif
 enum { kVtxPoolBytes = 768 * 1024, kVtxPadBytes = 8 * 1024 };  /* pad: <= 99 allocations rounded up to 64 B */
 #if SM_PSP_VTX_POOL
@@ -282,7 +282,7 @@ enum { kW2Verify = 8 };
 static bool g_ovf_ok = true;  /* cleared if the first verified overflow frames differ from software */
 static int g_ovf_rows;        /* rows of the sprite range this frame that exceed the limits */
 static uint32_t g_ovf_vn, g_ovf_vbad, g_frames_ovf, g_ovf_watch, g_ovf_arms;
-enum { kOvfVerify = 8, kOvfWatch = 30, kOvfArm = 3, kOvfArms = 3 };  /* watch: armed at most kOvfArms times, only until kOvfArm frames are audited */
+enum { kOvfVerify = 8, kOvfWatch = 12, kOvfArm = 3, kOvfArms = 3 };
 static int16_t g_row_lastk[256];  /* per row: last kept sprite (index in g_spr), 32767 = row not limited */
 static uint8_t g_row_lastc[256];  /* per row: slivers kept of that sprite, in screen column order */
 static bool g_obj_dry;           /* EmitQuad8 only counts (ObjCountQuads) */
