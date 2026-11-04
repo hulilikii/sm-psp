@@ -121,6 +121,32 @@ typedef struct Run { uint16_t r0, r1, first; } Run;
 typedef struct Geom { TileVert *v; int n; } Geom;
 
 static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
+
+/* Gate 5f: the big vertex buffers (tiles, sprites, mode 7) are built in this cached pool and written back once, instead
+ * of inside the display list (sceGuStart maps the list uncached: every vertex there is four uncached stores).
+ * Commands and the small colour buffers stay in the list. SM_PSP_VTX_POOL=0 restores the old behaviour. */
+#ifndef SM_PSP_VTX_POOL
+#define SM_PSP_VTX_POOL 1
+#endif
+enum { kVtxPoolBytes = 768 * 1024, kVtxPadBytes = 8 * 1024 };  /* pad: <= 99 allocations rounded up to 64 B */
+#if SM_PSP_VTX_POOL
+static uint8_t g_vtx_pool[kVtxPoolBytes] __attribute__((aligned(64)));
+static uint32_t g_vtx_top;
+static void *VtxAlloc(uint32_t bytes) {
+  bytes = (bytes + 63u) & ~63u;
+  if (g_vtx_top + bytes > (uint32_t)kVtxPoolBytes)
+    Die("vertex pool overflow");  /* cannot happen: DrawGe checks the frame against the pool before the list is opened */
+  void *p = g_vtx_pool + g_vtx_top;
+  g_vtx_top += bytes;
+  return p;
+}
+#define VTX_RESET() (g_vtx_top = 0)
+#define VTX_FLUSH() do { if (g_vtx_top) sceKernelDcacheWritebackRange(g_vtx_pool, g_vtx_top); } while (0)
+#else
+#define VtxAlloc(bytes) sceGuGetMemory(bytes)
+#define VTX_RESET() ((void)0)
+#define VTX_FLUSH() ((void)0)
+#endif
 static uint8_t *g_atlas2, *g_atlas4;        /* uncached VRAM tile atlases */
 static uint16_t *g_texture;                 /* uncached VRAM: 565 texture, or the 8888 copy target (256x256x4 = same bytes) */
 /* Software-PPU frame, 256x256 8888 (rows 240-255 unused). */
@@ -1332,7 +1358,7 @@ static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2
     int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
     if (cl + cr >= 8 || ct + cb >= 8)
       continue;
-    float u = (float)((pt % cols) * 8), v = (float)((pt / cols) * 8);
+    float u = (float)((pt & (cols - 1)) * 8), v = (float)((pt >> (cols == 32 ? 5 : 6)) * 8);
     float ul, ur, vt, vb;
     if (e->fl & 2) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
     if (e->fl & 4) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
@@ -1367,7 +1393,7 @@ static void PutTileQuad(TileVert *out[2][8], const TileEnt *e, int l, int ox, in
   int x0 = e->x, y0 = e->y;
   int cl = xl - x0, cr = x0 + 8 - xr, ct = ra - y0, cb = y0 + 8 - rb;
   int prio = e->fl & 1, pal = e->pal, pt = e->pt;
-  float u = (float)((pt % cols) * 8), v = (float)((pt / cols) * 8);
+  float u = (float)((pt & (cols - 1)) * 8), v = (float)((pt >> (cols == 32 ? 5 : 6)) * 8);
   float ul, ur, vt, vb;
   if (e->fl & 2) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
   if (e->fl & 4) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
@@ -1604,7 +1630,7 @@ static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int 
     g_obj_dry_n++;
     return;
   }
-  float u = (float)((pt % 32) * 8), v = (float)((pt / 32) * 8);
+  float u = (float)((pt & 31) * 8), v = (float)((pt >> 5) * 8);
   float ul, ur, vt, vb;
   if (hf) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
   if (vf) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
@@ -1818,7 +1844,7 @@ static int BuildObjGeom(const ObjBand *bands, int nb, int ox, int oy, ObjSeg *se
     cap = ObjCountQuads(bands, nb);  /* limited rows split tiles: count what is really emitted */
   if (cap <= 0)
     return 0;
-  TileVert *base = sceGuGetMemory(cap * 2 * sizeof(TileVert));
+  TileVert *base = VtxAlloc(cap * 2 * sizeof(TileVert));
   TileVert *w = base;
   *base_out = base;
   for (int b = 0; b < nb; b++) {
@@ -2593,10 +2619,12 @@ enum { kMaxStrips = 5 };
 enum { kMaxStrips = 1 };
 #endif
 enum { kDrawCmdBytes = 96, kListFixedBytes = 8 * 1024, kListAllocBytes = 160 * 16, kListSlackBytes = 16 * 1024 };
-static uint32_t g_peak_tiles, g_peak_list;  /* since the last log line */
+static uint32_t g_peak_tiles, g_peak_list, g_peak_vtx;  /* since the last log line */
 
-static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend, bool tint, bool sobj) {
-  uint32_t geom = (uint32_t)total * 2 * sizeof(TileVert);
+static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend, bool tint, bool sobj, uint32_t *vtx) {
+  uint32_t big = ((uint32_t)total + (uint32_t)obj_quads) * 2 * sizeof(TileVert) +
+                 (uint32_t)(g_m7_nq + g_m7_nrng) * 2 * sizeof(TileVert);  /* tiles, sprites, mode 7 */
+  uint32_t geom = 0;
   uint32_t mos_draws = 0;
   for (int l = 0; l < kLayers; l++) {
     if (!g_mos[l].on)
@@ -2604,8 +2632,12 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
     geom += (uint32_t)g_nruns[l] * 8 * sizeof(TileVert);
     mos_draws += (uint32_t)g_nruns[l] * 4;
   }
-  geom += (uint32_t)(g_m7_nq + g_m7_nrng) * 2 * sizeof(TileVert);
-  geom += (uint32_t)obj_quads * 2 * sizeof(TileVert);
+#if SM_PSP_VTX_POOL
+  *vtx = big + kVtxPadBytes;  /* built in the cached pool, not in the list */
+#else
+  *vtx = 0;
+  geom += big;
+#endif
   geom += (uint32_t)g_line_count * (kMaxStrips * 2 + 2) * sizeof(ColorVert);  /* backdrop + brightness rects */
   if (blend)  /* subscreen composite quads + subscreen window masks, per row */
     geom += (uint32_t)g_line_count * (4 * sizeof(TileVert) + 18 * sizeof(ColorVert));
@@ -3104,12 +3136,19 @@ static bool DrawGe(void) {
     if (sobj)
       BuildClutObj(15);
   }
-  {  /* gate 5d: the list must hold every vertex buffer and command of this frame; sceGuGetMemory never checks its end */
-    uint32_t need = ListBytesNeeded(total, obj_quads, obj_np, blend, tint, sobj);
+  {  /* gates 5d/5f: the list must hold every command (and, without the pool, every vertex) of this frame; the pool every big vertex buffer */
+    uint32_t vtx = 0;
+    uint32_t need = ListBytesNeeded(total, obj_quads, obj_np, blend, tint, sobj, &vtx);
     if (need > g_peak_list)
       g_peak_list = need;
+    if (vtx > g_peak_vtx)
+      g_peak_vtx = vtx;
     if (need > (uint32_t)kListBytes) {
       BUDGET(8, "listkb", (int)(need >> 10), (int)(kListBytes >> 10));
+      return false;
+    }
+    if (vtx > (uint32_t)kVtxPoolBytes) {
+      BUDGET(9, "vtxkb", (int)(vtx >> 10), (int)(kVtxPoolBytes >> 10));
       return false;
     }
   }
@@ -3133,6 +3172,7 @@ static bool DrawGe(void) {
   g_t_list_start = Now();
   PROF(g_pc_obj = g_t_list_start - t_bg;)
   g_prep_us = g_t_list_start - g_t_draw_start;
+  VTX_RESET();  /* the previous frame was synced in Present: the GE no longer reads the pool */
   sceGuStart(GU_DIRECT, g_gu_list);
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_BLEND);
@@ -3181,7 +3221,7 @@ static bool DrawGe(void) {
         int c = 0;
         for (int i = 0; i < g_nruns[l]; i++)
           c += g_counts[l][i][pr][p];
-        w[pr][p] = c ? sceGuGetMemory(c * 2 * sizeof(TileVert)) : NULL;
+        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(TileVert)) : NULL;
        }
     }
     for (int i = 0; i < g_nruns[l]; i++) {
@@ -3241,7 +3281,7 @@ static bool DrawGe(void) {
         for (int i = 0; i < g_nbruns; i++)
           if (g_bruns[i].l == l)
             c += g_bcounts[i][pr][p];
-        w[pr][p] = c ? sceGuGetMemory(c * 2 * sizeof(TileVert)) : NULL;
+        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(TileVert)) : NULL;
       }
     }
     for (int i = 0; i < g_nbruns; i++) {
@@ -3353,14 +3393,14 @@ static bool DrawGe(void) {
   /* Mode 7 geometry (z = SNES level 5: above OBJ priority 0, below priorities 1-3). */
   g_m7v = NULL;
   if (g_m7_nq > 0) {
-    g_m7v = sceGuGetMemory(g_m7_nq * 2 * sizeof(TileVert));
+    g_m7v = VtxAlloc(g_m7_nq * 2 * sizeof(TileVert));
     for (int i = 0; i < g_m7_nq; i++) {
       const M7Quad *q = &g_m7q[i];
       g_m7v[2 * i] = (TileVert){q->u0, q->v0, (int16_t)(kLeft + q->x0), (int16_t)(kTop + q->y0), (int16_t)(5 * kZLevel)};
       g_m7v[2 * i + 1] = (TileVert){q->u1, q->v1, (int16_t)(kLeft + q->x1), (int16_t)(kTop + q->y1), (int16_t)(5 * kZLevel)};
     }
   } else if (g_m7_img) {  /* image path: one 1:1 quad per row range (texel (x, row) = pixel (x, row)) */
-    g_m7v = sceGuGetMemory(g_m7_nrng * 2 * sizeof(TileVert));
+    g_m7v = VtxAlloc(g_m7_nrng * 2 * sizeof(TileVert));
     const float iu = 0.5f - g_uvh[0];
     for (int i = 0; i < g_m7_nrng; i++) {
       int r0 = g_m7rng[i][0], r1 = g_m7rng[i][1];
@@ -3370,6 +3410,8 @@ static bool DrawGe(void) {
                                     (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + r1), (int16_t)(5 * kZLevel)};
     }
   }
+
+  VTX_FLUSH();  /* every pool vertex is written: make it visible to the GE before any draw that reads it */
 
   /* Tint overlay: one rectangle per span of each run of rows with the same fixed colour and colour-window state
    * (gate 4t-b: 0, 1 or 2 spans where the colour window lets the math apply; unlimited rows: the full width). */
@@ -4018,9 +4060,10 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  why2: objcfg=%u objlimit=%u subwin=%u submulti=%u mathbright=%u m7=%u", (unsigned)g_reason_counts[10],
            (unsigned)g_reason_counts[11], (unsigned)g_reason_counts[12], (unsigned)g_reason_counts[13],
            (unsigned)g_reason_counts[14], (unsigned)g_reason_counts[15]);
-    PspLog("  peak: tiles=%u/%d list=%uKB/%dKB", (unsigned)g_peak_tiles, (int)kMaxTilesPerFrame,
-           (unsigned)(g_peak_list >> 10), (int)(kListBytes >> 10));
-    g_peak_tiles = g_peak_list = 0;
+    PspLog("  peak: tiles=%u/%d list=%uKB/%dKB vtx=%uKB/%dKB (pool=%d)", (unsigned)g_peak_tiles, (int)kMaxTilesPerFrame,
+           (unsigned)(g_peak_list >> 10), (int)(kListBytes >> 10), (unsigned)(g_peak_vtx >> 10),
+           (int)(kVtxPoolBytes >> 10), (int)SM_PSP_VTX_POOL);
+    g_peak_tiles = g_peak_list = g_peak_vtx = 0;
   }
   if ((g_frame % 300) == 0)
     ProfLog();

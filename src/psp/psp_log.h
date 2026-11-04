@@ -14,9 +14,12 @@
 #ifndef SM_PSP_GE_STRIPS
 #define SM_PSP_GE_STRIPS 0
 #endif
+#ifndef SM_PSP_VTX_POOL
+#define SM_PSP_VTX_POOL 1
+#endif
 #define PSP_STR2(x) #x
 #define PSP_STR(x) PSP_STR2(x)
-#define PSP_LOG_FILE "smpsp_g5e_strips" PSP_STR(SM_PSP_GE_STRIPS) ".log"
+#define PSP_LOG_FILE "smpsp_g5f_vp" PSP_STR(SM_PSP_VTX_POOL) "_strips" PSP_STR(SM_PSP_GE_STRIPS) ".log"
 
 #include <stdbool.h>
 
