@@ -408,7 +408,7 @@ static uint32_t g_t_draw_start, g_t_list_start;
 static uint32_t g_prep_us, g_build_us, g_gewait_us, g_vbwait_us;
 
 #if SM_PSP_LOG
-enum { kLateUs = 17000, kMissUs = 33800 };
+enum { kLateUs = 17000, kMissUs = 33800, kHitchUs = 24000, kHitchPerWindow = 8 };
 
 typedef struct Stat { uint32_t n, sum, max; } Stat;
 typedef struct Prof {
@@ -423,6 +423,8 @@ static uint32_t g_ppu_us, g_ppu_t0, g_cap_us, g_cpy_us, g_m7i_us;  /* software P
 static uint32_t g_pc_class, g_pc_bg, g_pc_obj;            /* prep phases this frame */
 static uint32_t g_c_tseen, g_c_tdec, g_c_draws, g_c_clut, g_c_verts;
 static uint32_t g_t_prev_end, g_holds;
+static uint32_t g_hitch_n;
+static bool g_hit_verified;  /* this frame was compared with the software image (audit frame) */
 
 static inline uint32_t Now(void) {
   return sceKernelGetSystemTimeLow();
@@ -2300,6 +2302,7 @@ static void Present(void) {
   g_gewait_us = Now() - t;
   if (g_verify_now) {
     g_verify_now = false;
+    
     GeVerify();
   }
   Pace();
@@ -4035,8 +4038,18 @@ static void PspRenderer_EndDraw(void) {
       p->miss++;
     if (held)
       p->hold++;
+    if (period > kHitchUs && g_hitch_n++ < (uint32_t)kHitchPerWindow) {
+      uint32_t game = t_enter - g_t_prev_end;
+      uint32_t logic = game > g_cap_us + g_ppu_us ? game - g_cap_us - g_ppu_us : 0;
+      PspLog("HITCH f=%u period=%u logic=%u cap=%u ppu=%u prep=%u build=%u gewait=%u vb=%u | ge=%d held=%d ver=%d tint=%d bruns=%d m7=%d/%d ovf=%d mos=%d sh=%d sf=%d w2=%d",
+             (unsigned)g_frame, (unsigned)period, (unsigned)logic, (unsigned)g_cap_us, (unsigned)g_ppu_us,
+             (unsigned)g_prep_us, (unsigned)g_build_us, (unsigned)g_gewait_us, (unsigned)g_vbwait_us,
+             drew_ge, held, g_hit_verified, g_ntint, g_nbruns, g_m7_nq, g_m7_img, g_ovf_rows, g_mos_frame,
+             g_sh_frame, g_sf_frame, g_w2_frame);
+    }
   }
   g_ppu_us = g_cap_us = g_cpy_us = g_m7i_us = 0;
+  g_hit_verified = false;
   g_pc_class = g_pc_bg = g_pc_obj = 0;
   g_c_tseen = g_c_tdec = g_c_draws = g_c_clut = g_c_verts = 0;
   g_t_prev_end = t_end;
@@ -4065,8 +4078,12 @@ static void PspRenderer_EndDraw(void) {
            (int)(kVtxPoolBytes >> 10), (int)SM_PSP_VTX_POOL);
     g_peak_tiles = g_peak_list = g_peak_vtx = 0;
   }
-  if ((g_frame % 300) == 0)
+  if ((g_frame % 300) == 0) {
+    if (g_hitch_n > (uint32_t)kHitchPerWindow)
+      PspLog("hitches: %u in the last 300 frames (first %d shown)", (unsigned)g_hitch_n, (int)kHitchPerWindow);
+    g_hitch_n = 0;
     ProfLog();
+  }
 #endif
   /* Write the buffered log when due. The stall is kept out of the statistics. */
   if (PspLog_Tick((unsigned)g_frame)) {
