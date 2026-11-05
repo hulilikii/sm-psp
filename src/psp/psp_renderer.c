@@ -424,14 +424,15 @@ enum { kLateUs = 17000, kMissUs = 33800, kHitchUs = 24000, kHitchPerWindow = 8 }
 typedef struct Stat { uint32_t n, sum, max; } Stat;
 typedef struct Prof {
   Stat game, ppu, prep, build, gewait, vbwait, period;
-  Stat cap, cpy, cls, bg, obj;          /* capture hook (and its VRAM copy); prep split: classify, BG, OBJ */
+  Stat cap, cpy, cls, bg, obj, emit;    /* capture hook (and its VRAM copy); prep split: classify, BG, OBJ; list vertices */
   Stat tseen, tdec, draws, clut, verts, m7i; /* per-frame counters; m7i: CPU time of the mode 7 image */
   uint32_t late, miss, hold;
 } Prof;
 static Prof g_prof[3];  /* 0: GE frame, 1: software frame while GE is on, 2: software mode */
 static const char *const kProfName[3] = {"ge", "swfb", "off"};
 static uint32_t g_ppu_us, g_ppu_t0, g_cap_us, g_cpy_us, g_m7i_us;  /* software PPU draw / capture / VRAM-copy / mode 7 image time this frame */
-static uint32_t g_pc_class, g_pc_bg, g_pc_obj;            /* prep phases this frame */
+static uint32_t g_pc_class, g_pc_bg, g_pc_obj, g_pc_emit; /* prep phases this frame; emit: list start -> vertices written */
+static uint32_t g_rc_hit, g_rc_miss;                      /* tile-row cache lookups since the last log line */
 static uint32_t g_c_tseen, g_c_tdec, g_c_draws, g_c_clut, g_c_verts;
 static uint32_t g_t_prev_end, g_holds;
 static uint32_t g_hitch_n;
@@ -696,6 +697,37 @@ static uint16_t M7Line(const Ppu *p, LineSnap *s) {
   return r;
 }
 
+/* VRAM snapshot for the GE path: only the 512-byte pages written since the last one (ppu->vramDirty, set in
+ * ppu_write). Every 64 frames the whole snapshot is compared with VRAM; a mismatch (a writer that bypasses
+ * ppu_write) switches to full copies for good. */
+enum { kVramPages = 128, kVramPageWords = 256 };
+static bool g_vd_ok = SM_PSP_VRAM_DIRTY;
+static void SnapshotVram(const Ppu *p) {
+  uint8_t *dirty = (uint8_t *)p->vramDirty;  /* the renderer owns the clear; the Ppu object is not const */
+  if (!g_vd_ok) {
+    memcpy(g_vram, p->vram, sizeof(g_vram));
+    memset(dirty, 0, kVramPages);
+    return;
+  }
+  for (int pg = 0; pg < kVramPages;) {
+    if (!dirty[pg]) {
+      pg++;
+      continue;
+    }
+    int e = pg + 1;
+    while (e < kVramPages && dirty[e])
+      e++;
+    memcpy(&g_vram[pg * kVramPageWords], &p->vram[pg * kVramPageWords], (size_t)(e - pg) * kVramPageWords * 2);
+    memset(&dirty[pg], 0, (size_t)(e - pg));
+    pg = e;
+  }
+  if ((g_frame & 63) == 0 && memcmp(g_vram, p->vram, sizeof(g_vram)) != 0) {
+    g_vd_ok = false;
+    memcpy(g_vram, p->vram, sizeof(g_vram));
+    PspLog("vramdirty: snapshot differs from VRAM, dirty tracking disabled");
+  }
+}
+
 static void CaptureImpl(const Ppu *p, int line) {
   if (!g_ge_active || line < 1 || line > kMaxLines)
     return;
@@ -822,7 +854,7 @@ static void CaptureImpl(const Ppu *p, int line) {
     /* VRAM/CGRAM as the display saw them for this frame. One 64 KB copy per frame, never per line,
      * and only if the frame can still be drawn by the GE. */
     PROF(uint32_t t_cpy = Now();)
-    memcpy(g_vram, p->vram, sizeof(g_vram));
+    SnapshotVram(p);
     memcpy(g_cgram, p->cgram, sizeof(g_cgram));
     memcpy(g_oam, p->oam, sizeof(g_oam));
     memcpy(g_hoam, p->highOam, sizeof(g_hoam));
@@ -1135,10 +1167,14 @@ static void FlickLog(void) {
 
 void PspRenderer_CaptureLine(const Ppu *p, int line) {
 #if SM_PSP_LOG
+#if SM_PSP_PROBES
   WinProbe(p, line);
   FlickProbe(p, line);
+#endif
   uint32_t t = Now();
+#if SM_PSP_PROBES
   M7Probe(p, line);
+#endif
   CaptureImpl(p, line);
   g_cap_us += Now() - t;
 #else
@@ -1389,7 +1425,7 @@ static int BuildRow(int l, const BgSnap *s, int ty, TileEnt *dst, int max) {
     if (n >= max)
       return -1;
     TileEnt *e = &dst[n++];
-    e->x = (int16_t)(tx * 8 - s->hscroll);
+    e->x = (int16_t)(tx * 8);  /* unscrolled: the caller subtracts hscroll, so rows are shared across fine scroll */
     e->y = 0;
     e->pt = (uint16_t)last_pt;
     e->pal = last_pal;
@@ -1402,18 +1438,21 @@ static int BuildRow(int l, const BgSnap *s, int ty, TileEnt *dst, int max) {
  * within a frame, so returned pointers stay valid. Entries from earlier frames never match (stamp). */
 static const TileEnt *RowCached(int l, const BgSnap *s, int ty, int *count) {
   unsigned t6 = (unsigned)ty & 63, wh = s->flags & 3;
+  unsigned hk = ((unsigned)(s->hscroll >> 3) << 1) | ((s->hscroll & 7) != 0);  /* tile column + (fine != 0: 32 vs 31 columns right) */
   unsigned h = (t6 * 5 + (unsigned)(s->hscroll >> 3) * 3 + (unsigned)l * 11 + (unsigned)(s->mapadr >> 10) * 7 +
-                (unsigned)(s->tileadr >> 12) * 13 + wh) & (kRowSlots - 1);
+                (unsigned)(s->tileadr >> 12) * 13 + wh + (hk & 1) * 17) & (kRowSlots - 1);
   RowCache *rc = &g_rc[h];
   if (rc->stamp == g_stamp && rc->l == l && rc->ty == t6 && rc->wh == wh && rc->map == s->mapadr &&
-      rc->tile == s->tileadr && rc->hs == s->hscroll) {
+      rc->tile == s->tileadr && rc->hs == hk) {
+    PROF(g_rc_hit++;)
     *count = rc->n;
     return &g_rows[rc->first];
   }
   int n = BuildRow(l, s, ty, &g_rows[g_rows_top], kRowPool - g_rows_top);
   if (n < 0)
     return NULL;
-  *rc = (RowCache){s->mapadr, s->tileadr, s->hscroll, g_stamp, (uint16_t)g_rows_top, (uint16_t)n,
+  PROF(g_rc_miss++;)
+  *rc = (RowCache){s->mapadr, s->tileadr, (uint16_t)hk, g_stamp, (uint16_t)g_rows_top, (uint16_t)n,
                    (uint8_t)l, (uint8_t)wh, (uint8_t)t6};
   g_rows_top += n;
   *count = n;
@@ -1440,8 +1479,10 @@ static bool BuildTileList(int l, const LineSnap *snap, int r0, int r1, TileList 
       if (n < 0)
         return false;
     }
-    for (int k = 0; k < n; k++)
+    for (int k = 0; k < n; k++) {
       dst[k].y = (int16_t)y0;
+      dst[k].x = (int16_t)(dst[k].x - s->hscroll);  /* cached and freshly built rows are both unscrolled */
+    }
     top += n;
   }
   g_ent_top = top;
@@ -3536,7 +3577,7 @@ static bool DrawGe(void) {
   }
 
   VTX_FLUSH();  /* every pool vertex is written: make it visible to the GE before any draw that reads it */
-
+  PROF(g_pc_emit = Now() - g_t_list_start;)
   /* Tint overlay: one rectangle per span of each run of rows with the same fixed colour and colour-window state
    * (gate 4t-b: 0, 1 or 2 spans where the colour window lets the math apply; unlimited rows: the full width). */
   ColorVert *tv = NULL;
@@ -4019,8 +4060,8 @@ static void ProfLog(void) {
     PspLog("  gewait=%u/%u vbwait=%u/%u period=%u/%u late=%u miss=%u hold=%u skip=%d",
            AVG(p->gewait), AVG(p->vbwait), AVG(p->period), (unsigned)p->late, (unsigned)p->miss,
            (unsigned)p->hold, (int)g_ppu_skip_draw);
-    PspLog("  cap=%u/%u cpy=%u/%u class=%u/%u bg=%u/%u obj=%u/%u", AVG(p->cap), AVG(p->cpy), AVG(p->cls),
-           AVG(p->bg), AVG(p->obj));
+    PspLog("  cap=%u/%u cpy=%u/%u class=%u/%u bg=%u/%u obj=%u/%u emit=%u/%u", AVG(p->cap), AVG(p->cpy), AVG(p->cls),
+           AVG(p->bg), AVG(p->obj), AVG(p->emit));
     PspLog("  tiles seen=%u/%u decoded=%u/%u | draws=%u/%u clut=%u/%u verts=%u/%u", AVG(p->tseen),
            AVG(p->tdec), AVG(p->draws), AVG(p->clut), AVG(p->verts));
     if (p->m7i.n)
@@ -4137,9 +4178,11 @@ static void PspRenderer_EndDraw(void) {
 #if SM_PSP_LOG
   /* Per-frame timing. "game" is everything since the previous frame finished:
    * the game logic, input and the software PPU (its share is "ppu"). */
+#if SM_PSP_PROBES
   M7FrameEnd();
   WinFrameEnd();
   FlickFrameEnd();
+#endif
   uint32_t t_end = Now();
   if (g_t_prev_end != 0) {
     Prof *p = &g_prof[!g_ge_active ? 2 : (drew_ge ? 0 : 1)];
@@ -4156,6 +4199,7 @@ static void PspRenderer_EndDraw(void) {
     StatAdd(&p->cls, g_pc_class);
     StatAdd(&p->bg, g_pc_bg);
     StatAdd(&p->obj, g_pc_obj);
+    StatAdd(&p->emit, g_pc_emit);
     StatAdd(&p->tseen, g_c_tseen);
     StatAdd(&p->tdec, g_c_tdec);
     StatAdd(&p->draws, g_c_draws);
@@ -4181,7 +4225,7 @@ static void PspRenderer_EndDraw(void) {
   }
   g_ppu_us = g_cap_us = g_cpy_us = g_m7i_us = 0;
   g_hit_verified = false;
-  g_pc_class = g_pc_bg = g_pc_obj = 0;
+  g_pc_class = g_pc_bg = g_pc_obj = g_pc_emit = 0;
   g_c_tseen = g_c_tdec = g_c_draws = g_c_clut = g_c_verts = 0;
   g_t_prev_end = t_end;
   if (g_note_pending) {
@@ -4208,12 +4252,16 @@ static void PspRenderer_EndDraw(void) {
            (unsigned)(g_peak_list >> 10), (int)(kListBytes >> 10), (unsigned)(g_peak_vtx >> 10),
            (int)(kVtxPoolBytes >> 10), (int)SM_PSP_VTX_POOL);
     g_peak_tiles = g_peak_list = g_peak_vtx = 0;
+    PspLog("  rowcache: hit=%u miss=%u", (unsigned)g_rc_hit, (unsigned)g_rc_miss);
+    g_rc_hit = g_rc_miss = 0;
   }
   if ((g_frame % 300) == 0) {
     if (g_hitch_n > (uint32_t)kHitchPerWindow)
       PspLog("hitches: %u in the last 300 frames (first %d shown)", (unsigned)g_hitch_n, (int)kHitchPerWindow);
     g_hitch_n = 0;
+#if SM_PSP_PROBES
     FlickLog();
+#endif
     ProfLog();
   }
 #endif

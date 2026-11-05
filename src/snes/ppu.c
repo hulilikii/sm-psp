@@ -94,6 +94,7 @@ enum {
 Ppu* ppu_init(Snes* snes) {
   Ppu* ppu = malloc(sizeof(Ppu));
   ppu->snes = snes;
+  memset(ppu->vramDirty, 1, sizeof(ppu->vramDirty));
   return ppu;
 }
 
@@ -109,6 +110,7 @@ void ppu_copy(Ppu *ppu, Ppu *ppu_src) {
   ppu->renderBuffer = renderBuffer;
   ppu->renderPitch = (uint32_t)pitch;
   ppu->snes = snes;
+  memset(ppu->vramDirty, 1, sizeof(ppu->vramDirty));
 }
 
 void ppu_reset(Ppu* ppu) {
@@ -212,10 +214,12 @@ void ppu_reset(Ppu* ppu) {
   ppu->countersLatched = false;
   ppu->ppu1openBus = 0;
   ppu->ppu2openBus = 0;
+  memset(ppu->vramDirty, 1, sizeof(ppu->vramDirty));
 }
 
 void ppu_saveload(Ppu *ppu, SaveLoadFunc *func, void *ctx) {
   func(ctx, &ppu->vram, offsetof(Ppu, pixelbuffer_placeholder) - offsetof(Ppu, vram));
+  memset(ppu->vramDirty, 1, sizeof(ppu->vramDirty));  // a load rewrote VRAM behind ppu_write
 }
 
 void PpuBeginDrawing(Ppu *ppu, uint8_t *pixels, size_t pitch, uint32_t render_flags) {
@@ -1487,12 +1491,14 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
       // TODO: vram access during rendering (also cgram and oam)
       uint16_t vramAdr = ppu_getVramRemap(ppu);
       ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0xff00) | val;
+      ppu->vramDirty[(vramAdr & 0x7fff) >> 8] = 1;
       if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }
     case 0x19: {
       uint16_t vramAdr = ppu_getVramRemap(ppu);
       ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0x00ff) | (val << 8);
+      ppu->vramDirty[(vramAdr & 0x7fff) >> 8] = 1;
       if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }
