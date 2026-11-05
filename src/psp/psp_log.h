@@ -26,9 +26,12 @@
 #ifndef SM_PSP_VRAM_DIRTY
 #define SM_PSP_VRAM_DIRTY 1
 #endif
+#ifndef SM_PSP_CAP_REUSE
+#define SM_PSP_CAP_REUSE 1
+#endif
 #define PSP_STR2(x) #x
 #define PSP_STR(x) PSP_STR2(x)
-#define PSP_LOG_FILE "smpsp_g5ha_vd" PSP_STR(SM_PSP_VRAM_DIRTY) "_pr" PSP_STR(SM_PSP_PROBES) "_tb" PSP_STR(SM_PSP_TRIPLE) ".log"
+#define PSP_LOG_FILE "smpsp_g5hb_vd" PSP_STR(SM_PSP_VRAM_DIRTY) "_cr" PSP_STR(SM_PSP_CAP_REUSE) "_pr" PSP_STR(SM_PSP_PROBES) "_tb" PSP_STR(SM_PSP_TRIPLE) ".log"
 
 #include <stdbool.h>
 

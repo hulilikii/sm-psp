@@ -169,6 +169,8 @@ struct Ppu {
   uint8_t mosaicModulo[kPpuXPixels];
   // 1 = 512-byte VRAM page written since the renderer last copied it. After pixelbuffer_placeholder: not saved.
   uint8_t vramDirty[128];
+  // Bumped by ppu_write for registers the renderer's per-line capture reads (see PpuWriteChangesCapture). Not saved.
+  uint32_t regGen;
 
 };
 

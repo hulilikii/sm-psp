@@ -191,6 +191,13 @@ static Note g_note;
 static bool g_note_pending;
 #endif
 static uint32_t g_capture_gaps;
+/* Per-line capture reuse: a line whose PPU registers (Ppu.regGen) and OAM address equal the previous line's copies that
+ * line's snapshot and re-reads only BG scroll and CGRAM entry 0. Log builds recompute every 16th frame and compare. */
+static bool g_cap_reuse_ok = SM_PSP_CAP_REUSE;
+static uint32_t g_cap_gen, g_cap_oamadr;
+#if SM_PSP_LOG
+static uint32_t g_cap_n_reuse, g_cap_n_full, g_cap_n_chk, g_cap_n_bad;
+#endif
 static uint16_t g_vram[0x8000] __attribute__((aligned(16)));
 static uint16_t g_cgram[256] __attribute__((aligned(16)));
 
@@ -728,6 +735,16 @@ static void SnapshotVram(const Ppu *p) {
   }
 }
 
+/* Snapshot of the previous line with the values that ppu_write's counter does not cover re-read. */
+static void CaptureRefresh(const Ppu *p, LineSnap *d, const LineSnap *prev) {
+  memcpy(d, prev, sizeof(*d));
+  for (int l = 0; l < kLayers; l++) {
+    d->bg[l].hscroll = p->bgLayer[l].hScroll & 0x3ff;
+    d->bg[l].vscroll = p->bgLayer[l].vScroll & 0x3ff;
+  }
+  d->cg0 = p->cgram[0];
+}
+
 static void CaptureImpl(const Ppu *p, int line) {
   if (!g_ge_active || line < 1 || line > kMaxLines)
     return;
@@ -750,6 +767,31 @@ static void CaptureImpl(const Ppu *p, int line) {
     return;
   }
   LineSnap *s = &g_lines[line - 1];
+  /* Same registers as the previous line: copy its snapshot. Log builds recompute every 16th frame and compare
+   * (end of function). A frame that is already dead never gets here, so the copied reasons are 0. */
+#if SM_PSP_LOG
+  LineSnap cand;
+  bool check = false;
+#endif
+  if (g_cap_reuse_ok && line > 1 && p->regGen == g_cap_gen && p->oamAdr == g_cap_oamadr) {
+#if SM_PSP_LOG
+    if ((g_frame & 15) == 0) {
+      check = true;
+      CaptureRefresh(p, &cand, &g_lines[line - 2]);
+    } else
+#endif
+    {
+      CaptureRefresh(p, s, &g_lines[line - 2]);
+      if (s->m7on)
+        g_m7_rows++;  /* same matrix as the previous mode 7 row: g_m7c and g_m7_same already cover it */
+      PROF(g_cap_n_reuse++;)
+      g_line_count = line;
+      return;
+    }
+  }
+  g_cap_gen = p->regGen;
+  g_cap_oamadr = p->oamAdr;
+  PROF(g_cap_n_full++;)
   bool forced = p->forcedBlank;
   s->w2main = 0;
   for (int l = 0; l < kLayers; l++) {
@@ -869,6 +911,23 @@ static void CaptureImpl(const Ppu *p, int line) {
                     p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10,
                     p->clipMode, p->preventMathMode, p->screenWindowed[0], p->windowsel, p->screenWindowed[1]};
     g_note_pending = true;
+  }
+#endif
+#if SM_PSP_LOG
+  if (check) {
+    g_cap_n_chk++;
+    if (!cand.m7on)
+      memcpy(cand.m7m, s->m7m, sizeof(cand.m7m));  /* m7m is only written on mode 7 rows */
+    if (memcmp(&cand, s, sizeof(cand)) != 0) {
+      const uint8_t *ca = (const uint8_t *)&cand, *cs = (const uint8_t *)s;
+      unsigned off = 0;
+      while (off < sizeof(cand) && ca[off] == cs[off])
+        off++;
+      g_cap_n_bad++;
+      g_cap_reuse_ok = false;
+      PspLog("capreuse: f=%u line=%d byte %u of %u differs, reuse disabled", (unsigned)g_frame, line, off,
+             (unsigned)sizeof(cand));
+    }
   }
 #endif
   g_line_count = line;
@@ -4254,6 +4313,9 @@ static void PspRenderer_EndDraw(void) {
     g_peak_tiles = g_peak_list = g_peak_vtx = 0;
     PspLog("  rowcache: hit=%u miss=%u", (unsigned)g_rc_hit, (unsigned)g_rc_miss);
     g_rc_hit = g_rc_miss = 0;
+    PspLog("  capreuse: reused=%u full=%u chk=%u bad=%u on=%d", (unsigned)g_cap_n_reuse, (unsigned)g_cap_n_full,
+           (unsigned)g_cap_n_chk, (unsigned)g_cap_n_bad, (int)g_cap_reuse_ok);
+    g_cap_n_reuse = g_cap_n_full = g_cap_n_chk = g_cap_n_bad = 0;
   }
   if ((g_frame % 300) == 0) {
     if (g_hitch_n > (uint32_t)kHitchPerWindow)

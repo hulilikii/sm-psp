@@ -1353,9 +1353,24 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr) {
   }
 }
 
+/* True if a write to this PPU register can change what psp_renderer.c captures per line. BG scroll, VRAM and CGRAM
+ * ports are excluded (the capture re-reads the scroll and CGRAM entry 0 on every line); 0x0d/0x0e also set the
+ * mode 7 scroll, which mode 7 rows snapshot. */
+static inline bool PpuWriteChangesCapture(const Ppu *ppu, uint8_t adr) {
+  if (adr < 0x0d)
+    return true;
+  if (adr <= 0x0e)
+    return ppu->mode == 7;
+  if (adr <= 0x19)
+    return false;
+  return adr != 0x21 && adr != 0x22;
+}
+
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
 //  if (adr != 24 && adr != 25)
 //    printf("ppu_write(%d, %d)\n", adr, val);
+  if (PpuWriteChangesCapture(ppu, adr))
+    ppu->regGen++;
   switch(adr) {
     case 0x00: {
       // TODO: oam address reset when written on first line of vblank, (and when forced blank is disabled?)
