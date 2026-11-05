@@ -66,6 +66,8 @@ enum {
   kVramSubZ = kVramSub + kSubBytes,           /* its depth buffer: 256x256 16 bit */
   kSubZBytes = 256 * 256 * 2,
   kVramNeeded = kVramSubZ + kSubZBytes,
+  kVramBuf2 = kVramNeeded,                    /* third 5650 frame buffer (triple buffering) */
+  kBufBytes = 512 * 272 * 2,
 };
 
 // Reasons a frame is handed back to the software renderer. 
@@ -218,6 +220,15 @@ static uint32_t g_clut7[256] __attribute__((aligned(64)));
 static uint16_t g_clut7_stamp;
 static uint8_t *g_vram_u;     /* uncached VRAM base */
 static uint32_t g_draw_off;   /* VRAM offset of the buffer the GE draws into (toggles on every swap) */
+static const uint32_t kBufOff[3] = {0, kBufBytes, kVramBuf2};
+static bool g_triple;         /* three frame buffers in rotation */
+static int g_draw_i, g_prev_i = 1;  /* buffer being drawn / the one queued by the previous swap (on screen by now) */
+
+/* Triple buffering replaces sceGuSwapBuffers, so every list names its draw buffer itself. */
+static void SelectDrawBuffer(void) {
+  if (g_triple)
+    sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+}
 /* Mode 7 (GE path): matrix and flags are snapshotted per row (LineSnap). Frames with one constant matrix, b = c = 0,
  * a, d > 0, large field only (no flips/charfill/mosaic) are drawn as tile quads (M7Prepare). Everything else
  * (rotation, HDMA matrix, flips, charfill, mosaic, small field) is sampled on the CPU into an 8-bit image (gate 4r). */
@@ -2302,12 +2313,23 @@ static void Present(void) {
   g_gewait_us = Now() - t;
   if (g_verify_now) {
     g_verify_now = false;
-    
+    PROF(g_hit_verified = true;)    
     GeVerify();
   }
   Pace();
-  sceGuSwapBuffers();
-  g_draw_off ^= 0x44000;
+  if (g_triple) {
+    /* The queued buffer goes on screen at the next vblank. Pace() waited for a vblank since the previous swap only
+     * if the game ran ahead, so draw the next frame into the one buffer that is neither queued nor on screen. */
+    sceDisplaySetFrameBuf((void *)((uintptr_t)sceGeEdramGetAddr() + g_draw_off), 512, PSP_DISPLAY_PIXEL_FORMAT_565,
+                          PSP_DISPLAY_SETBUF_NEXTFRAME);
+    int next = 3 - g_draw_i - g_prev_i;
+    g_prev_i = g_draw_i;
+    g_draw_i = next;
+    g_draw_off = kBufOff[next];
+  } else {
+    sceGuSwapBuffers();
+    g_draw_off ^= 0x44000;
+  }
   g_vcount_last = sceDisplayGetVcount();
 }
 
@@ -3177,6 +3199,7 @@ static bool DrawGe(void) {
   g_prep_us = g_t_list_start - g_t_draw_start;
   VTX_RESET();  /* the previous frame was synced in Present: the GE no longer reads the pool */
   sceGuStart(GU_DIRECT, g_gu_list);
+  SelectDrawBuffer();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_BLEND);
   sceGuDisable(GU_ALPHA_TEST);
@@ -3824,6 +3847,14 @@ static bool PspRenderer_Initialize(void) {
   sceGuDisplay(GU_TRUE);
   g_vcount_last = sceDisplayGetVcount();
 
+  g_triple = SM_PSP_TRIPLE && (unsigned)sceGeEdramGetSize() >= (unsigned)(kVramBuf2 + kBufBytes);
+  if (g_triple) {  /* the buffers the swap rotates through: software frames do not cover the borders */
+    memset(g_vram_u + kBufOff[1], 0, kBufBytes);
+    memset(g_vram_u + kBufOff[2], 0, kBufBytes);
+  }
+  PspLog("triple buffer: %d (needs %u of %u)", (int)g_triple, (unsigned)(kVramBuf2 + kBufBytes),
+         (unsigned)sceGeEdramGetSize());
+
   if (g_ge_ok) {
     memset(g_hash2, 0xff, sizeof(g_hash2));
     memset(g_hash4, 0xff, sizeof(g_hash4));
@@ -3945,6 +3976,7 @@ static void PspRenderer_EndDraw(void) {
     g_t_list_start = Now();
     g_prep_us = g_t_list_start - g_t_draw_start;
     sceGuStart(GU_DIRECT, g_gu_list);
+    SelectDrawBuffer();
     sceGuDisable(GU_ALPHA_TEST);
     sceGuDisable(GU_DEPTH_TEST);
     sceGuDisable(GU_BLEND);
