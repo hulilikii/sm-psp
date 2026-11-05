@@ -1,0 +1,4349 @@
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+
+#include <pspdisplay.h>
+#include <pspge.h>
+#include <pspgu.h>
+#include <pspkernel.h>
+#include <psputils.h>
+
+#include "src/types.h"
+#include "src/util.h"
+#include "src/snes/ppu.h"
+#include "src/psp/psp_renderer.h"
+#include "src/psp/psp_log.h"
+#include "src/psp/psp_audio_me.h"
+
+#if SM_PSP_LOG
+#define PROF(...) __VA_ARGS__
+#else
+#define PROF(...)
+#endif
+
+#ifndef SM_PSP_SW_PATH
+#define SM_PSP_SW_PATH 1
+#endif
+
+#if !SM_PSP_LOG && SM_PSP_SW_PATH < 0
+#error "SM_PSP_SW_PATH=-1 calibrates with the log clock (Now() is 0 without it): use PSP_LOG=1 or PSP_SW_PATH=0/1"
+#endif
+
+#ifndef SM_PSP_GE_STRIPS
+#define SM_PSP_GE_STRIPS 0
+#endif
+
+#define PSP_VBLANK_GATE 1  /* wait for vblank only when running ahead of the panel */
+
+enum {
+  kPspWidth = 480,
+  kPspHeight = 272,
+  kGameWidth = 256,
+  kGameHeight = 240,
+  kTexWidth = 512,
+  kTexHeight = 256,
+  kMaxLines = 240,
+  kLayers = 3,
+  kListWords = 128 * 1024,   /* 512 KB */
+  kListBytes = kListWords * 4,
+  kMaxTilesPerFrame = 12000, /* gate 5d: ceiling only; ListBytesNeeded() decides whether the frame fits the list */
+  kMaxSpriteQuads = 2000,    /* 2000 * 2 * 16 B = 64 KB */
+  kMaxObjBands = 4,          /* OBJ window: row bands of one window state per frame */
+  kLeft = (kPspWidth - kGameWidth) / 2,
+  kTop = (kPspHeight - kGameHeight) / 2,
+
+// VRAM: [0,0x44000) draw, [0x44000,0x88000) disp, [0x88000,0xCC000) depth,
+// [0xCC000,0x10C000) software-frame texture (565 512x256, or 8888 256x256), 512x512 T4 2bpp atlas, 256x512 T4 4bpp atlas.
+  kVramTexture = 512 * 272 * 6,
+  kVramAtlas2 = kVramTexture + kTexWidth * kTexHeight * 2,
+  kAtlas2Bytes = 512 * 512 / 2,
+  kVramAtlas4 = kVramAtlas2 + kAtlas2Bytes,
+  kAtlas4Bytes = 256 * 512 / 2,
+  kVramAtlas7 = kVramAtlas4 + kAtlas4Bytes,  /* mode 7: 256 tiles of 8x8, 8 bit, 16x16 tiles = 128x128 */
+  kAtlas7Bytes = 128 * 128,
+  kVramSub = kVramAtlas7 + kAtlas7Bytes,      /* subscreen composite target: 256x256 8888 */
+  kSubBytes = 256 * 256 * 4,
+  kVramSubZ = kVramSub + kSubBytes,           /* its depth buffer: 256x256 16 bit */
+  kSubZBytes = 256 * 256 * 2,
+  kVramNeeded = kVramSubZ + kSubZBytes,
+  kVramBuf2 = kVramNeeded,                    /* third 5650 frame buffer (triple buffering) */
+  kBufBytes = 512 * 272 * 2,
+};
+
+// Reasons a frame is handed back to the software renderer. 
+enum {
+  kReasonMode = 1, kReasonBigTile = 2, kReasonMosaic = 4, kReasonWindow = 8,
+  kReasonMathClip = 16,   /* color window clip mode, or prevent mode 1/2 (window dependent) */
+  kReasonMathTint = 32,   /* fixed colour or half colour together with subscreen layers */
+  kReasonBg3Prio = 64,    /* unused since Gate 4a (BG3 high is level 15 as in ppu.c) */
+  kReasonBudget = 128,
+  kReasonSubObj = 256,    /* sprites enabled on the subscreen */
+  kReasonSubBg = 512,     /* BG tiles visible on the subscreen where math applies */
+  kReasonObjCfg = 1024,   /* OBJ interlace / config changes mid-frame / non-contiguous OBJ rows */
+  kReasonObjLimit = 2048, /* a line exceeds 32 sprites or 34 tile slivers (hardware drops some) */
+  kReasonSubWin = 4096,   /* contributing subscreen layer is windowed (TSW) */
+  kReasonSubMulti = 8192, /* >1 contributing subscreen layer, or math config varies per line */
+  kReasonMathBright = 16384, /* colour math in use while brightness < 15 (software clamps before brightness) */
+  kReasonM7 = 32768,      /* mode 7 setup the GE path cannot draw (rotation, flips, charfill, varying matrix, ...) */
+  kReasonCount = 16,
+};
+
+typedef struct BgSnap {
+  uint16_t hscroll, vscroll, mapadr, tileadr;
+  uint8_t flags;  /* 1 wider, 2 higher, 4 drawn on main, 8 enabled on subscreen */
+  uint8_t wm, wl, wr;  /* main-screen window 1: wm 0 none, 1 visible only inside [wl,wr], 2 hidden inside [wl,wr] */
+  uint8_t sm, sl, sr;  /* the same for the subscreen (TSW) */
+} BgSnap;
+
+typedef struct LineSnap {
+  BgSnap bg[kLayers];
+  uint16_t subfix;    /* gate 4t-c: fixed colour (5-5-5) added with a subscreen BG layer on this row, 0 = none */
+  uint8_t subhalf;    /* gate 4t-d: this submath row uses half colour (BG3/OBJ subscreen, alpha-coded target) */
+  uint8_t w2main;     /* gate 4u: a drawn main BG layer of this row is masked by window 2 */
+  uint16_t cg0;       /* CGRAM entry 0 (backdrop); colour is baked per run in DrawGe */
+  uint8_t forced;     /* forced blank: black */
+  uint16_t reasons;
+  uint8_t brightness, bg3prio, mathmask, submath;  /* submath: subscreen add may matter */
+  uint8_t objon;                                   /* OBJ enabled on the main screen */
+  uint8_t subneg, subwin;                          /* subtract mode; subscreen layers (bit l) windowed */
+  uint8_t prevnoop;                                /* prevent-math mode set, but colour math has nothing to do (gate 4t-a) */
+  uint8_t cwm, cwl, cwr;                           /* gate 4t-b: colour-window limit of the tint (as BgSnap.wm: 0 none, 1 math only inside [cwl,cwr], 2 only outside) */
+  uint8_t tint, tinthalf;                          /* fixed-colour math on this row; result halved */
+  uint16_t tintfix;                                /* fixed colour, 5-5-5 (R | G << 5 | B << 10) */
+  uint8_t subobj;                                  /* OBJ on the subscreen and added by colour math */
+  uint8_t owm, owl, owr;                           /* OBJ window on the main screen (as BgSnap.wm) */
+  uint8_t mosmask, mossize, mosstart;              /* mosaic: BG1-3 mask (mode 1, size > 1), size, start line */
+  uint8_t m7on, m7fl;                              /* mode 7 row with BG1 on; flags 1 large, 2 charfill, 4 xflip, 8 yflip, 16 extbg, 32 mosaic */
+  int16_t m7m[8];                                  /* its matrix: a, b, c, d, centre x, y, scroll h, v */
+} LineSnap;
+
+typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
+typedef struct ColorVert { uint32_t color; int16_t x, y, z; } ColorVert;
+typedef struct Run { uint16_t r0, r1, first; } Run;
+typedef struct Geom { TileVert *v; int n; } Geom;
+
+static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
+
+/* Gate 5f: the big vertex buffers (tiles, sprites, mode 7) are built in this cached pool and written back once, instead
+ * of inside the display list (sceGuStart maps the list uncached: every vertex there is four uncached stores).
+ * Commands and the small colour buffers stay in the list. SM_PSP_VTX_POOL=0 restores the old behaviour. */
+#ifndef SM_PSP_VTX_POOL
+#define SM_PSP_VTX_POOL 0
+#endif
+enum { kVtxPoolBytes = 768 * 1024, kVtxPadBytes = 8 * 1024 };  /* pad: <= 99 allocations rounded up to 64 B */
+#if SM_PSP_VTX_POOL
+static uint8_t g_vtx_pool[kVtxPoolBytes] __attribute__((aligned(64)));
+static uint32_t g_vtx_top;
+static void *VtxAlloc(uint32_t bytes) {
+  bytes = (bytes + 63u) & ~63u;
+  if (g_vtx_top + bytes > (uint32_t)kVtxPoolBytes)
+    Die("vertex pool overflow");  /* cannot happen: DrawGe checks the frame against the pool before the list is opened */
+  void *p = g_vtx_pool + g_vtx_top;
+  g_vtx_top += bytes;
+  return p;
+}
+#define VTX_RESET() (g_vtx_top = 0)
+#define VTX_FLUSH() do { if (g_vtx_top) sceKernelDcacheWritebackRange(g_vtx_pool, g_vtx_top); } while (0)
+#else
+#define VtxAlloc(bytes) sceGuGetMemory(bytes)
+#define VTX_RESET() ((void)0)
+#define VTX_FLUSH() ((void)0)
+#endif
+static uint8_t *g_atlas2, *g_atlas4;        /* uncached VRAM tile atlases */
+static uint16_t *g_texture;                 /* uncached VRAM: 565 texture, or the 8888 copy target (256x256x4 = same bytes) */
+/* Software-PPU frame, 256x256 8888 (rows 240-255 unused). */
+static uint8_t g_framebuffer[kGameWidth * 256 * 4] __attribute__((aligned(64)));
+
+static LineSnap g_lines[kMaxLines];
+static int g_line_count;
+static uint16_t g_frame_reasons;
+#if SM_PSP_LOG
+/* Every distinct register signature that sends a frame to software is logged once (up to 48). */
+typedef struct Sig { uint32_t a, b, c; } Sig;
+static Sig g_sigs[48];
+static int g_nsigs;
+static bool NewSig(const Ppu *p, uint16_t reasons) {
+  uint32_t mm = 0;
+  for (int i = 0; i < 6; i++)
+    mm |= (uint32_t)(p->mathEnabled[i] ? 1 : 0) << i;
+  Sig s;
+  s.a = reasons | (uint32_t)p->mode << 16 | (uint32_t)p->screenEnabled[0] << 20;
+  s.b = (uint32_t)p->screenEnabled[1] | (uint32_t)(p->addSubscreen ? 1 : 0) << 8 | (uint32_t)(p->halfColor ? 1 : 0) << 9 |
+        (uint32_t)(p->subtractColor ? 1 : 0) << 10 | (uint32_t)p->preventMathMode << 11 | (uint32_t)p->clipMode << 13 |
+        (uint32_t)p->screenWindowed[0] << 15 | (uint32_t)p->screenWindowed[1] << 23;
+  s.c = p->windowsel | mm << 24;
+  for (int i = 0; i < g_nsigs; i++)
+    if (g_sigs[i].a == s.a && g_sigs[i].b == s.b && g_sigs[i].c == s.c)
+      return false;
+  if (g_nsigs == 48)
+    return false;
+  g_sigs[g_nsigs++] = s;
+  return true;
+}
+#endif
+static bool g_frame_dead;  /* a fallback reason is already known: stop capturing this frame */
+static bool g_frame_subnoop;
+static uint32_t g_frames_subnoop;
+static Run g_subruns[kMaxLines];
+#if SM_PSP_LOG
+typedef struct Note { int line; unsigned bits, mode, tm, ts, mathmask, add, sub, half, fixed, clip, prevent, tmw, wsel, tsw; } Note;
+static Note g_note;
+static bool g_note_pending;
+#endif
+static uint32_t g_capture_gaps;
+/* Per-line capture reuse: a line whose PPU registers (Ppu.regGen) and OAM address equal the previous line's copies that
+ * line's snapshot and re-reads only BG scroll and CGRAM entry 0. Log builds recompute every 16th frame and compare. */
+static bool g_cap_reuse_ok = SM_PSP_CAP_REUSE;
+static uint32_t g_cap_gen, g_cap_oamadr;
+#if SM_PSP_LOG
+static uint32_t g_cap_n_reuse, g_cap_n_full, g_cap_n_chk, g_cap_n_bad;
+#endif
+static uint16_t g_vram[0x8000] __attribute__((aligned(16)));
+static uint16_t g_cgram[256] __attribute__((aligned(16)));
+
+static uint16_t g_oam[256];
+static uint8_t g_hoam[32];
+static uint8_t g_obj_size, g_obj_start;
+static uint16_t g_obj_adr1, g_obj_adr2;
+static bool g_obj_rot;
+typedef struct Sprite { int16_t x; uint8_t y, size; uint16_t attr; } Sprite;
+typedef struct ObjSeg { uint8_t pal; uint16_t first, n; } ObjSeg;  /* first/n in vertices */
+typedef struct ObjBand { uint16_t r0, r1; uint8_t wm, wl, wr; } ObjBand;  /* rows of one OBJ window state */
+static Sprite g_spr[128];                 /* in precedence order (index k wins over k+1) */
+static int g_nspr, g_spr_quads;
+static ObjSeg g_objseg[128 * kMaxObjBands * 2];  /* runs of consecutive sprites with one palette (per band and span) */
+static int g_nobjseg;
+static ObjBand g_objband[kMaxObjBands];
+static int g_nobjband;
+static TileVert *g_objbase;
+static uint32_t g_clutobj[16][8][16] __attribute__((aligned(64)));
+static uint16_t g_clutobj_stamp[16];
+
+static uint32_t g_hash2[4096], g_hash4[2048], g_hash7[256];
+static uint16_t g_seen7[256];
+static uint8_t g_empty7[256];
+static uint8_t *g_atlas7;
+static uint32_t g_clut7[256] __attribute__((aligned(64)));
+static uint16_t g_clut7_stamp;
+static uint8_t *g_vram_u;     /* uncached VRAM base */
+static uint32_t g_draw_off;   /* VRAM offset of the buffer the GE draws into (toggles on every swap) */
+static const uint32_t kBufOff[3] = {0, kBufBytes, kVramBuf2};
+static bool g_triple;         /* three frame buffers in rotation */
+static int g_draw_i, g_prev_i = 1;  /* buffer being drawn / the one queued by the previous swap (on screen by now) */
+
+/* Triple buffering replaces sceGuSwapBuffers, so every list names its draw buffer itself. */
+static void SelectDrawBuffer(void) {
+  if (g_triple)
+    sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+}
+/* Mode 7 (GE path): matrix and flags are snapshotted per row (LineSnap). Frames with one constant matrix, b = c = 0,
+ * a, d > 0, large field only (no flips/charfill/mosaic) are drawn as tile quads (M7Prepare). Everything else
+ * (rotation, HDMA matrix, flips, charfill, mosaic, small field) is sampled on the CPU into an 8-bit image (gate 4r). */
+typedef struct M7Cfg { int16_t m[8]; uint8_t fl; } M7Cfg;
+static M7Cfg g_m7c;           /* first mode 7 row of the frame */
+static int g_m7_rows;         /* rows of this frame in mode 7 with BG1 on */
+static bool g_m7_same;        /* all of them share g_m7c */
+static bool g_m7q_ok = true;  /* cleared if the first verified tile-quad mode 7 frames differ from software */
+static bool g_m7i_ok = true;  /* the same for the image path */
+static int g_frame_mode = -1;        /* BG mode of this frame (first line that is not forced blank) */
+static bool g_m7_ok = true;          /* cleared if the texture-coordinate self test fails */
+#ifndef SM_PSP_GE_WIN
+#define SM_PSP_GE_WIN 1  /* 1: window-1 masks on BG1-3 / OBJ are drawn by the GE, 0: those frames stay in software */
+#endif
+static bool g_win_ok = SM_PSP_GE_WIN;  /* cleared if the first verified window frames differ from software */
+static uint32_t g_win_vn, g_win_vbad, g_win_rows;
+enum { kWinVerify = 8 };
+/* Gate 4t-a: prevent-math modes 1/2 on rows where colour math has nothing to add are drawn by the GE. */
+static bool g_prev_ok = true;  /* cleared if the first verified such frames differ from software */
+static int g_prev_rows;        /* rows of this frame that rely on the no-op rule */
+static uint32_t g_prev_vn, g_prev_vbad, g_frames_prev;
+enum { kPrevVerify = 8 };
+/* Gate 4t-b: a fixed-colour tint limited by one colour window (W1 or W2, prevent-math mode 1/2) is drawn by the GE as
+ * one rectangle per row span. */
+static bool g_cw_ok = true;  /* cleared if the first verified such frames differ from software */
+static int g_cw_rows;        /* rows of this frame whose tint is limited by the colour window */
+static uint32_t g_cw_vn, g_cw_vbad, g_frames_cw;
+enum { kCwVerify = 8 };
+/* Gate 4t-c: subscreen BG layer added together with a non-zero fixed colour (X-ray visor), drawn via the multisub target. */
+static bool g_sf_ok = true;  /* cleared if the first verified such frames differ from software */
+static bool g_sf_frame;      /* this frame is drawn by that path */
+static uint32_t g_sf_vn, g_sf_vbad, g_frames_sf;
+/* Gate 5b: subfix frames whose fixed colour is 0 (subscreen layer masked by window 2) have their own audit budget and
+ * switch, so the first frames with a real fixed colour cannot use up their verification. */
+static bool g_sf0_ok = true, g_sf_zero;
+static uint32_t g_sf0_vn, g_sf0_vbad;
+static int g_sf_r0, g_sf_r1, g_sf_masks;  /* log only */
+static uint16_t g_sf_col;
+enum { kSfVerify = 8 };
+/* Gate 5e: subfix frames with OBJ on the subscreen (sprites composited in the multisub target over the fixed colour).
+ * Own audit and switch: a failure only sends those frames back to software. */
+static bool g_sfo_ok = true, g_sfo_frame;
+static uint32_t g_sfo_vn, g_sfo_vbad, g_frames_sfo;
+/* Gate 4t-d: X-ray visor with half colour: window 2 on BG1/BG2 per row, colour window (prevent mode 2), subscreen BG3
+ * added half-and-half where it has a pixel, fixed colour added where it has none (alpha-coded target). */
+static bool g_sh_ok = true;  /* cleared if the first verified such frames differ from software */
+static bool g_sh_frame;      /* this frame is drawn by that path */
+static uint32_t g_sh_vn, g_sh_vbad, g_frames_sh;
+enum { kShVerify = 8 };
+/* Gate 5c: the same in subtract mode (water-room visor): max(main - sub, 0) / 2 where BG3 has a pixel, main - fixed
+ * elsewhere. Own audit and switch, so a failure keeps the add-mode visor path. */
+static bool g_shn_ok = true, g_shn_frame;
+static uint32_t g_shn_vn, g_shn_vbad, g_frames_shn;
+/* Gate 4u: half colour with OBJ on the subscreen (own audit, so a failure keeps the visor path), and window 2 on
+ * main BG layers outside the half-colour frames (per-row spans of gate 4t-d). */
+static bool g_shobj_ok = true, g_shobj_frame;
+static uint32_t g_sho_vn, g_sho_vbad, g_frames_sho;
+static bool g_w2_ok = true, g_w2_frame;
+static uint32_t g_w2_vn, g_w2_vbad, g_frames_w2;
+enum { kW2Verify = 8 };
+/* Gate 4p: lines with more than 32 sprites or 34 slivers are drawn on the GE with the hardware drop rule (ppu.c). */
+static bool g_ovf_ok = true;  /* cleared if the first verified overflow frames differ from software */
+static int g_ovf_rows;        /* rows of the sprite range this frame that exceed the limits */
+static uint32_t g_ovf_vn, g_ovf_vbad, g_frames_ovf, g_ovf_watch, g_ovf_arms;
+enum { kOvfVerify = 8, kOvfWatch = 12, kOvfArm = 3, kOvfArms = 3 };
+static int16_t g_row_lastk[256];  /* per row: last kept sprite (index in g_spr), 32767 = row not limited */
+static uint8_t g_row_lastc[256];  /* per row: slivers kept of that sprite, in screen column order */
+static bool g_obj_dry;           /* EmitQuad8 only counts (ObjCountQuads) */
+static int g_obj_dry_n;
+/* Gate 4q: mosaic on BG1-3 (mode 1, main screen). The layer is sampled on the CPU at the block origins into a
+ * 128x128 8888 image per tile priority; the GE stretches it (nearest) over each run. */
+enum { kMosDim = 128, kMosVerify = 8 };
+typedef struct MosLayer { bool on, any[2]; int size, start; TileVert *v; } MosLayer;
+static MosLayer g_mos[kLayers];
+static uint32_t g_mosd[kLayers][2][kMosDim * kMosDim] __attribute__((aligned(64)));  /* 384 KB */
+static bool g_mos_ok = true;  /* cleared if the first verified mosaic frames differ from software */
+static bool g_mos_frame;      /* this frame has a mosaic layer on the GE */
+static int g_mos_size;
+static uint32_t g_mos_vn, g_mos_vbad, g_frames_mos;
+static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at the sample point (x, y) */
+static bool g_verify_now, g_audit_now;
+static bool g_multisub_ok = true;   /* cleared if the first verified multi-layer subscreen frames differ from software */
+static bool g_frame_multisub, g_want_ms_verify;
+static uint32_t g_ms_vn, g_ms_vbad;
+static uint32_t g_bright_rows, g_br_vn;  /* rows drawn through the brightness multiply this frame; verified frames that had some */
+enum { kBrightVerify = 8 };
+enum { kAuditFrames = 600 };  /* log builds: every this many frames the software PPU also draws, and the GE image is compared with it */
+static uint32_t g_m7_vn, g_m7_vbad, g_m7_vnear;
+static uint32_t g_m7_bigv, g_m7_bigbad;  /* verified frames above kM7BaseQuads, and their bad pixels */
+static bool g_m7big_ok = true;           /* cleared if those frames differ from software */
+enum { kM7Verify = 20, kM7MaxQuads = 7680, kM7BaseQuads = 4096, kM7BigVerify = 6 };
+typedef struct M7Quad { int16_t x0, x1, y0, y1; float u0, u1, v0, v1; } M7Quad;
+static M7Quad g_m7q[kM7MaxQuads];
+static int g_m7_nq;
+static uint32_t g_m7_yc;  /* Y0 of the frame (for the verification log) */
+static TileVert *g_m7v;
+/* Gate 4r image path: 8-bit plane colour index per screen pixel (row = screen row), 0 = transparent. */
+static uint8_t g_m7img[256 * 256] __attribute__((aligned(64)));
+static bool g_m7_img;              /* this frame's mode 7 comes from g_m7img */
+static int g_m7_nrng;              /* row ranges drawn from it */
+static uint16_t g_m7rng[kMaxLines][2];
+static uint32_t g_m7i_vn, g_m7i_vbad, g_frames_m7i;
+enum { kM7IVerify = 8 };
+static uint16_t g_seen2[4096], g_seen4[2048];
+static uint8_t g_empty2[4096], g_empty4[2048];
+static uint16_t g_mask2[4096], g_mask4[2048];  /* bit i set: tile uses pixel value i */
+static uint16_t g_stamp;
+static uint32_t g_clut2[16][8][8] __attribute__((aligned(64)));
+static uint32_t g_clut4[16][8][16] __attribute__((aligned(64)));
+static uint16_t g_clut2_stamp[16], g_clut4_stamp[16];
+static uint32_t g_clut2h[8][8] __attribute__((aligned(64)));  /* gate 4t-d: BG3 on the half-colour target, opaque = alpha 0x80 */
+static uint16_t g_clut2h_stamp;
+
+static Run g_runs[kLayers][kMaxLines];
+static int g_nruns[kLayers];
+static int g_counts[kLayers][kMaxLines][2][8];
+static Geom g_geom[kLayers][kMaxLines][2][8];
+
+// One non-empty tile of a layer run: destination before clipping, atlas tile, palette and flags. Built once per run and shared
+typedef struct TileEnt { int16_t x, y; uint16_t pt; uint8_t pal, fl; } TileEnt;  /* fl: 1 prio, 2 hflip, 4 vflip */
+typedef struct TileList { uint16_t first, n; } TileList;
+enum { kEntPool = 16384 };  /* gate 5d: a tile entry is 8 B; stays above kMaxTilesPerFrame */
+static TileEnt g_ents[kEntPool];
+static int g_ent_top;
+/* Gate 4t-d: visible x spans of every row of a layer (window 2 with per-row HDMA edges), and per tile entry the
+ * class (hidden / fully visible / split per row) found while counting. Both only used on half-colour visor frames. */
+typedef struct RowWin { int16_t a[2], b[2]; uint8_t n; } RowWin;
+static RowWin g_rw[kLayers][kMaxLines];
+static uint8_t g_tkind[kEntPool];
+/* Tile-row cache (gate 4k): per frame, the non-empty tiles of one tilemap row (x set, y left 0), keyed by everything
+ * that selects them except vscroll. HDMA wave effects change vscroll every 2 rows, so short runs hit the same
+ * rows over and over. */
+typedef struct RowCache { uint16_t map, tile, hs, stamp, first, n; uint8_t l, wh, ty; } RowCache;
+enum { kRowPool = 4096, kRowSlots = 256, kRowMaxRun = 16 };
+static TileEnt g_rows[kRowPool];
+static int g_rows_top;
+static RowCache g_rc[kRowSlots];
+static TileList g_mlist[kLayers][kMaxLines];  /* per main run */
+
+// Subscreen blend: runs of the one contributing subscreen layer.
+typedef struct BRun { uint8_t l; uint16_t first, r0, r1; TileList lst; } BRun;
+static BRun g_bruns[kMaxLines + 1];
+static int g_nbruns;
+static int g_bcounts[kMaxLines + 1][2][8];
+static Geom g_bgeom[kMaxLines + 1][2][8];
+static int g_zbg[kLayers][2];  /* depth marker per BG layer/priority pass */
+static uint32_t g_frames_blend, g_frames_tint;
+/* Depth markers: z = SNES priority level * kZLevel (see DrawGe); sprites add 127-k; backdrop is below level 1. */
+enum { kZLevel = 256, kZBackdrop = 64, kClutBright = 15 };  /* kClutBright: all CLUTs/backdrop are baked at 15; brightness is a final multiply */
+/* Rows [r0,r1) whose main-screen pixels get the fixed colour added/subtracted (optionally halved), limited to the
+ * colour-window state cwm/cwl/cwr (gate 4t-b). v0/vn: its ColorVerts in the tint vertex buffer. */
+typedef struct TintRun { uint16_t r0, r1, fix, v0; uint8_t half, cwm, cwl, cwr, vn; } TintRun;
+static TintRun g_tint[kMaxLines];
+static int g_ntint;
+/* Consecutive tint rows with the same layer mask and add/subtract mode (HDMA can change both inside a frame).
+ * Each range gets its own overlay and its own restore pass, limited to its rows with the scissor. */
+typedef struct TintRange { uint16_t r0, r1, first, n; uint8_t mask, neg; } TintRange;
+enum { kMaxTintRanges = 6 };
+static TintRange g_trange[kMaxTintRanges];
+static int g_ntr;
+static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2, y2), 2 = (x, y, w, h) */
+/* Gate 4s: rows of one subscreen colour-math mask. The blend is drawn once; each band restores its own layers. */
+typedef struct BlendBand { uint16_t r0, r1; uint8_t mask; } BlendBand;
+enum { kMaxBlendBands = 6, kBandVerify = 8 };
+static BlendBand g_bband[kMaxBlendBands];
+static int g_nbband;
+static bool g_band_ok = true;  /* cleared if the first verified multi-band frames differ from software */
+static uint32_t g_bnd_vn, g_bnd_vbad;
+
+static bool g_ge_ok;
+static bool g_ge_active;
+static int g_ge_level;  /* 0 software, 1 GE, 2 GE without tint (tint frames go back to software) */
+#ifndef SM_PSP_GE_DEFAULT
+#define SM_PSP_GE_DEFAULT 1  /* 1: boot into GE + tint (when VRAM allows), 0: boot into software */
+#endif
+static unsigned g_vcount_last;
+static uint32_t g_frame;
+static int g_swpath = SM_PSP_SW_PATH;  /* -1 calibrating, 0 CPU 565 convert, 1 GE copy to VRAM */
+enum { kSwPaths = 2, kSwCalFrames = 30, kSwCalSkip = 3 };
+static uint32_t g_cal_frames, g_cal_sum[kSwPaths], g_cal_n[kSwPaths];
+static uint32_t g_frames_ge, g_frames_sw, g_reason_counts[kReasonCount];
+
+//profiling
+
+enum { kSkipAfter = 8 };  /* consecutive GE frames before the software PPU is skipped */
+static uint32_t g_streak;
+static uint32_t g_t_draw_start, g_t_list_start;
+static uint32_t g_prep_us, g_build_us, g_gewait_us, g_vbwait_us;
+
+#if SM_PSP_LOG
+enum { kLateUs = 17000, kMissUs = 33800, kHitchUs = 24000, kHitchPerWindow = 8 };
+
+typedef struct Stat { uint32_t n, sum, max; } Stat;
+typedef struct Prof {
+  Stat game, ppu, prep, build, gewait, vbwait, period;
+  Stat cap, cpy, cls, bg, obj, emit;    /* capture hook (and its VRAM copy); prep split: classify, BG, OBJ; list vertices */
+  Stat tseen, tdec, draws, clut, verts, m7i; /* per-frame counters; m7i: CPU time of the mode 7 image */
+  uint32_t late, miss, hold;
+} Prof;
+static Prof g_prof[3];  /* 0: GE frame, 1: software frame while GE is on, 2: software mode */
+static const char *const kProfName[3] = {"ge", "swfb", "off"};
+static uint32_t g_ppu_us, g_ppu_t0, g_cap_us, g_cpy_us, g_m7i_us;  /* software PPU draw / capture / VRAM-copy / mode 7 image time this frame */
+static uint32_t g_pc_class, g_pc_bg, g_pc_obj, g_pc_emit; /* prep phases this frame; emit: list start -> vertices written */
+static uint32_t g_rc_hit, g_rc_miss;                      /* tile-row cache lookups since the last log line */
+static uint32_t g_c_tseen, g_c_tdec, g_c_draws, g_c_clut, g_c_verts;
+static uint32_t g_t_prev_end, g_holds;
+static uint32_t g_hitch_n;
+static bool g_hit_verified;  /* this frame was compared with the software image (audit frame) */
+
+static inline uint32_t Now(void) {
+  return sceKernelGetSystemTimeLow();
+}
+
+static void StatAdd(Stat *s, uint32_t v) {
+  s->n++;
+  s->sum += v;
+  if (v > s->max)
+    s->max = v;
+}
+
+static void ProfPpuBegin(void) { g_ppu_t0 = Now(); }
+static void ProfPpuEnd(void) { g_ppu_us += Now() - g_ppu_t0; }
+#else
+static inline uint32_t Now(void) {
+  return 0;
+}
+#endif
+
+//color
+
+static uint32_t BakeColor(uint16_t c, int brightness, bool transparent) {
+  int r5 = c & 31, g5 = (c >> 5) & 31, b5 = (c >> 10) & 31;
+  uint32_t r = (uint32_t)(((r5 << 3) | (r5 >> 2)) * brightness / 15);
+  uint32_t g = (uint32_t)(((g5 << 3) | (g5 >> 2)) * brightness / 15);
+  uint32_t b = (uint32_t)(((b5 << 3) | (b5 >> 2)) * brightness / 15);
+  return (transparent ? 0u : 0xff000000u) | b << 16 | g << 8 | r;
+}
+
+ //software patch
+ 
+static inline uint16_t Rgb565(const uint8_t *p) {
+  return (uint16_t)((p[0] >> 3) | (p[1] >> 2) << 5 | (p[2] >> 3) << 11);  /* PSP 5650: R in the low bits */
+}
+
+static void PspRenderer_Convert(void) {
+  for (int y = 0; y < kGameHeight; y++) {
+    const uint8_t *src = g_framebuffer + y * kGameWidth * 4;
+    uint16_t *dst = g_texture + y * kTexWidth;
+    for (int x = 0; x < kGameWidth; x++)
+      dst[x] = Rgb565(src + x * 4);
+  }
+}
+
+//capture
+
+/* Gate 4t-c: subscreen BG layer added together with a non-zero fixed colour, no half colour. Such rows are drawn by
+ * the GE through the multisub target; window masks of the subscreen layers are painted over that target. */
+/* Gate 4v: a BG layer shown on the subscreen is masked by window 2 (TSW). */
+static bool SubW2Layer(const Ppu *p) {
+  for (int l = 0; l < kLayers; l++)
+    if ((p->screenEnabled[1] & (1 << l)) && (p->screenWindowed[1] & (1 << l)) && ((p->windowsel >> (l * 4)) & 8))
+      return true;
+  return false;
+}
+
+static bool SubFixMath(const Ppu *p) {
+  return g_sf_ok && p->mode == 1 && p->addSubscreen && !p->halfColor && p->preventMathMode != 3 &&
+         ((p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0 || (g_sf0_ok && SubW2Layer(p))) &&
+         (p->screenEnabled[1] & 7) && (!(p->screenEnabled[1] & 0x10) || g_sfo_ok);  /* gate 5e: OBJ on the subscreen */
+}
+
+/* Gate 4t-d/5c: subscreen BG3 alone, added (or subtracted) with half colour. Every non-empty BG3 tile matters (a black
+ * pixel still halves the main pixel), the fixed colour goes where BG3 has no pixel. Fixed colour may be 0. */
+static bool SubHalfMath(const Ppu *p) {
+  uint8_t ts = p->screenEnabled[1];  /* gate 4u: BG3 and/or OBJ on the subscreen, no BG1/BG2 */
+  return g_sh_ok && p->mode == 1 && p->addSubscreen && p->halfColor && (!p->subtractColor || g_shn_ok) &&
+         p->preventMathMode != 3 && (ts & 0x0b) == 0 && (ts & 0x14) != 0 && ((ts & 0x10) ? g_shobj_ok : true);
+}
+
+/* Window 1 mask of layer l (0-2 BG, 4 OBJ) on the main screen, for the GE path. wm: 0 no effect, 1 the layer is
+ * visible only inside [wl,wr], 2 hidden inside [wl,wr]. As in ppu.c an empty window (left > right) masks
+ * nothing, and an inverted empty window masks everything. Returns false for setups the GE path does not draw
+ * (window 2, mode 7, or after the run-time check failed): the frame stays in software. */
+static bool LayerWin(const Ppu *p, int l, int sub, uint8_t *wm, uint8_t *wl, uint8_t *wr) {
+  *wm = *wl = *wr = 0;
+  if (!(p->screenWindowed[sub] & (1 << l)))
+    return true;
+  uint32_t n = (p->windowsel >> (l * 4)) & 0xf;  /* 1 inverse 1, 2 enable 1, 4 inverse 2, 8 enable 2 */
+  if (!(n & 0xa))
+    return true;
+  if (!g_win_ok || p->mode == 7 || (n & 0xa) == 0xa)  /* window 1 + 2 together (mask logic): not drawn */
+    return false;
+  bool w2 = (n & 8) != 0;
+  if (w2 && !(sub ? (SubFixMath(p) || SubHalfMath(p)) : (SubHalfMath(p) || (g_w2_ok && l < 3))))  /* gates 4t-c/d/u: window 2 on the subscreen of a subfix/half row; on main BG layers via per-row spans */
+    return false;
+  int left = w2 ? p->window2left : p->window1left, right = w2 ? p->window2right : p->window1right;
+  bool ena = left <= right;
+  if (w2 ? (n & 4) : (n & 1)) {
+    *wm = 1;
+    *wl = ena ? left : 1;
+    *wr = ena ? right : 0;
+  } else if (ena) {
+    *wm = 2;
+    *wl = left;
+    *wr = right;
+  }
+  return true;
+}
+
+/* Visible x spans [a,b) of a layer window state (see LayerWin): 0, 1 or 2 spans. */
+static int WinSpans(int wm, int wl, int wr, int a[2], int b[2]) {
+  int n = 0;
+  if (wm == 0) {
+    a[0] = 0;
+    b[0] = kGameWidth;
+    return 1;
+  }
+  if (wm == 1) {
+    if (wl > wr)
+      return 0;
+    a[0] = wl;
+    b[0] = wr + 1;
+    return 1;
+  }
+  if (wl > 0) {
+    a[n] = 0;
+    b[n++] = wl;
+  }
+  if (wr + 1 < kGameWidth) {
+    a[n] = wr + 1;
+    b[n++] = kGameWidth;
+  }
+  return n;
+}
+
+/* True when colour math cannot change a pixel: fixed colour 0, no half colour, and no subscreen layer to add
+ * (ppu.c no-math path). Prevent-math modes 1/2 only choose where math applies, so then they need no window. */
+static bool MathHasNoEffect(const Ppu *p) {
+bool fix = (p->fixedColorR | p->fixedColorG | p->fixedColorB) != 0;
+  if (p->addSubscreen)
+    return p->screenEnabled[1] == 0 && !fix;
+  return !fix && !p->halfColor;
+}
+
+/* Colour-window limit of the math region for prevent-math mode 1 (math inside the window) or 2 (outside), for the GE
+ * tint path. Same model as PpuWindows_Calc in ppu.c: a window counts only if enabled, inverse flips the region, an
+ * empty (left > right) enabled window is empty, or everything when inverted. The result is a BgSnap-style state
+ * (wm 0 no limit, 1 only inside [wl,wr], 2 only outside). Returns false for W1 + W2 together (ppu.c ORs them) or if
+ * the audit failed. */
+static bool ColorWinMath(const Ppu *p, uint8_t *wm, uint8_t *wl, uint8_t *wr) {
+  enum { kEmpty, kAll, kIn, kOut };
+  uint32_t n = (p->windowsel >> 20) & 0xf;  /* 1 inverse 1, 2 enable 1, 4 inverse 2, 8 enable 2 */
+  bool e1 = (n & 2) != 0, e2 = (n & 8) != 0;
+  int k = kEmpty, l = 0, r = 0;  /* k: the window region */
+  *wm = *wl = *wr = 0;
+  if (!g_cw_ok || (e1 && e2))
+    return false;
+  if (e1 || e2) {
+    bool inv = e1 ? (n & 1) != 0 : (n & 4) != 0;
+    l = e1 ? p->window1left : p->window2left;
+    r = e1 ? p->window1right : p->window2right;
+    k = l <= r ? (inv ? kOut : kIn) : (inv ? kAll : kEmpty);
+  }
+  if (p->preventMathMode == 2)  /* math outside the window */
+    k = k == kEmpty ? kAll : k == kAll ? kEmpty : k == kIn ? kOut : kIn;
+  if (k == kEmpty) {
+    *wm = 1;  /* only inside an empty span */
+    *wl = 1;
+    *wr = 0;
+  } else if (k != kAll) {
+    *wm = k == kIn ? 1 : 2;
+    *wl = (uint8_t)l;
+    *wr = (uint8_t)r;
+  }
+  return true;
+}
+
+static uint16_t LineReasons(const Ppu *p, uint8_t mathmask, bool *submath, bool *tint, uint16_t *tintfix,
+                           bool *tinthalf, uint8_t cw[3], uint16_t *subfix, bool *subhalf) {
+  *submath = false;
+  *subfix = 0;
+  *subhalf = false;
+  *tint = false;
+  *tintfix = 0;
+  *tinthalf = false;
+  cw[0] = cw[1] = cw[2] = 0;
+  if (p->forcedBlank)
+    return 0;
+  uint16_t r = 0;
+  int nl = p->mode == 7 ? 1 : kLayers;  /* mode 7 has BG1 only */
+  for (int l = 0; l < nl; l++) {
+    if (!((p->screenEnabled[0] | p->screenEnabled[1]) & (1 << l)))
+      continue;  /* shown on neither screen: tile size, mosaic and window cannot matter (X-ray HUD rows) */
+    if (p->bgLayer[l].bigTiles)
+      r |= kReasonBigTile;
+    if (p->mode != 1 && p->mode != 7 && p->bgLayer[l].mosaicEnabled && p->mosaicSize > 1)  /* mode 1: MosPrepare, mode 7: image */
+      r |= kReasonMosaic;
+    uint8_t wm, wl, wr;
+    if (!LayerWin(p, l, 0, &wm, &wl, &wr))
+      r |= kReasonWindow;
+  }
+  if (p->clipMode != 0)
+    r |= kReasonMathClip;
+  if (mathmask != 0 && p->preventMathMode != 3) {
+    if (p->mode == 7 && p->addSubscreen && p->screenEnabled[1] != 0)
+      r |= kReasonM7;  /* subscreen layers in mode 7 are not drawn */
+    uint16_t fix = (uint16_t)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10);
+    if (p->addSubscreen && p->screenEnabled[1] != 0) {
+      if (SubFixMath(p)) {
+        *submath = true;
+        *subfix = (uint16_t)(fix | 0x8000);  /* bit 15 marks a subfix row, also when the fixed colour is 0 (gate 4v) */
+      } else if (SubHalfMath(p)) {
+        *submath = true;
+        *subfix = fix;
+        *subhalf = true;
+      } else if (fix || p->halfColor) {
+        r |= kReasonMathTint;
+      } else {
+        /* fixed == 0 and no half: adding the subscreen only changes pixels where
+         * a subscreen layer is opaque (ppu.c: empty subscreen pixel = fixed color
+         * = 0, unhalved). Subscreen sprite bounds checked in DrawGe. */
+        if (p->screenEnabled[1] & 7)
+          *submath = true;
+      }
+    } else if (p->addSubscreen) {
+      /* Empty subscreen: every pixel gets the fixed colour added, never halved (ppu.c). */
+      if (fix) {
+        *tint = true;
+        *tintfix = fix;
+      }
+    } else if (fix || p->halfColor) {
+      /* No subscreen add: fixed colour added/subtracted, result halved when half colour is set. */
+      *tint = true;
+      *tintfix = fix;
+      *tinthalf = p->halfColor;
+     }
+    if (p->preventMathMode != 0 && !(g_prev_ok && MathHasNoEffect(p)) &&
+        !((*tint || *subhalf) && ColorWinMath(p, &cw[0], &cw[1], &cw[2])))
+      r |= kReasonMathClip;  /* prevent inside/outside the colour window: only a single-window fixed-colour tint is drawn (gate 4t-b) */
+   }
+  return r;
+}
+
+/* Mode 7 row (GE path): snapshot of matrix, flags and mosaic of every mode 7 row with BG1 on, so HUD + mode 7 frames
+ * and per-line (HDMA) matrix changes need no fallback. Returns the fallback reasons. */
+static uint16_t M7Line(const Ppu *p, LineSnap *s) {
+  uint8_t fl = (uint8_t)((p->m7largeField ? 1 : 0) | (p->m7charFill ? 2 : 0) | (p->m7xFlip ? 4 : 0) |
+                         (p->m7yFlip ? 8 : 0) | (p->m7extBg ? 16 : 0));
+  uint16_t r = 0;
+  if ((fl & 16) || !g_m7_ok || !g_m7i_ok)  /* extbg is not drawn by ppu.c either; self test or image audit failed */
+    r |= kReasonM7;
+  if (!(p->screenEnabled[0] & 1))
+    return r;  /* BG1 off: no mode 7 pixels on this row */
+  if (p->bgLayer[0].mosaicEnabled && p->mosaicSize > 1)
+    fl |= 32;
+  s->m7on = 1;
+  s->m7fl = fl;
+  memcpy(s->m7m, p->m7matrix, sizeof(s->m7m));
+  if (g_m7_rows == 0) {
+    memcpy(g_m7c.m, p->m7matrix, sizeof(g_m7c.m));
+    g_m7c.fl = fl;
+  } else if (fl != g_m7c.fl || memcmp(p->m7matrix, g_m7c.m, sizeof(g_m7c.m))) {
+    g_m7_same = false;
+  }
+  g_m7_rows++;
+  return r;
+}
+
+/* VRAM snapshot for the GE path: only the 512-byte pages written since the last one (ppu->vramDirty, set in
+ * ppu_write). Every 64 frames the whole snapshot is compared with VRAM; a mismatch (a writer that bypasses
+ * ppu_write) switches to full copies for good. */
+enum { kVramPages = 128, kVramPageWords = 256 };
+static bool g_vd_ok = SM_PSP_VRAM_DIRTY;
+static void SnapshotVram(const Ppu *p) {
+  uint8_t *dirty = (uint8_t *)p->vramDirty;  /* the renderer owns the clear; the Ppu object is not const */
+  if (!g_vd_ok) {
+    memcpy(g_vram, p->vram, sizeof(g_vram));
+    memset(dirty, 0, kVramPages);
+    return;
+  }
+  for (int pg = 0; pg < kVramPages;) {
+    if (!dirty[pg]) {
+      pg++;
+      continue;
+    }
+    int e = pg + 1;
+    while (e < kVramPages && dirty[e])
+      e++;
+    memcpy(&g_vram[pg * kVramPageWords], &p->vram[pg * kVramPageWords], (size_t)(e - pg) * kVramPageWords * 2);
+    memset(&dirty[pg], 0, (size_t)(e - pg));
+    pg = e;
+  }
+  if ((g_frame & 63) == 0 && memcmp(g_vram, p->vram, sizeof(g_vram)) != 0) {
+    g_vd_ok = false;
+    memcpy(g_vram, p->vram, sizeof(g_vram));
+    PspLog("vramdirty: snapshot differs from VRAM, dirty tracking disabled");
+  }
+}
+
+/* Snapshot of the previous line with the values that ppu_write's counter does not cover re-read. */
+static void CaptureRefresh(const Ppu *p, LineSnap *d, const LineSnap *prev) {
+  memcpy(d, prev, sizeof(*d));
+  for (int l = 0; l < kLayers; l++) {
+    d->bg[l].hscroll = p->bgLayer[l].hScroll & 0x3ff;
+    d->bg[l].vscroll = p->bgLayer[l].vScroll & 0x3ff;
+  }
+  d->cg0 = p->cgram[0];
+}
+
+static void CaptureImpl(const Ppu *p, int line) {
+  if (!g_ge_active || line < 1 || line > kMaxLines)
+    return;
+  if (line == 1) {
+    g_frame_dead = false;
+    g_frame_mode = -1;
+    g_m7_rows = 0;
+    g_m7_same = true;
+    g_obj_size = p->objSize;
+    g_obj_adr1 = p->objTileAdr1;
+    g_obj_adr2 = p->objTileAdr2;
+    g_obj_rot = p->objPriority;
+    g_obj_start = g_obj_rot ? (uint8_t)((p->oamAdr & 0xfe) >> 1) : 0;
+    g_line_count = 0;
+    g_frame_reasons = 0;
+  } else if (g_frame_dead) {
+    return;  /* DrawGe hands this frame back anyway; skip the per-line work */
+  } else if (line != g_line_count + 1) {
+    g_capture_gaps++;
+    return;
+  }
+  LineSnap *s = &g_lines[line - 1];
+  /* Same registers as the previous line: copy its snapshot. Log builds recompute every 16th frame and compare
+   * (end of function). A frame that is already dead never gets here, so the copied reasons are 0. */
+#if SM_PSP_LOG
+  LineSnap cand;
+  bool check = false;
+#endif
+  if (g_cap_reuse_ok && line > 1 && p->regGen == g_cap_gen && p->oamAdr == g_cap_oamadr) {
+#if SM_PSP_LOG
+    if ((g_frame & 15) == 0) {
+      check = true;
+      CaptureRefresh(p, &cand, &g_lines[line - 2]);
+    } else
+#endif
+    {
+      CaptureRefresh(p, s, &g_lines[line - 2]);
+      if (s->m7on)
+        g_m7_rows++;  /* same matrix as the previous mode 7 row: g_m7c and g_m7_same already cover it */
+      PROF(g_cap_n_reuse++;)
+      g_line_count = line;
+      return;
+    }
+  }
+  g_cap_gen = p->regGen;
+  g_cap_oamadr = p->oamAdr;
+  PROF(g_cap_n_full++;)
+  bool forced = p->forcedBlank;
+  s->w2main = 0;
+  for (int l = 0; l < kLayers; l++) {
+    const BgLayer *bg = &p->bgLayer[l];
+    BgSnap *b = &s->bg[l];
+    b->hscroll = bg->hScroll & 0x3ff;
+    b->vscroll = bg->vScroll & 0x3ff;
+    b->mapadr = bg->tilemapAdr;
+    b->tileadr = bg->tileAdr;
+    bool drawn = !forced && p->mode == 1 && (p->screenEnabled[0] & (1 << l)) && !bg->bigTiles;
+    b->flags = (uint8_t)((bg->tilemapWider ? 1 : 0) | (bg->tilemapHigher ? 2 : 0) | (drawn ? 4 : 0) |
+                         ((p->screenEnabled[1] & (1 << l)) ? 8 : 0));
+     b->wm = b->wl = b->wr = 0;
+    if (drawn)
+      LayerWin(p, l, 0, &b->wm, &b->wl, &b->wr);  /* setups it cannot draw are flagged by LineReasons */
+    if (drawn && b->wm && ((p->windowsel >> (l * 4)) & 8))
+      s->w2main = 1;
+    b->sm = b->sl = b->sr = 0;
+    if (!forced && p->mode == 1 && (p->screenEnabled[1] & (1 << l)) && !bg->bigTiles)
+      LayerWin(p, l, 1, &b->sm, &b->sl, &b->sr);  /* unsupported setups are flagged through subwin */
+  }
+  s->brightness = p->brightness & 15;
+  s->bg3prio = p->bg3priority ? 1 : 0;
+  s->cg0 = p->cgram[0];
+  s->forced = forced ? 1 : 0;
+  {  /* mosaic (mode 1): BG1-3 with the effect on; the GE path draws it from the layer geometry (MosPrepare) */
+    uint8_t mos = 0;
+    if (!forced && p->mode == 1 && p->mosaicSize > 1)
+      for (int l = 0; l < kLayers; l++)
+        if (p->bgLayer[l].mosaicEnabled)
+          mos |= (uint8_t)(1 << l);
+    s->mosmask = mos;
+    s->mossize = p->mosaicSize;
+    s->mosstart = p->mosaicStartLine;
+  }
+  uint8_t mm = 0;
+  for (int i = 0; i < 6; i++)
+    mm |= (uint8_t)((p->mathEnabled[i] ? 1 : 0) << i);
+  s->mathmask = mm;
+  bool submath, tint, tinthalf, subhalf;
+  uint16_t tintfix;
+  uint8_t cw[3];
+  uint16_t subfix;
+  s->reasons = LineReasons(p, mm, &submath, &tint, &tintfix, &tinthalf, cw, &subfix, &subhalf);
+  s->subfix = subfix;
+  s->subhalf = subhalf ? 1 : 0;
+  s->cwm = cw[0];
+  s->cwl = cw[1];
+  s->cwr = cw[2];
+  s->submath = submath;
+  s->tint = tint;
+  s->tinthalf = tinthalf;
+  s->tintfix = tintfix;
+  s->m7on = 0;
+  s->m7fl = 0;
+  if (!forced) {
+    if (g_frame_mode < 0)
+      g_frame_mode = p->mode;
+    if (p->mode != 1 && p->mode != 7)  /* mixed mode 1 / mode 7 frames (HUD + mode 7) are drawn */
+      s->reasons |= kReasonMode;
+    if (p->mode == 7)
+      s->reasons |= M7Line(p, s);
+  }
+  /* only matters where the subscreen is added to the main screen with the fixed colour at 0 */
+  s->subobj = (!forced && mm != 0 && p->preventMathMode != 3 && p->addSubscreen && (p->screenEnabled[1] & 16)) ? 1 : 0;
+  s->subneg = p->subtractColor ? 1 : 0;
+  s->prevnoop = (!forced && mm != 0 && (p->preventMathMode == 1 || p->preventMathMode == 2) && g_prev_ok &&
+                 MathHasNoEffect(p)) ? 1 : 0;
+  {
+    uint8_t sw = 0;
+    for (int l = 0; l < kLayers; l++) {  /* only setups the GE path cannot draw (window 2, mode 7, audit failed) */
+      uint8_t m, a, e;
+      if (!LayerWin(p, l, 1, &m, &a, &e))
+        sw |= (uint8_t)(1 << l);
+    }
+    if ((p->screenWindowed[1] & 16) && ((p->windowsel >> 16) & 0xa))
+      sw |= 8;  /* OBJ on the subscreen is windowed */
+    s->subwin = sw;
+#if SM_PSP_LOG
+    if (sw && submath && NewSig(p, 0))  /* gate 4v: which setup still makes a subscreen window unsupported */
+      PspLog("SUBWIN line=%d sw=%02x TM=%02x TS=%02x tsw=%02x wsel=%06x w1=%d-%d w2=%d-%d math=%02x half=%d fixed=%04x neg=%d",
+             line, sw, p->screenEnabled[0], p->screenEnabled[1], p->screenWindowed[1], (unsigned)p->windowsel,
+             p->window1left, p->window1right, p->window2left, p->window2right, mm, p->halfColor ? 1 : 0,
+             (unsigned)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10), p->subtractColor ? 1 : 0);
+#endif
+  }
+  bool objon = !forced && (p->mode == 1 || p->mode == 7) && (p->screenEnabled[0] & 16);
+  s->objon = objon;
+  s->owm = s->owl = s->owr = 0;
+  if (objon || s->subobj) {
+    uint16_t r2 = 0;
+    if (p->objInterlace || p->objSize != g_obj_size || p->objTileAdr1 != g_obj_adr1 ||
+        p->objTileAdr2 != g_obj_adr2 || (bool)p->objPriority != g_obj_rot ||
+        (g_obj_rot && (uint8_t)((p->oamAdr & 0xfe) >> 1) != g_obj_start))
+      r2 |= kReasonObjCfg;
+    if (objon && !LayerWin(p, 4, 0, &s->owm, &s->owl, &s->owr))
+      r2 |= kReasonWindow;
+    s->reasons |= r2;
+  }
+  g_frame_reasons |= s->reasons;
+  if (line == 1 && !g_frame_reasons) {
+    /* VRAM/CGRAM as the display saw them for this frame. One 64 KB copy per frame, never per line,
+     * and only if the frame can still be drawn by the GE. */
+    PROF(uint32_t t_cpy = Now();)
+    SnapshotVram(p);
+    memcpy(g_cgram, p->cgram, sizeof(g_cgram));
+    memcpy(g_oam, p->oam, sizeof(g_oam));
+    memcpy(g_hoam, p->highOam, sizeof(g_hoam));
+    PROF(g_cpy_us = Now() - t_cpy;)
+  }
+  if (g_frame_reasons)
+    g_frame_dead = true;
+#if SM_PSP_LOG
+  if (s->reasons && NewSig(p, s->reasons)) {  /* first time each register signature is seen: remember the state */
+    g_note = (Note){line, s->reasons, p->mode, p->screenEnabled[0], p->screenEnabled[1], mm,
+                    p->addSubscreen, p->subtractColor, p->halfColor,
+                    p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10,
+                    p->clipMode, p->preventMathMode, p->screenWindowed[0], p->windowsel, p->screenWindowed[1]};
+    g_note_pending = true;
+  }
+#endif
+#if SM_PSP_LOG
+  if (check) {
+    g_cap_n_chk++;
+    if (!cand.m7on)
+      memcpy(cand.m7m, s->m7m, sizeof(cand.m7m));  /* m7m is only written on mode 7 rows */
+    if (memcmp(&cand, s, sizeof(cand)) != 0) {
+      const uint8_t *ca = (const uint8_t *)&cand, *cs = (const uint8_t *)s;
+      unsigned off = 0;
+      while (off < sizeof(cand) && ca[off] == cs[off])
+        off++;
+      g_cap_n_bad++;
+      g_cap_reuse_ok = false;
+      PspLog("capreuse: f=%u line=%d byte %u of %u differs, reuse disabled", (unsigned)g_frame, line, off,
+             (unsigned)sizeof(cand));
+    }
+  }
+#endif
+  g_line_count = line;
+}
+
+#if SM_PSP_LOG
+/* Mode 7 probe (log only, no effect on drawing): is the matrix constant over a frame or changed per
+ * line (HDMA), how much of the 1024x1024 plane is visible, which options are in use. Runs for every
+ * frame, whether or not the GE path is on. */
+typedef struct M7Rec { int16_t m[8]; uint8_t fl; } M7Rec;  /* m: a, b, c, d, centre x, y, scroll h, v */
+static struct {
+  M7Rec first, cur;
+  int lines, chg_abcd, chg_sc, chg_fl, other_lines;
+  int amin, amax, dmin, dmax;
+  bool rot;
+} g_m7;
+static struct {
+  uint32_t n, constant, abcd, scroll, rot, large, charfill, flip, extbg, mosaic, obj, mixed;
+  uint32_t tiles_sum, tiles_max;
+} g_m7w;
+static uint32_t g_m7_total;
+
+static void M7Probe(const Ppu *p, int line) {
+  if (line < 1 || line > kMaxLines)
+    return;
+  if (line == 1)
+    memset(&g_m7, 0, sizeof(g_m7));
+  if (p->forcedBlank || p->mode != 7) {
+    g_m7.other_lines++;
+    return;
+  }
+  M7Rec r;
+  memcpy(r.m, p->m7matrix, sizeof(r.m));
+  r.fl = (uint8_t)((p->m7largeField ? 1 : 0) | (p->m7charFill ? 2 : 0) | (p->m7xFlip ? 4 : 0) | (p->m7yFlip ? 8 : 0) |
+                   (p->m7extBg ? 16 : 0) | ((p->bgLayer[0].mosaicEnabled && p->mosaicSize > 1) ? 32 : 0) |
+                   ((p->screenEnabled[0] & 16) ? 64 : 0));
+  if (g_m7.lines == 0) {
+    g_m7.first = r;
+    g_m7.amin = g_m7.amax = r.m[0];
+    g_m7.dmin = g_m7.dmax = r.m[3];
+  } else {
+    if (memcmp(r.m, g_m7.cur.m, 4 * sizeof(int16_t)))
+      g_m7.chg_abcd++;
+    if (memcmp(r.m + 4, g_m7.cur.m + 4, 4 * sizeof(int16_t)))
+      g_m7.chg_sc++;
+    if (r.fl != g_m7.cur.fl)
+      g_m7.chg_fl++;
+    if (r.m[0] < g_m7.amin) g_m7.amin = r.m[0];
+    if (r.m[0] > g_m7.amax) g_m7.amax = r.m[0];
+    if (r.m[3] < g_m7.dmin) g_m7.dmin = r.m[3];
+    if (r.m[3] > g_m7.dmax) g_m7.dmax = r.m[3];
+  }
+  if (r.m[1] || r.m[2])
+    g_m7.rot = true;
+  g_m7.cur = r;
+  g_m7.lines++;
+}
+
+static void M7FrameEnd(void) {
+  if (g_m7.lines == 0)
+    return;
+  g_m7_total++;
+  g_m7w.n++;
+  if (!g_m7.chg_abcd && !g_m7.chg_sc)
+    g_m7w.constant++;
+  else if (g_m7.chg_abcd)
+    g_m7w.abcd++;
+  else
+    g_m7w.scroll++;
+  uint8_t fl = g_m7.first.fl;
+  g_m7w.rot += g_m7.rot;
+  g_m7w.large += fl & 1;
+  g_m7w.charfill += (fl >> 1) & 1;
+  g_m7w.flip += (fl >> 2 & 3) != 0;
+  g_m7w.extbg += (fl >> 4) & 1;
+  g_m7w.mosaic += (fl >> 5) & 1;
+  g_m7w.obj += (fl >> 6) & 1;
+  g_m7w.mixed += g_m7.other_lines != 0;
+  /* plane area covered by the screen (plane pixels): 256 x lines x |a*d - b*c| / 65536, in 8x8 tiles */
+  const int16_t *m = g_m7.first.m;
+  int64_t det = (int64_t)m[0] * m[3] - (int64_t)m[1] * m[2];
+  if (det < 0)
+    det = -det;
+  uint32_t tiles = (uint32_t)((int64_t)256 * g_m7.lines * det / 65536 / 64);
+  g_m7w.tiles_sum += tiles;
+  if (tiles > g_m7w.tiles_max)
+    g_m7w.tiles_max = tiles;
+  if (g_m7_total <= 6 || g_m7_total % 600 == 0)
+    PspLog("M7s f=%u a=%d b=%d c=%d d=%d cx=%d cy=%d hs=%d vs=%d fl=%02x | last a=%d d=%d | chg abcd=%d sc=%d fl=%d lines=%d other=%d | A %d..%d D %d..%d | tiles~%u",
+           (unsigned)g_frame, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], fl, g_m7.cur.m[0], g_m7.cur.m[3],
+           g_m7.chg_abcd, g_m7.chg_sc, g_m7.chg_fl, g_m7.lines, g_m7.other_lines, g_m7.amin, g_m7.amax, g_m7.dmin,
+           g_m7.dmax, (unsigned)tiles);
+}
+
+static void M7Log(void) {
+  if (g_m7w.n == 0)
+    return;
+  PspLog("M7 n=%u const=%u abcd-per-line=%u scroll-only=%u | rot=%u large=%u charfill=%u flip=%u extbg=%u mosaic=%u obj=%u mixed=%u | tiles avg=%u max=%u",
+         (unsigned)g_m7w.n, (unsigned)g_m7w.constant, (unsigned)g_m7w.abcd, (unsigned)g_m7w.scroll, (unsigned)g_m7w.rot,
+         (unsigned)g_m7w.large, (unsigned)g_m7w.charfill, (unsigned)g_m7w.flip, (unsigned)g_m7w.extbg,
+         (unsigned)g_m7w.mosaic, (unsigned)g_m7w.obj, (unsigned)g_m7w.mixed, (unsigned)(g_m7w.tiles_sum / g_m7w.n),
+         (unsigned)g_m7w.tiles_max);
+  memset(&g_m7w, 0, sizeof(g_m7w));
+}
+
+/* Window probe (log only, no effect on drawing). Frames with a windowed layer go back to software
+ * (kReasonWindow). This reports which layers are windowed (main / sub / colour window), which windows
+ * they use, and whether the edges are a fixed box or change from line to line (HDMA). Every line,
+ * whether or not the GE path is on. */
+static struct {
+  int rows, on, first, last, chg1, chg2, chgsel;
+  int l1min, l1max, r1min, r1max, l2min, l2max, r2min, r2max;
+  int pl1, pr1, pl2, pr2;
+  uint32_t sel, psel, ml;
+  uint8_t mon, son, cw, w1use, w2use, tm, ts, math, add;
+} g_wp;
+static uint32_t g_wp_total;
+
+static void WinProbe(const Ppu *p, int line) {
+  if (line < 1 || line > kMaxLines)
+    return;
+  if (line == 1)
+    memset(&g_wp, 0, sizeof(g_wp));
+  if (p->forcedBlank)
+    return;
+  g_wp.rows++;
+  uint8_t m_on = 0, s_on = 0;
+  for (int l = 0; l < 5; l++) {  /* BG1-4, OBJ: one windowsel nibble each (colour window is nibble 5) */
+    if (!((p->windowsel >> (l * 4)) & 0xa))
+      continue;
+    if (p->screenWindowed[0] & (1 << l))
+      m_on |= (uint8_t)(1 << l);
+    if (p->screenWindowed[1] & (1 << l))
+      s_on |= (uint8_t)(1 << l);
+  }
+  bool cw = (p->clipMode == 1 || p->clipMode == 2 || p->preventMathMode == 1 || p->preventMathMode == 2) &&
+            ((p->windowsel >> 20) & 0xa);
+  if (!m_on && !s_on && !cw)
+    return;
+  int l1 = p->window1left, r1 = p->window1right, l2 = p->window2left, r2 = p->window2right;
+  if (g_wp.on == 0) {
+    g_wp.first = line - 1;
+    g_wp.l1min = g_wp.l1max = l1;
+    g_wp.r1min = g_wp.r1max = r1;
+    g_wp.l2min = g_wp.l2max = l2;
+    g_wp.r2min = g_wp.r2max = r2;
+    g_wp.sel = p->windowsel;
+    for (int l = 0; l < 6; l++) {
+      uint32_t n = (p->windowsel >> (l * 4)) & 0xf;
+      if (n & 2)
+        g_wp.w1use |= (uint8_t)(1 << l);
+      if (n & 8)
+        g_wp.w2use |= (uint8_t)(1 << l);
+      g_wp.ml |= (uint32_t)p->windowLayer[l].maskLogic << (2 * l);
+    }
+    g_wp.tm = p->screenEnabled[0];
+    g_wp.ts = p->screenEnabled[1];
+    for (int i = 0; i < 6; i++)
+      g_wp.math |= (uint8_t)((p->mathEnabled[i] ? 1 : 0) << i);
+    g_wp.add = p->addSubscreen ? 1 : 0;
+  } else {
+    if (l1 != g_wp.pl1 || r1 != g_wp.pr1)
+      g_wp.chg1++;
+    if (l2 != g_wp.pl2 || r2 != g_wp.pr2)
+      g_wp.chg2++;
+    if (p->windowsel != g_wp.psel)
+      g_wp.chgsel++;
+    if (l1 < g_wp.l1min) g_wp.l1min = l1;
+    if (l1 > g_wp.l1max) g_wp.l1max = l1;
+    if (r1 < g_wp.r1min) g_wp.r1min = r1;
+    if (r1 > g_wp.r1max) g_wp.r1max = r1;
+    if (l2 < g_wp.l2min) g_wp.l2min = l2;
+    if (l2 > g_wp.l2max) g_wp.l2max = l2;
+    if (r2 < g_wp.r2min) g_wp.r2min = r2;
+    if (r2 > g_wp.r2max) g_wp.r2max = r2;
+  }
+  g_wp.pl1 = l1; g_wp.pr1 = r1; g_wp.pl2 = l2; g_wp.pr2 = r2;
+  g_wp.psel = p->windowsel;
+  g_wp.mon |= m_on;
+  g_wp.son |= s_on;
+  g_wp.cw |= cw;
+  g_wp.on++;
+  g_wp.last = line - 1;
+}
+
+static void WinFrameEnd(void) {
+  if (g_wp.on == 0)
+    return;
+  g_wp_total++;
+  if (g_wp_total <= 4 || g_wp_total % 20 == 0)
+    PspLog("WIN f=%u n=%u rows=%d/%d (%d..%d) main=%02x sub=%02x cw=%d | sel=%06x ml=%03x w1=%02x w2=%02x selchg=%d | w1 L%d-%d R%d-%d chg=%d | w2 L%d-%d R%d-%d chg=%d | TM=%02x TS=%02x math=%02x add=%d",
+           (unsigned)g_frame, (unsigned)g_wp_total, g_wp.on, g_wp.rows, g_wp.first, g_wp.last, g_wp.mon, g_wp.son,
+           g_wp.cw, (unsigned)g_wp.sel, (unsigned)g_wp.ml, g_wp.w1use, g_wp.w2use, g_wp.chgsel, g_wp.l1min,
+           g_wp.l1max, g_wp.r1min, g_wp.r1max, g_wp.chg1, g_wp.l2min, g_wp.l2max, g_wp.r2min, g_wp.r2max,
+           g_wp.chg2, g_wp.tm, g_wp.ts, g_wp.math, g_wp.add);
+  g_wp.on = 0;
+}
+#endif
+
+#if SM_PSP_LOG
+/* Flicker probe (log only, no effect on drawing). The game may fake transparency by alternating something every
+ * other frame. Per frame: a hash of the layer / colour-math / window-select registers over all rows (reg), of OAM
+ * (oam) and of VRAM (vram). A hash that equals its value two frames ago but not last frame's is an A-B-A-B step. */
+enum { kFlkReg, kFlkOam, kFlkVram, kFlkKinds, kFlkRun = 6, kFlkLogMax = 6 };
+static struct {
+  uint32_t cur[kFlkKinds], p1[kFlkKinds], p2[kFlkKinds];
+  uint32_t run[kFlkKinds], frames[kFlkKinds], logged[kFlkKinds];
+  uint32_t tm, ts, math, sel, fix;
+  uint8_t add, half, neg;
+  int lines;
+} g_flk;
+
+static inline uint32_t FlkMix(uint32_t h, uint32_t w) {
+  return (h ^ w) * 16777619u;
+}
+
+static void FlickProbe(const Ppu *p, int line) {
+  if (line < 1 || line > kMaxLines)
+    return;
+  uint32_t mm = 0;
+  for (int i = 0; i < 6; i++)
+    mm |= (uint32_t)(p->mathEnabled[i] ? 1 : 0) << i;
+  uint32_t fix = (uint32_t)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10);
+  uint32_t w0 = (uint32_t)p->screenEnabled[0] | (uint32_t)p->screenEnabled[1] << 8 | mm << 16 |
+                (uint32_t)(p->addSubscreen ? 1 : 0) << 22 | (uint32_t)(p->halfColor ? 1 : 0) << 23 |
+                (uint32_t)(p->subtractColor ? 1 : 0) << 24 | (uint32_t)p->preventMathMode << 25 |
+                (uint32_t)p->clipMode << 27 | (uint32_t)(p->forcedBlank ? 1 : 0) << 29;
+  uint32_t w1 = fix | (uint32_t)p->brightness << 16;
+  uint32_t w3 = (uint32_t)p->screenWindowed[0] | (uint32_t)p->screenWindowed[1] << 8 | (uint32_t)p->mode << 16;
+  if (line == 1) {
+    g_flk.lines = 0;
+    g_flk.cur[kFlkReg] = 2166136261u;
+    uint32_t h = 2166136261u, w;
+    for (int i = 0; i < 256; i += 2) {
+      memcpy(&w, &p->oam[i], 4);
+      h = FlkMix(h, w);
+    }
+    for (int i = 0; i < 32; i += 4) {
+      memcpy(&w, &p->highOam[i], 4);
+      h = FlkMix(h, w);
+    }
+    g_flk.cur[kFlkOam] = h;
+    h = 2166136261u;
+    for (int i = 0; i < 0x8000; i += 2) {
+      memcpy(&w, &p->vram[i], 4);
+      h = FlkMix(h, w);
+    }
+    g_flk.cur[kFlkVram] = h;
+    g_flk.tm = p->screenEnabled[0];
+    g_flk.ts = p->screenEnabled[1];
+    g_flk.math = mm;
+    g_flk.sel = p->windowsel;
+    g_flk.fix = fix;
+    g_flk.add = p->addSubscreen ? 1 : 0;
+    g_flk.half = p->halfColor ? 1 : 0;
+    g_flk.neg = p->subtractColor ? 1 : 0;
+  }
+  uint32_t h = g_flk.cur[kFlkReg];
+  h = FlkMix(h, w0);
+  h = FlkMix(h, w1);
+  h = FlkMix(h, (uint32_t)p->windowsel);
+  h = FlkMix(h, w3);
+  g_flk.cur[kFlkReg] = h;
+  g_flk.lines++;
+}
+
+static void FlickFrameEnd(void) {
+  static const char *const kName[kFlkKinds] = {"reg", "oam", "vram"};
+  if (g_flk.lines == 0)
+    return;
+  for (int k = 0; k < kFlkKinds; k++) {
+    bool alt = g_flk.cur[k] == g_flk.p2[k] && g_flk.cur[k] != g_flk.p1[k];
+    g_flk.run[k] = alt ? g_flk.run[k] + 1 : 0;
+    if (g_flk.run[k] >= (uint32_t)kFlkRun) {
+      g_flk.frames[k]++;
+      if (g_flk.run[k] == (uint32_t)kFlkRun && g_flk.logged[k] < (uint32_t)kFlkLogMax) {
+        g_flk.logged[k]++;
+        PspLog("FLICKER f=%u kind=%s | row0 TM=%02x TS=%02x math=%02x add=%d half=%d neg=%d fix=%04x wsel=%06x lines=%d",
+               (unsigned)g_frame, kName[k], (unsigned)g_flk.tm, (unsigned)g_flk.ts, (unsigned)g_flk.math,
+               g_flk.add, g_flk.half, g_flk.neg, (unsigned)g_flk.fix, (unsigned)g_flk.sel, g_flk.lines);
+      }
+    }
+    g_flk.p2[k] = g_flk.p1[k];
+    g_flk.p1[k] = g_flk.cur[k];
+  }
+  g_flk.lines = 0;
+}
+
+static void FlickLog(void) {
+  if (g_flk.frames[kFlkReg] | g_flk.frames[kFlkOam] | g_flk.frames[kFlkVram])
+    PspLog("FLK frames in A-B alternation (of 300): reg=%u oam=%u vram=%u", (unsigned)g_flk.frames[kFlkReg],
+           (unsigned)g_flk.frames[kFlkOam], (unsigned)g_flk.frames[kFlkVram]);
+  memset(g_flk.frames, 0, sizeof(g_flk.frames));
+}
+#endif
+
+void PspRenderer_CaptureLine(const Ppu *p, int line) {
+#if SM_PSP_LOG
+#if SM_PSP_PROBES
+  WinProbe(p, line);
+  FlickProbe(p, line);
+#endif
+  uint32_t t = Now();
+#if SM_PSP_PROBES
+  M7Probe(p, line);
+#endif
+  CaptureImpl(p, line);
+  g_cap_us += Now() - t;
+#else
+  CaptureImpl(p, line);
+#endif
+}
+
+//tile atlas
+
+/* Decodes (if changed this frame) physical tile pt and returns true if empty.
+ * bpp4: 16 words/tile, atlas 32 tiles wide. 2bpp: 8 words/tile, 64 wide.
+ * One 32-bit store per tile row into the uncached VRAM mirror. */
+static bool EnsureTile(bool bpp4, int pt) {
+  uint16_t *seen = bpp4 ? g_seen4 : g_seen2;
+  uint32_t *hash = bpp4 ? g_hash4 : g_hash2;
+  uint8_t *empty = bpp4 ? g_empty4 : g_empty2;
+  if (seen[pt] == g_stamp)
+    return empty[pt];
+  seen[pt] = g_stamp;
+  PROF(g_c_tseen++;)
+  int words = bpp4 ? 16 : 8;
+  const uint16_t *src = &g_vram[pt * words];
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < words; i++)
+    h = (h ^ src[i]) * 16777619u;
+  if (hash[pt] == h)
+    return empty[pt];
+  hash[pt] = h;
+  PROF(g_c_tdec++;)
+  uint32_t *dst;
+  int stride_words;
+  if (bpp4) {
+    dst = (uint32_t *)(g_atlas4 + (pt >> 5) * 8 * 128 + (pt & 31) * 4);
+    stride_words = 128 / 4;
+  } else {
+    dst = (uint32_t *)(g_atlas2 + (pt >> 6) * 8 * 256 + (pt & 63) * 4);
+    stride_words = 256 / 4;
+  }
+  uint32_t any = 0, used = 0;
+  for (int y = 0; y < 8; y++, dst += stride_words) {
+    uint32_t w0 = src[y], w1 = bpp4 ? src[8 + y] : 0, row = 0;
+    for (int x = 0; x < 8; x++) {
+      int s = 7 - x;
+      uint32_t px = (w0 >> s & 1) | ((w0 >> (s + 7)) & 2);
+      if (bpp4)
+        px |= ((w1 >> s & 1) << 2) | ((w1 >> (s + 5)) & 8);
+      row |= px << (4 * x);
+      used |= 1u << px;
+    }
+    *dst = row;
+    any |= row;
+  }
+  empty[pt] = any == 0;
+  (bpp4 ? g_mask4 : g_mask2)[pt] = (uint16_t)used;
+  return empty[pt];
+}
+
+static void BuildClut2(int b) {
+  if (g_clut2_stamp[b] == g_stamp)
+    return;
+  g_clut2_stamp[b] = g_stamp;
+  for (int pal = 0; pal < 8; pal++)
+    for (int j = 0; j < 8; j++)
+      g_clut2[b][pal][j] = BakeColor(g_cgram[pal * 4 + (j & 3)], b, (j & 3) == 0);
+}
+
+static void BuildClut4(int b) {
+  if (g_clut4_stamp[b] == g_stamp)
+    return;
+  g_clut4_stamp[b] = g_stamp;
+  for (int pal = 0; pal < 8; pal++)
+    for (int j = 0; j < 16; j++)
+      g_clut4[b][pal][j] = BakeColor(g_cgram[pal * 16 + j], b, j == 0);
+}
+
+static void BuildClutObj(int b) {
+  if (g_clutobj_stamp[b] == g_stamp)
+    return;
+  g_clutobj_stamp[b] = g_stamp;
+  for (int pal = 0; pal < 8; pal++)
+    for (int j = 0; j < 16; j++)
+      g_clutobj[b][pal][j] = BakeColor(g_cgram[128 + pal * 16 + j], b, j == 0);
+}
+
+/* Gate 4t-d: BG3 palette for the half-colour subscreen target: index 0 transparent, every other entry opaque
+ * (even black) with alpha 0x80, which the composite turns into the 1/2 factors. */
+static void BuildClut2Half(void) {
+  if (g_clut2h_stamp == g_stamp)
+    return;
+  g_clut2h_stamp = g_stamp;
+  for (int pal = 0; pal < 8; pal++)
+    for (int j = 0; j < 8; j++)
+      g_clut2h[pal][j] = (j & 3) ? ((BakeColor(g_cgram[pal * 4 + (j & 3)], kClutBright, false) & 0x00ffffffu) | 0x80000000u)
+                                 : 0u;
+}
+
+/* Mode 7 tiles: the pixel is the high byte of vram[tile * 64 + row * 8 + col]. Same scheme as EnsureTile.
+ * Returns true if the tile is empty (all pixels 0 = transparent). */
+static bool EnsureTile7(int t) {
+  if (g_seen7[t] == g_stamp)
+    return g_empty7[t];
+  g_seen7[t] = g_stamp;
+  const uint16_t *src = &g_vram[t * 64];
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < 64; i++)
+    h = (h ^ (src[i] >> 8)) * 16777619u;
+  if (g_hash7[t] == h)
+    return g_empty7[t];
+  g_hash7[t] = h;
+  uint32_t *dst = (uint32_t *)(g_atlas7 + (t >> 4) * 8 * 128 + (t & 15) * 8);
+  uint32_t any = 0;
+  for (int y = 0; y < 8; y++, dst += 128 / 4) {
+    uint32_t w0 = 0, w1 = 0;
+    for (int x = 0; x < 4; x++) {
+      w0 |= (uint32_t)(src[y * 8 + x] >> 8) << (8 * x);
+      w1 |= (uint32_t)(src[y * 8 + 4 + x] >> 8) << (8 * x);
+    }
+    dst[0] = w0;
+    dst[1] = w1;
+    any |= w0 | w1;
+  }
+  g_empty7[t] = any == 0;
+  return g_empty7[t];
+}
+
+static void BuildClut7(int b) {
+  if (g_clut7_stamp == g_stamp)
+    return;
+  g_clut7_stamp = g_stamp;
+  for (int i = 0; i < 256; i++)
+    g_clut7[i] = BakeColor(g_cgram[i], b, i == 0);
+}
+
+//BG layers
+
+static bool SameGeom(const LineSnap *a, const LineSnap *b, int l) {
+  const BgSnap *x = &a->bg[l], *y = &b->bg[l];
+  return x->hscroll == y->hscroll && x->vscroll == y->vscroll && x->mapadr == y->mapadr &&
+         x->tileadr == y->tileadr && (x->flags & 7) == (y->flags & 7);
+}
+
+static bool SameBg(const LineSnap *a, const LineSnap *b, int l) {
+  const BgSnap *x = &a->bg[l], *y = &b->bg[l];
+  return SameGeom(a, b, l) && x->wm == y->wm && x->wl == y->wl && x->wr == y->wr;
+}
+
+static bool SameSub(const LineSnap *a, const LineSnap *b, int l) {
+  const BgSnap *x = &a->bg[l], *y = &b->bg[l];
+  return SameGeom(a, b, l) && x->flags == y->flags && x->sm == y->sm && x->sl == y->sl && x->sr == y->sr &&
+         a->mathmask == b->mathmask && a->bg3prio == b->bg3prio;
+}
+
+/* Same as SameSub without the window state (gate 4t-c: windows are painted over the subscreen target per row). */
+static bool SameSubNoWin(const LineSnap *a, const LineSnap *b, int l) {
+  return SameGeom(a, b, l) && a->bg[l].flags == b->bg[l].flags && a->mathmask == b->mathmask &&
+         a->bg3prio == b->bg3prio;
+}
+
+/* Hidden x spans (up to 2) of a layer window state (see LayerWin): the complement of WinSpans. */
+static int HiddenSpans(int wm, int wl, int wr, int a[3], int b[3]) {
+  int va[2], vb[2];
+  int nv = WinSpans(wm, wl, wr, va, vb), n = 0, x = 0;
+  for (int k = 0; k < nv; k++) {
+    if (va[k] > x) {
+      a[n] = x;
+      b[n++] = va[k];
+    }
+    x = vb[k];
+  }
+  if (x < kGameWidth) {
+    a[n] = x;
+    b[n++] = kGameWidth;
+  }
+  return n;
+}
+
+/* Walks the tilemap of layer l once for rows [r0,r1) and appends every non-empty
+ * tile to the pool (decoding it into the atlas on the way). Consecutive equal
+ * tilemap words reuse the previous lookup. Returns false if the pool is full. */
+static bool BuildTileListRaw(int l, const LineSnap *snap, int r0, int r1, TileList *out) {
+  const BgSnap *s = &snap->bg[l];
+  bool bpp4 = l < 2;
+  int words = bpp4 ? 16 : 8, shift = bpp4 ? 4 : 3;
+  /* SNES BG row for 0-based screen row r is r + 1 + vscroll (line is 1-based). */
+  int ty0 = (s->vscroll + r0 + 1) >> 3, ty1 = (s->vscroll + r1) >> 3;
+  int tx0 = s->hscroll >> 3, tx1 = (s->hscroll + kGameWidth - 1) >> 3;
+  int wide = s->flags & 1, high = (s->flags >> 1) & 1;
+  int start = g_ent_top, top = start;
+  unsigned last_t = 0x10000;  /* no tilemap word equals this */
+  int last_pt = 0;
+  bool last_empty = true;
+  uint8_t last_pal = 0, last_fl = 0;
+  for (int ty = ty0; ty <= ty1; ty++) {
+    int rowbase = s->mapadr + (ty & 31) * 32 + (((ty & 32) && high) ? (wide ? 0x800 : 0x400) : 0);
+    int y0 = ty * 8 - s->vscroll - 1;
+    for (int tx = tx0; tx <= tx1; tx++) {
+      int addr = (rowbase + (tx & 31) + (((tx & 32) && wide) ? 0x400 : 0)) & 0x7fff;
+      unsigned t = g_vram[addr];
+      if (t != last_t) {
+        last_t = t;
+        last_pt = (int)((s->tileadr + (t & 0x3ff) * words) & 0x7fff) >> shift;
+        last_pal = (uint8_t)((t >> 10) & 7);
+        last_fl = (uint8_t)(((t >> 13) & 1) | ((t >> 13) & 2) | ((t >> 13) & 4));
+        last_empty = EnsureTile(bpp4, last_pt);
+      }
+      if (last_empty)
+        continue;
+      if (top >= kEntPool)
+        return false;
+      TileEnt *e = &g_ents[top++];
+      e->x = (int16_t)(tx * 8 - s->hscroll);
+      e->y = (int16_t)y0;
+      e->pt = (uint16_t)last_pt;
+      e->pal = last_pal;
+      e->fl = last_fl;
+    }
+  }
+  g_ent_top = top;
+  out->first = (uint16_t)start;
+  out->n = (uint16_t)(top - start);
+  return true;
+}
+
+/* Non-empty tiles of tilemap row ty of layer l (x set, y 0) written to dst. Returns the count, or -1 if more
+ * than max would be needed. Same lookup as BuildTileListRaw. */
+static int BuildRow(int l, const BgSnap *s, int ty, TileEnt *dst, int max) {
+  bool bpp4 = l < 2;
+  int words = bpp4 ? 16 : 8, shift = bpp4 ? 4 : 3;
+  int tx0 = s->hscroll >> 3, tx1 = (s->hscroll + kGameWidth - 1) >> 3;
+  int wide = s->flags & 1, high = (s->flags >> 1) & 1;
+  int rowbase = s->mapadr + (ty & 31) * 32 + (((ty & 32) && high) ? (wide ? 0x800 : 0x400) : 0);
+  int n = 0, last_pt = 0;
+  unsigned last_t = 0x10000;  /* no tilemap word equals this */
+  bool last_empty = true;
+  uint8_t last_pal = 0, last_fl = 0;
+  for (int tx = tx0; tx <= tx1; tx++) {
+    int addr = (rowbase + (tx & 31) + (((tx & 32) && wide) ? 0x400 : 0)) & 0x7fff;
+    unsigned t = g_vram[addr];
+    if (t != last_t) {
+      last_t = t;
+      last_pt = (int)((s->tileadr + (t & 0x3ff) * words) & 0x7fff) >> shift;
+      last_pal = (uint8_t)((t >> 10) & 7);
+      last_fl = (uint8_t)(((t >> 13) & 1) | ((t >> 13) & 2) | ((t >> 13) & 4));
+      last_empty = EnsureTile(bpp4, last_pt);
+    }
+    if (last_empty)
+      continue;
+    if (n >= max)
+      return -1;
+    TileEnt *e = &dst[n++];
+    e->x = (int16_t)(tx * 8);  /* unscrolled: the caller subtracts hscroll, so rows are shared across fine scroll */
+    e->y = 0;
+    e->pt = (uint16_t)last_pt;
+    e->pal = last_pal;
+    e->fl = last_fl;
+  }
+  return n;
+}
+
+/* Cached tiles of row ty (built on first use this frame), or NULL if the row pool is full. The pool only grows
+ * within a frame, so returned pointers stay valid. Entries from earlier frames never match (stamp). */
+static const TileEnt *RowCached(int l, const BgSnap *s, int ty, int *count) {
+  unsigned t6 = (unsigned)ty & 63, wh = s->flags & 3;
+  unsigned hk = ((unsigned)(s->hscroll >> 3) << 1) | ((s->hscroll & 7) != 0);  /* tile column + (fine != 0: 32 vs 31 columns right) */
+  unsigned h = (t6 * 5 + (unsigned)(s->hscroll >> 3) * 3 + (unsigned)l * 11 + (unsigned)(s->mapadr >> 10) * 7 +
+                (unsigned)(s->tileadr >> 12) * 13 + wh + (hk & 1) * 17) & (kRowSlots - 1);
+  RowCache *rc = &g_rc[h];
+  if (rc->stamp == g_stamp && rc->l == l && rc->ty == t6 && rc->wh == wh && rc->map == s->mapadr &&
+      rc->tile == s->tileadr && rc->hs == hk) {
+    PROF(g_rc_hit++;)
+    *count = rc->n;
+    return &g_rows[rc->first];
+  }
+  int n = BuildRow(l, s, ty, &g_rows[g_rows_top], kRowPool - g_rows_top);
+  if (n < 0)
+    return NULL;
+  PROF(g_rc_miss++;)
+  *rc = (RowCache){s->mapadr, s->tileadr, (uint16_t)hk, g_stamp, (uint16_t)g_rows_top, (uint16_t)n,
+                   (uint8_t)l, (uint8_t)wh, (uint8_t)t6};
+  g_rows_top += n;
+  *count = n;
+  return &g_rows[rc->first];
+}
+
+/* Same result as BuildTileListRaw. Short runs (a few rows, e.g. HDMA waves) copy cached rows and only set y. */
+static bool BuildTileList(int l, const LineSnap *snap, int r0, int r1, TileList *out) {
+  if (r1 - r0 > kRowMaxRun)
+    return BuildTileListRaw(l, snap, r0, r1, out);
+  const BgSnap *s = &snap->bg[l];
+  int ty0 = (s->vscroll + r0 + 1) >> 3, ty1 = (s->vscroll + r1) >> 3;
+  int start = g_ent_top, top = start;
+  for (int ty = ty0; ty <= ty1; ty++) {
+    int y0 = ty * 8 - s->vscroll - 1, n = 0;
+    const TileEnt *src = RowCached(l, s, ty, &n);
+    TileEnt *dst = &g_ents[top];
+    if (src) {
+      if (top + n > kEntPool)
+        return false;
+      memcpy(dst, src, (size_t)n * sizeof(TileEnt));
+    } else {
+      n = BuildRow(l, s, ty, dst, kEntPool - top);
+      if (n < 0)
+        return false;
+    }
+    for (int k = 0; k < n; k++) {
+      dst[k].y = (int16_t)y0;
+      dst[k].x = (int16_t)(dst[k].x - s->hscroll);  /* cached and freshly built rows are both unscrolled */
+    }
+    top += n;
+  }
+  g_ent_top = top;
+  out->first = (uint16_t)start;
+  out->n = (uint16_t)(top - start);
+  return true;
+}
+
+static void CountList(const TileList *lst, int counts[2][8]) {
+  for (int i = 0; i < lst->n; i++) {
+    const TileEnt *e = &g_ents[lst->first + i];
+    counts[e->fl & 1][e->pal]++;
+  }
+}
+
+/* Emits CPU-clipped quads for rows [r0,r1) into out[prio][pal] (no negative or
+ * off-screen vertex ever reaches the GE) and for x in [vx0,vx1) (a window span). */
+static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8], int ox, int oy, int vx0,
+                     int vx1) {
+  int cols = l < 2 ? 32 : 64;
+  for (int i = 0; i < lst->n; i++) {
+    const TileEnt *e = &g_ents[lst->first + i];
+    int x0 = e->x, y0 = e->y, prio = e->fl & 1, pal = e->pal, pt = e->pt;
+    int cl = x0 < vx0 ? vx0 - x0 : 0, cr = x0 + 8 > vx1 ? x0 + 8 - vx1 : 0;
+    int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
+    if (cl + cr >= 8 || ct + cb >= 8)
+      continue;
+    float u = (float)((pt & (cols - 1)) * 8), v = (float)((pt >> (cols == 32 ? 5 : 6)) * 8);
+    float ul, ur, vt, vb;
+    if (e->fl & 2) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
+    if (e->fl & 4) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
+    TileVert *w = out[prio][pal];
+    w[0] = (TileVert){ul, vt, (int16_t)(ox + x0 + cl), (int16_t)(oy + y0 + ct), (int16_t)g_zbg[l][prio]};
+    w[1] = (TileVert){ur, vb, (int16_t)(ox + x0 + 8 - cr), (int16_t)(oy + y0 + 8 - cb), (int16_t)g_zbg[l][prio]};
+    out[prio][pal] += 2;
+  }
+}
+
+/* Gate 4t-d: main-screen window rows. On a half-colour visor frame runs are grouped by geometry only; the window
+ * state of every row (HDMA edges) is applied while quads are emitted. g_rw holds the visible spans of each row. */
+enum { kTkHidden = 0, kTkFull = 1, kTkSplit = 2 };
+
+static void BuildRowWin(int l, int r0, int r1) {
+  for (int r = r0; r < r1; r++) {
+    const BgSnap *s = &g_lines[r].bg[l];
+    int a[2] = {0, 0}, b[2] = {0, 0};
+    int n = WinSpans(s->wm, s->wl, s->wr, a, b);
+    RowWin *w = &g_rw[l][r];
+    w->n = (uint8_t)n;
+    for (int k = 0; k < 2; k++) {
+      w->a[k] = (int16_t)a[k];
+      w->b[k] = (int16_t)b[k];
+    }
+  }
+}
+
+/* One quad of tile e: x in [xl,xr), rows [ra,rb), clipped on the CPU (same maths as EmitList). */
+static void PutTileQuad(TileVert *out[2][8], const TileEnt *e, int l, int ox, int oy, int xl, int xr, int ra, int rb) {
+  int cols = l < 2 ? 32 : 64;
+  int x0 = e->x, y0 = e->y;
+  int cl = xl - x0, cr = x0 + 8 - xr, ct = ra - y0, cb = y0 + 8 - rb;
+  int prio = e->fl & 1, pal = e->pal, pt = e->pt;
+  float u = (float)((pt & (cols - 1)) * 8), v = (float)((pt >> (cols == 32 ? 5 : 6)) * 8);
+  float ul, ur, vt, vb;
+  if (e->fl & 2) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
+  if (e->fl & 4) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
+  TileVert *w = out[prio][pal];
+  w[0] = (TileVert){ul, vt, (int16_t)(ox + xl), (int16_t)(oy + ra), (int16_t)g_zbg[l][prio]};
+  w[1] = (TileVert){ur, vb, (int16_t)(ox + xr), (int16_t)(oy + rb), (int16_t)g_zbg[l][prio]};
+  out[prio][pal] += 2;
+}
+
+/* Quads of tile e for rows [r0,r1) under the per-row window table; consecutive rows with the same visible interval
+ * merge. out == NULL only counts (identical control flow, so counts and emission always agree). */
+static int TileRowsEmit(const TileEnt *e, int l, int r0, int r1, TileVert *out[2][8], int ox, int oy) {
+  int x0 = e->x;
+  int ra = e->y > r0 ? e->y : r0, rb = e->y + 8 < r1 ? e->y + 8 : r1;
+  int nq = 0;
+  int s0[2] = {0, 0}, s1[2] = {0, 0}, srow[2] = {-1, -1};
+  for (int r = ra; r <= rb; r++) {
+    int xl[2] = {0, 0}, xr[2] = {0, 0}, ni = 0;
+    if (r < rb) {
+      const RowWin *w = &g_rw[l][r];
+      for (int k = 0; k < w->n; k++) {
+        int a = w->a[k] > x0 ? w->a[k] : x0;
+        int b = w->b[k] < x0 + 8 ? w->b[k] : x0 + 8;
+        if (a < b) {
+          xl[ni] = a;
+          xr[ni] = b;
+          ni++;
+        }
+      }
+    }
+    for (int j = 0; j < 2; j++) {
+      bool have = j < ni;
+      if (srow[j] >= 0 && !(have && xl[j] == s0[j] && xr[j] == s1[j])) {
+        if (out)
+          PutTileQuad(out, e, l, ox, oy, s0[j], s1[j], srow[j], r);
+        nq++;
+        srow[j] = -1;
+      }
+      if (have && srow[j] < 0) {
+        s0[j] = xl[j];
+        s1[j] = xr[j];
+        srow[j] = r;
+      }
+    }
+  }
+  return nq;
+}
+
+static uint8_t TileWinKind(const TileEnt *e, int l, int r0, int r1) {
+  int x0 = e->x;
+  int ra = e->y > r0 ? e->y : r0, rb = e->y + 8 < r1 ? e->y + 8 : r1;
+  bool full = true, any = false;
+  for (int r = ra; r < rb; r++) {
+    const RowWin *w = &g_rw[l][r];
+    bool f = false;
+    for (int k = 0; k < w->n; k++) {
+      if (w->a[k] <= x0 && w->b[k] >= x0 + 8)
+        f = true;
+      if (w->a[k] < x0 + 8 && w->b[k] > x0)
+        any = true;
+    }
+    if (!f)
+      full = false;
+  }
+  if (ra >= rb || !any)
+    return kTkHidden;
+  return full ? kTkFull : kTkSplit;
+}
+
+static void CountListWin(int l, const TileList *lst, int r0, int r1, int counts[2][8]) {
+  for (int i = 0; i < lst->n; i++) {
+    const TileEnt *e = &g_ents[lst->first + i];
+    uint8_t k = TileWinKind(e, l, r0, r1);
+    g_tkind[lst->first + i] = k;
+    if (k == kTkFull)
+      counts[e->fl & 1][e->pal]++;
+    else if (k == kTkSplit)
+      counts[e->fl & 1][e->pal] += TileRowsEmit(e, l, r0, r1, NULL, 0, 0);
+  }
+}
+
+static void EmitListWin(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8], int ox, int oy) {
+  for (int i = 0; i < lst->n; i++) {
+    uint8_t k = g_tkind[lst->first + i];
+    if (k == kTkFull) {
+      TileList one = {(uint16_t)(lst->first + i), 1};
+      EmitList(l, &one, r0, r1, out, ox, oy, 0, kGameWidth);
+    } else if (k == kTkSplit) {
+      TileRowsEmit(&g_ents[lst->first + i], l, r0, r1, out, ox, oy);
+    }
+  }
+}
+
+/* Composite quads of the half-colour subscreen target: rows [rlo,rhi) grouped by colour-window state, one quad per
+ * span where colour math applies (gate 4t-b state). Returns the vertex count; out == NULL only counts. */
+static int SubAddRows(int rlo, int rhi, TileVert *out) {
+  int nv = 0;
+  for (int r = rlo; r < rhi;) {
+    const LineSnap *ls = &g_lines[r];
+    int e = r + 1;
+    while (e < rhi && g_lines[e].cwm == ls->cwm && g_lines[e].cwl == ls->cwl && g_lines[e].cwr == ls->cwr)
+      e++;
+    int wa[2], we[2];
+    int ns = WinSpans(ls->cwm, ls->cwl, ls->cwr, wa, we);
+    for (int k = 0; k < ns; k++, nv += 2) {
+      if (out) {
+        out[nv] = (TileVert){(float)wa[k], (float)r, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + r), 0};
+        out[nv + 1] = (TileVert){(float)we[k], (float)e, (int16_t)(kLeft + we[k]), (int16_t)(kTop + e), 0};
+      }
+    }
+    r = e;
+  }
+  return nv;
+}
+
+/* Gate 4q: samples layer l at the mosaic block origins into g_mosd[l][tile priority], as ppu.c does: column
++ * x - x % size, line y - (y - start) % size (1-based lines), then the scroll of the layer. */
+static void MosBuild(int l, const BgSnap *s, int size, int start) {
+  MosLayer *m = &g_mos[l];
+  bool bpp4 = l < 2;
+  int words = bpp4 ? 16 : 8;
+  int ncols = (kGameWidth + size - 1) / size, nrows = (kGameHeight - start) / size + 1;
+  int wide = s->flags & 1, high = (s->flags >> 1) & 1;
+  uint32_t *img0 = g_mosd[l][0], *img1 = g_mosd[l][1];
+  if (bpp4)
+    BuildClut4(kClutBright);
+  else
+    BuildClut2(kClutBright);
+  m->any[0] = m->any[1] = false;
+  for (int i = 0; i < nrows; i++) {
+    int by = start + i * size + s->vscroll, ty = by >> 3, row = by & 7;
+    int rowbase = s->mapadr + (ty & 31) * 32 + (((ty & 32) && high) ? (wide ? 0x800 : 0x400) : 0);
+    uint32_t *d0 = img0 + i * kMosDim, *d1 = img1 + i * kMosDim;
+    for (int j = 0; j < ncols; j++) {
+      int bx = j * size + s->hscroll;
+      unsigned t = g_vram[(rowbase + ((bx >> 3) & 31) + (((bx & 0x100) && wide) ? 0x400 : 0)) & 0x7fff];
+      int col = (t & 0x4000) ? (bx & 7) : 7 - (bx & 7);
+      int base = (s->tileadr + (int)(t & 0x3ff) * words + ((t & 0x8000) ? 7 - row : row)) & 0x7fff;
+      unsigned w0 = g_vram[base];
+      int px = (int)((w0 >> col) & 1) | (int)(((w0 >> (8 + col)) & 1) << 1);
+      if (bpp4) {
+        unsigned w1 = g_vram[(base + 8) & 0x7fff];
+        px |= (int)(((w1 >> col) & 1) << 2) | (int)(((w1 >> (8 + col)) & 1) << 3);
+      }
+      uint32_t c = 0;
+      int hp = (t & 0x2000) != 0;
+      if (px) {
+        int pal = (t >> 10) & 7;
+        c = bpp4 ? g_clut4[kClutBright][pal][px] : g_clut2[kClutBright][pal][px];
+        m->any[hp] = true;
+      }
+      d0[j] = hp ? 0 : c;
+      d1[j] = hp ? c : 0;
+    }
+  }
+  sceKernelDcacheWritebackRange(img0, (unsigned)nrows * kMosDim * 4);
+  sceKernelDcacheWritebackRange(img1, (unsigned)nrows * kMosDim * 4);
+}
+
+/* 0: layer l has no mosaic this frame, 1: image built (g_mos[l].on), -1: a setup the GE path cannot draw
+ * (geometry or mosaic changing inside the frame, mosaic on part of the rows, or the audit failed). */
+static int MosPrepare(int l) {
+  MosLayer *m = &g_mos[l];
+  const LineSnap *first = NULL;
+  int ndrawn = 0, nmos = 0;
+  m->on = false;
+  for (int r = 0; r < g_line_count; r++) {
+    const LineSnap *ls = &g_lines[r];
+    if (!(ls->bg[l].flags & 4))
+      continue;
+    ndrawn++;
+    if (!(ls->mosmask & (1 << l)))
+      continue;
+    nmos++;
+    if (!first)
+      first = ls;
+    else if (ls->mossize != first->mossize || ls->mosstart != first->mosstart || !SameGeom(first, ls, l))
+      return -1;
+  }
+  if (nmos == 0)
+    return 0;
+  if (nmos != ndrawn || !g_mos_ok || first->mossize < 2 || first->mossize > 16 || first->mosstart > 1)
+    return -1;
+  m->size = first->mossize;
+  m->start = first->mosstart;
+  MosBuild(l, &first->bg[l], m->size, m->start);
+  m->on = true;
+  g_mos_frame = true;
+  g_mos_size = m->size;
+  return 1;
+}
+
+//GE Frame
+
+static void CountReasons(int mask);
+
+#if SM_PSP_LOG
+/* Why a frame went back to software with kReasonSubMulti (first few occurrences only). */
+static void NoteSubMulti(const char *what, int row, int x, int y) {
+  static unsigned n;
+  if (n++ < 12)
+    PspLog("submulti f=%u %s row=%d %d %d (blend runs=%d tint runs=%d)", (unsigned)g_frame, what, row, x, y, g_nbruns,
+           g_ntint);
+}
+#define NOTE_SUBMULTI(what, row, x, y) NoteSubMulti(what, row, x, y)
+#else
+#define NOTE_SUBMULTI(what, row, x, y) ((void)0)
+#endif
+
+#if SM_PSP_LOG
+static void NoteBudget(int site, const char *what, int a, int b) {
+  static unsigned n[10];  /* one counter per BUDGET site (0-8) */
+  if (n[site]++ < 3)
+    PspLog("budget f=%u %s %d/%d", (unsigned)g_frame, what, a, b);
+}
+#define BUDGET(site, what, a, b) do { NoteBudget(site, what, a, b); CountReasons(kReasonBudget); } while (0)
+#else
+#define BUDGET(site, what, a, b) CountReasons(kReasonBudget)
+#endif
+
+//sprites
+
+static const uint8_t kSpriteSizes[8][2] = {
+  {8, 16}, {8, 32}, {8, 64}, {16, 32}, {16, 64}, {32, 64}, {16, 32}, {16, 32}
+};
+
+static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf, int z,
+                      int vx0, int vx1) {
+  int cl = x0 < vx0 ? vx0 - x0 : 0, cr = x0 + 8 > vx1 ? x0 + 8 - vx1 : 0;
+  int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
+  if (cl + cr >= 8 || ct + cb >= 8)
+    return;
+  if (g_obj_dry) {
+    g_obj_dry_n++;
+    return;
+  }
+  float u = (float)((pt & 31) * 8), v = (float)((pt >> 5) * 8);
+  float ul, ur, vt, vb;
+  if (hf) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
+  if (vf) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
+  TileVert *o = *w;
+  o[0] = (TileVert){ul, vt, (int16_t)(ox + x0 + cl), (int16_t)(oy + y0 + ct), (int16_t)z};
+  o[1] = (TileVert){ur, vb, (int16_t)(ox + x0 + 8 - cr), (int16_t)(oy + y0 + 8 - cb), (int16_t)z};
+  *w += 2;
+}
+
+/* Visible 8-pixel columns of a sprite: the ones ppu.c counts as slivers (col + x in (-8, 256)). *first = first one. */
+static int ObjVisCols(const Sprite *sp, int *first) {
+  int n = sp->size >> 3, f = -1, c = 0;
+  for (int tc = 0; tc < n; tc++) {
+    int cx = tc * 8 + sp->x;
+    if (cx > -8 && cx < 256) {
+      if (f < 0)
+        f = tc;
+      c++;
+    }
+  }
+  *first = f < 0 ? 0 : f;
+  return c;
+}
+
+/* Sprite k (index in g_spr) still has its column vi (visible-column index) on row r. */
+static inline bool ObjRowKeeps(int k, int r, int vi) {
+  int lk = g_row_lastk[r];
+  return lk > k || (lk == k && vi < (int)g_row_lastc[r]);
+}
+
+/* EmitQuad8 for the rows of the tile on which sprite k keeps this column (hardware sprite/sliver limit). */
+static void EmitQuad8Rows(TileVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf,
+                          int z, int vx0, int vx1, int k, int vi) {
+  int b = y0 + 8 < r1 ? y0 + 8 : r1;
+  int r = y0 > r0 ? y0 : r0;
+  while (r < b) {
+    if (!ObjRowKeeps(k, r, vi)) {
+      r++;
+      continue;
+    }
+    int e = r + 1;
+    while (e < b && ObjRowKeeps(k, e, vi))
+      e++;
+    EmitQuad8(w, ox, oy, x0, y0, r, e, pt, hf, vf, z, vx0, vx1);
+    r = e;
+  }
+}
+
+/* w == NULL: decode every tile the sprite uses (atlas fill, before the list is
+ * open). Otherwise emit CPU-clipped quads for rows [o0,o1). Tile selection
+ * mirrors ppu.c: 16x16-page wrap for the low nibble, row offset added to the
+ * high nibble, hflip mirrors columns, vflip mirrors rows. */
+static void WalkSprite(const Sprite *sp, int o0, int o1, TileVert **w, int z, int ox, int oy, int vx0, int vx1) {
+  int n = sp->size >> 3;
+  bool hf = (sp->attr & 0x4000) != 0, vf = (sp->attr & 0x8000) != 0;
+  int adr = (sp->attr & 0x100) ? g_obj_adr2 : g_obj_adr1;
+  int ycopies = (sp->y + sp->size > 256) ? 2 : 1;  /* rows wrap modulo 256 (uint8 row in ppu.c) */
+  int k = (int)(sp - g_spr), tc0 = 0;
+  if (g_ovf_rows && w)
+    ObjVisCols(sp, &tc0);
+  for (int tr = 0; tr < n; tr++) {
+    for (int tc = 0; tc < n; tc++) {
+      int sr = vf ? n - 1 - tr : tr, sc = hf ? n - 1 - tc : tc;
+      int used = ((((sp->attr & 0xff) >> 4) + sr) << 4) | (((sp->attr & 0xf) + sc) & 0xf);
+      int pt = ((adr + used * 16) & 0x7fff) >> 4;
+      if (EnsureTile(true, pt))
+        continue;
+      if (w == NULL)
+        continue;
+      int x0 = sp->x + tc * 8;
+      for (int c = 0; c < ycopies; c++) {
+        int y0 = (c ? sp->y - 256 : sp->y) + tr * 8;
+        if (g_ovf_rows)
+          EmitQuad8Rows(w, ox, oy, x0, y0, o0, o1, pt, hf, vf, z, vx0, vx1, k, tc - tc0);
+        else
+          EmitQuad8(w, ox, oy, x0, y0, o0, o1, pt, hf, vf, z, vx0, vx1);
+      }
+    }
+  }
+}
+
+/* Rows over 32 sprites / 34 slivers (ppu.c): sprites after the 32nd in-range one are dropped, and so is every
+ * sliver after the 34th (counted per sprite in screen column order). Records, per such row, the last kept
+ * sprite and how many of its slivers are kept. */
+static void ObjLimitRows(int r0, int r1, const uint8_t *cs, const uint16_t *ct) {
+  for (int r = 0; r < 256; r++) {
+    g_row_lastk[r] = 32767;
+    g_row_lastc[r] = 255;
+  }
+  for (int r = r0; r < r1; r++) {
+    if (cs[r] <= 32 && ct[r] <= 34)
+      continue;
+    int nsp = 0, nt = 0, lk = -1, lc = 0;
+    for (int k = 0; k < g_nspr; k++) {
+      const Sprite *sp = &g_spr[k];
+      if (((unsigned)(r - sp->y) & 255u) >= sp->size)
+        continue;
+      if (++nsp > 32)
+        break;
+      int first, vis = ObjVisCols(sp, &first);
+      lk = k;
+      if (nt + vis > 34) {
+        lc = 34 - nt;
+        break;
+      }
+      nt += vis;
+      lc = vis;
+    }
+    g_row_lastk[r] = (int16_t)lk;
+    g_row_lastc[r] = (uint8_t)lc;
+  }
+}
+
+/* Builds the sprite list in precedence order and checks the hardware limits.
+ * Returns false (reason counted) if the frame must fall back. */
+static bool PrepareObj(int o0, int o1) {
+  static uint8_t cs[256];
+  static uint16_t ct[256];
+  memset(cs, 0, sizeof(cs));
+  memset(ct, 0, sizeof(ct));
+  g_spr_quads = 0;
+  g_nspr = 0;
+  for (int k = 0; k < 128; k++) {
+    int i = (g_obj_start + k) & 127;
+    uint16_t w0 = g_oam[2 * i], w1 = g_oam[2 * i + 1];
+    int hb = g_hoam[i >> 2] >> ((i & 3) * 2);
+    int size = kSpriteSizes[g_obj_size][(hb >> 1) & 1];
+    int x = (w0 & 0xff) | ((hb & 1) << 8);
+    if (x > 255)
+      x -= 512;
+    int y = w0 >> 8;
+    if (x <= -size)
+      continue;
+    int tiles = 0;
+    for (int col = 0; col < size; col += 8)
+      if (col + x > -8 && col + x < 256)
+        tiles++;
+    bool any_row = false;
+    for (int r = 0; r < size; r++) {
+      int row = (y + r) & 255;
+      if (row >= o0 && row < o1) {
+        cs[row]++;
+        ct[row] = (uint16_t)(ct[row] + tiles);
+        any_row = true;
+      }
+    }
+    if (!any_row)
+      continue;
+    g_spr[g_nspr++] = (Sprite){(int16_t)x, (uint8_t)y, (uint8_t)size, w1};
+    int q = (size >> 3) * (size >> 3) * ((y + size > 256) ? 2 : 1);
+    g_spr_quads += q;
+  }
+  int nover = 0;
+  for (int r = o0; r < o1; r++)
+    if (cs[r] > 32 || ct[r] > 34)
+      nover++;
+  if (nover) {
+    if (!g_ovf_ok) {
+      CountReasons(kReasonObjLimit);
+      return false;
+    }
+    ObjLimitRows(o0, o1, cs, ct);
+    g_ovf_rows = nover;
+  }
+  if (g_spr_quads > kMaxSpriteQuads) {
+    BUDGET(0, "sprquads", g_spr_quads, kMaxSpriteQuads);
+    return false;
+  }
+  for (int i = 0; i < g_nspr; i++)
+    WalkSprite(&g_spr[i], o0, o1, NULL, 0, 0, 0, 0, kGameWidth);
+  return true;
+}
+
+static ObjSeg g_sobjseg[128];
+static int g_nsobjseg;
+static TileVert *g_sobjbase;
+
+/* Number of quads BuildObjGeom will emit for these bands (limited rows split tiles, so g_spr_quads is no bound). */
+static int ObjCountQuads(const ObjBand *bands, int nb) {
+  int wa[2], we[2];
+  TileVert *w = NULL;  /* never written: EmitQuad8 only counts */
+  g_obj_dry = true;
+  g_obj_dry_n = 0;
+  for (int b = 0; b < nb; b++) {
+    int ns = WinSpans(bands[b].wm, bands[b].wl, bands[b].wr, wa, we);
+    for (int s = 0; s < ns; s++)
+      for (int k = g_nspr - 1; k >= 0; k--)
+        WalkSprite(&g_spr[k], bands[b].r0, bands[b].r1, &w, 0, 0, 0, wa[s], we[s]);
+  }
+  g_obj_dry = false;
+  return g_obj_dry_n;
+}
+
+/* Emits the sprite quads of every window band at offset (ox,oy); returns the number of palette segments.
+ * Per band the visible spans are clipped on the CPU. Bands and spans never overlap, so their order does not
+ * matter; inside one the sprite with the lowest OAM index is still drawn last. */
+static int BuildObjGeom(const ObjBand *bands, int nb, int ox, int oy, ObjSeg *segs, TileVert **base_out) {
+  int nseg = 0, npairs = 0;
+  int sa[kMaxObjBands][2], sb[kMaxObjBands][2], ns[kMaxObjBands];
+  *base_out = NULL;
+  if (g_spr_quads <= 0 || nb <= 0)
+    return 0;
+  for (int b = 0; b < nb; b++) {
+    ns[b] = WinSpans(bands[b].wm, bands[b].wl, bands[b].wr, sa[b], sb[b]);
+    npairs += ns[b];
+  }
+  if (npairs == 0)
+    return 0;
+  int cap = g_spr_quads * npairs;
+  if (g_ovf_rows)
+    cap = ObjCountQuads(bands, nb);  /* limited rows split tiles: count what is really emitted */
+  if (cap <= 0)
+    return 0;
+  TileVert *base = VtxAlloc(cap * 2 * sizeof(TileVert));
+  TileVert *w = base;
+  *base_out = base;
+  for (int b = 0; b < nb; b++) {
+    for (int s = 0; s < ns[b]; s++) {
+      for (int k = g_nspr - 1; k >= 0; k--) {
+        const Sprite *sp = &g_spr[k];
+        int pal = (sp->attr >> 9) & 7, prio = (sp->attr >> 12) & 3;
+        TileVert *start = w;
+        WalkSprite(sp, bands[b].r0, bands[b].r1, &w, (prio * 4 + 2) * kZLevel + 127 - k, ox, oy, sa[b][s],
+                   sb[b][s]);
+        if (w == start)
+          continue;
+        if (nseg == 0 || segs[nseg - 1].pal != pal)
+          segs[nseg++] = (ObjSeg){(uint8_t)pal, (uint16_t)(start - base), 0};
+        segs[nseg - 1].n = (uint16_t)(segs[nseg - 1].n + (w - start));
+      }
+    }
+  }
+  return nseg;
+}
+
+/* True if a sprite that is visible horizontally covers a row with subscreen OBJ + colour math. */
+static bool SubObjHit(void) {
+  static uint8_t row[256];
+  bool any = false;
+  memset(row, 0, sizeof(row));
+  for (int r = 0; r < g_line_count; r++)
+    if (g_lines[r].subobj) {
+      row[r] = 1;
+      any = true;
+    }
+  if (!any)
+    return false;
+  for (int i = 0; i < 128; i++) {
+    int hb = g_hoam[i >> 2] >> ((i & 3) * 2);
+    int size = kSpriteSizes[g_obj_size][(hb >> 1) & 1];
+    int x = (g_oam[2 * i] & 0xff) | ((hb & 1) << 8);
+    if (x > 255)
+      x -= 512;
+    if (x <= -size)
+      continue;
+    int y = g_oam[2 * i] >> 8;
+    for (int r = 0; r < size; r++)  /* rows wrap modulo 256 like ppu.c */
+      if (row[(y + r) & 255])
+        return true;
+  }
+  return false;
+}
+
+/* One mode 7 row of the image path, computed as PpuDrawBackground_mode7 in ppu.c does (y = 1-based line):
+ * an 8-bit colour index per pixel, 0 = transparent. */
+static void M7RenderRow(const LineSnap *ls, int y, uint8_t *dst) {
+  const int16_t *m = ls->m7m;
+  unsigned fl = ls->m7fl;
+  int xCenter = ((int16_t)(m[4] << 3)) >> 3, yCenter = ((int16_t)(m[5] << 3)) >> 3;
+  int hScroll = ((int16_t)(m[6] << 3)) >> 3, vScroll = ((int16_t)(m[7] << 3)) >> 3;
+  int clippedH = hScroll - xCenter, clippedV = vScroll - yCenter;
+  clippedH = (clippedH & 0x2000) ? (clippedH | ~1023) : (clippedH & 1023);
+  clippedV = (clippedV & 0x2000) ? (clippedV | ~1023) : (clippedV & 1023);
+  int size = ls->mossize;
+  bool mos = (fl & 32) && size > 1;
+  if (mos)
+    y -= (y - (int)ls->mosstart) % size;
+  uint32_t ry = (fl & 8) ? (uint32_t)(255 - y) : (uint32_t)y;
+  uint32_t a = (uint32_t)(int32_t)m[0], c = (uint32_t)(int32_t)m[2];
+  uint32_t X0 = (uint32_t)((m[0] * clippedH) & ~63) + (uint32_t)((m[1] * (int)ry) & ~63) +
+                (uint32_t)((m[1] * clippedV) & ~63) + ((uint32_t)xCenter << 8);
+  uint32_t Y0 = (uint32_t)((m[2] * clippedH) & ~63) + (uint32_t)((m[3] * (int)ry) & ~63) +
+                (uint32_t)((m[3] * clippedV) & ~63) + ((uint32_t)yCenter << 8);
+  uint32_t outside = (fl & 1) ? 0x3ffffu : 0xffffffffu;
+  bool fill = (fl & 2) != 0, xf = (fl & 4) != 0;
+  uint32_t rx0 = xf ? 255u : 0u;
+  uint32_t xpos = X0 + a * rx0, ypos = Y0 + c * rx0;
+  uint32_t dx = xf ? 0u - a : a, dy = xf ? 0u - c : c;
+  const uint16_t *vr = g_vram;
+  if (!mos) {
+    for (int x = 0; x < kGameWidth; x++, xpos += dx, ypos += dy) {
+      unsigned tile = 0;
+      if ((xpos | ypos) > outside) {
+        if (!fill) {
+          dst[x] = 0;
+          continue;
+        }
+      } else {
+        tile = vr[(ypos >> 11 & 0x7f) * 128 + (xpos >> 11 & 0x7f)] & 0xff;
+      }
+      dst[x] = (uint8_t)(vr[tile * 64 + (ypos >> 8 & 7) * 8 + (xpos >> 8 & 7)] >> 8);
+    }
+  } else {
+    for (int x = 0; x < kGameWidth; x += size, xpos += dx * (uint32_t)size, ypos += dy * (uint32_t)size) {
+      unsigned tile = 0, pixel = 0;
+      if ((xpos | ypos) > outside) {
+        if (fill)
+          pixel = vr[(ypos >> 8 & 7) * 8 + (xpos >> 8 & 7)] >> 8;
+      } else {
+        tile = vr[(ypos >> 11 & 0x7f) * 128 + (xpos >> 11 & 0x7f)] & 0xff;
+        pixel = vr[tile * 64 + (ypos >> 8 & 7) * 8 + (xpos >> 8 & 7)] >> 8;
+      }
+      int w = kGameWidth - x < size ? kGameWidth - x : size;
+      memset(dst + x, (int)pixel, (size_t)w);
+    }
+  }
+}
+
+/* Gate 4r: renders every mode 7 row (BG1 on) into g_m7img and records the row ranges to draw. CPU only, before
+ * the list is opened; the written rows are written back for the GE. */
+static void M7PrepareImg(void) {
+  int nr = 0, rmin = -1, rmax = -1;
+  PROF(uint32_t t0 = Now();)
+  for (int r = 0; r < g_line_count; r++) {
+    if (!g_lines[r].m7on)
+      continue;
+    M7RenderRow(&g_lines[r], r + 1, g_m7img + r * 256);
+    if (rmin < 0)
+      rmin = r;
+    rmax = r;
+    if (nr && g_m7rng[nr - 1][1] == r) {
+      g_m7rng[nr - 1][1] = (uint16_t)(r + 1);
+    } else {
+      g_m7rng[nr][0] = (uint16_t)r;
+      g_m7rng[nr][1] = (uint16_t)(r + 1);
+      nr++;
+    }
+  }
+  if (rmin >= 0)
+    sceKernelDcacheWritebackRange(g_m7img + rmin * 256, (unsigned)(rmax - rmin + 1) * 256);
+  g_m7_nrng = nr;
+  g_m7_img = nr > 0;
+  PROF(g_m7i_us = Now() - t0;)
+}
+
+/* Mode 7 frame as textured quads. With b = c = 0 the screen maps to the plane by
+ *   plane x = (X0 + a * x) >> 8                      (linear in x)
+ *   plane y = (Y0 + ((d * ry) & ~63)) >> 8           (constant along a row; ry = line, 1-based)
+ * exactly as ppu.c computes it. Rows are grouped by plane tile row when d is a multiple of 64 (the
+ * mapping is then exactly linear and one quad covers a whole tile band), otherwise by plane row (the
+ * quantisation to 64 makes the mapping stair-stepped) with a constant v. Texture coordinates are
+ * placed so that nearest sampling picks the same texel ppu.c does: target + 1/512 stays clear of
+ * texel boundaries, and g_uvh says whether the GE samples at the pixel centre or the corner. */
+static bool M7Prepare(void) {
+  g_m7_nq = 0;
+  g_m7_img = false;
+  g_m7_nrng = 0;
+  if (g_m7_rows == 0)
+    return true;
+  const int16_t *m = g_m7c.m;
+  if (!(g_m7_same && g_m7q_ok && g_m7c.fl == 1 && !m[1] && !m[2] && m[0] > 0 && m[3] > 0)) {
+    M7PrepareImg();  /* rotation, per-line matrix, flips, charfill, mosaic, small field */
+    return true;
+  }
+  int a = m[0], d = m[3];
+  int xCenter = ((int16_t)(m[4] << 3)) >> 3, yCenter = ((int16_t)(m[5] << 3)) >> 3;
+  int hScroll = ((int16_t)(m[6] << 3)) >> 3, vScroll = ((int16_t)(m[7] << 3)) >> 3;
+  int clippedH = hScroll - xCenter, clippedV = vScroll - yCenter;
+  clippedH = (clippedH & 0x2000) ? (clippedH | ~1023) : (clippedH & 1023);
+  clippedV = (clippedV & 0x2000) ? (clippedV | ~1023) : (clippedV & 1023);
+  uint32_t X0 = (uint32_t)((a * clippedH) & ~63) + ((uint32_t)xCenter << 8);
+  uint32_t Yc = (uint32_t)((d * clippedV) & ~63) + ((uint32_t)yCenter << 8);
+  g_m7_yc = Yc;
+  const float du = (float)a / 256.0f, dv = (float)d / 256.0f;
+
+  struct { int xa, xb, tx, m0, m1; float u; } cs[160];
+  int ncs = 0;
+  for (int x = 0; x < kGameWidth; x++) {
+    uint32_t X = X0 + (uint32_t)a * (uint32_t)x;
+    if (X > 0x3ffff)
+      continue;
+    int tx = (int)(X >> 11);
+    if (ncs && cs[ncs - 1].xb == x && cs[ncs - 1].tx == tx) {
+      cs[ncs - 1].xb = x + 1;
+    } else {
+      if (ncs == 160) {
+        g_m7_nq = 0;
+        M7PrepareImg();
+        return true;
+      }
+      cs[ncs].xa = x;
+      cs[ncs].xb = x + 1;
+      cs[ncs].tx = tx;
+      cs[ncs].u = (float)(X - ((uint32_t)tx << 11)) / 256.0f;
+      cs[ncs].m0 = cs[ncs].m1 = (int)(X & 255);
+      ncs++;
+    }
+    if ((int)(X & 255) < cs[ncs - 1].m0) cs[ncs - 1].m0 = (int)(X & 255);
+    if ((int)(X & 255) > cs[ncs - 1].m1) cs[ncs - 1].m1 = (int)(X & 255);
+  }
+  /* Nearest sampling takes floor(u). The exact plane position of a pixel is a multiple of 1/256; shifting
+   * it by delta keeps the right texel as long as 0 <= m/256 + delta < 1 for every residue m (0..255) that
+   * occurs. Put delta in the middle of that range: the margin against GE rounding is then as large as the
+   * residues allow (a fixed 1/512 failed on hardware for scales that put pixels exactly on texel edges). */
+  for (int k = 0; k < ncs; k++)
+    cs[k].u += (float)(256 - cs[k].m0 - cs[k].m1) / 512.0f;
+
+  bool band = (d % 64) == 0;
+  int r = 0;
+  while (r < g_line_count) {
+    uint32_t Y = (((uint32_t)d * (uint32_t)(r + 1)) & ~63u) + Yc;
+    if (!g_lines[r].m7on || Y > 0x3ffff) {
+      r++;
+      continue;
+    }
+    uint32_t key = band ? Y >> 11 : Y >> 8;
+    int r1 = r + 1;
+    while (r1 < g_line_count && g_lines[r1].m7on) {
+      uint32_t Y1 = (((uint32_t)d * (uint32_t)(r1 + 1)) & ~63u) + Yc;
+      if (Y1 > 0x3ffff || (band ? Y1 >> 11 : Y1 >> 8) != key)
+        break;
+      r1++;
+    }
+    int ty = (int)(Y >> 11);
+    float v0, v1;
+    if (band) {
+      int m0 = (int)(Y & 255), m1 = m0;
+      for (int rr = r + 1; rr < r1; rr++) {
+        int m = (int)((((uint32_t)d * (uint32_t)(rr + 1)) & ~63u) + Yc) & 255;
+        if (m < m0) m0 = m;
+        if (m > m1) m1 = m;
+      }
+      float tv = (float)(Y - ((uint32_t)ty << 11)) / 256.0f + (float)(256 - m0 - m1) / 512.0f;
+      v0 = tv - g_uvh[1] * dv;
+      v1 = v0 + (float)(r1 - r) * dv;
+    } else {
+      v0 = v1 = (float)((Y >> 8) & 7) + 0.5f;
+    }
+    for (int k = 0; k < ncs; k++) {
+      int t = g_vram[ty * 128 + cs[k].tx] & 0xff;
+      if (EnsureTile7(t))
+        continue;
+      if (g_m7_nq >= (g_m7big_ok ? kM7MaxQuads : kM7BaseQuads)) {
+        g_m7_nq = 0;
+        M7PrepareImg();  /* too many quads: draw the image instead of falling back to software */
+        return true;
+      }
+      float ax = (float)((t & 15) * 8), ay = (float)((t >> 4) * 8);
+      float u0 = ax + cs[k].u - g_uvh[0] * du;
+      M7Quad *q = &g_m7q[g_m7_nq++];
+      q->x0 = (int16_t)cs[k].xa;
+      q->x1 = (int16_t)cs[k].xb;
+      q->y0 = (int16_t)r;
+      q->y1 = (int16_t)r1;
+      q->u0 = u0;
+      q->u1 = u0 + (float)(cs[k].xb - cs[k].xa) * du;
+      q->v0 = ay + v0;
+      q->v1 = ay + v1;
+    }
+    r = r1;
+  }
+  return true;
+}
+
+// Wait for the panel only if ahead
+static void Pace(void) {
+  uint32_t t = Now();
+#if PSP_VBLANK_GATE
+  if (sceDisplayGetVcount() == g_vcount_last)
+    sceDisplayWaitVblankStart();
+#else
+  sceDisplayWaitVblankStart();
+#endif
+  g_vbwait_us = Now() - t;
+}
+
+/* Compares the GE image of a mode 7 frame with the software image (the software PPU drew this frame too).
+ * Only the first kM7Verify mode 7 frames; reads the draw buffer through the uncached VRAM mirror. */
+static void GeVerify(void) {
+  const uint16_t *ge = (const uint16_t *)(g_vram_u + g_draw_off);
+  uint32_t exact = 0, near = 0, bad = 0;
+  int bx = -1, by = -1;
+  uint16_t bsw = 0, bge = 0;
+  static uint16_t rowbad[kMaxLines];
+  memset(rowbad, 0, sizeof(rowbad));
+  for (int y = 0; y < g_line_count; y++)
+    for (int x = 0; x < kGameWidth; x++) {
+      uint16_t sw = Rgb565(g_framebuffer + (y * kGameWidth + x) * 4), g = ge[(kTop + y) * 512 + kLeft + x];
+      if (sw == g) {
+        exact++;
+      } else {
+        int dr = (sw & 31) - (g & 31), dg = ((sw >> 5) & 63) - ((g >> 5) & 63), db = (sw >> 11) - (g >> 11);
+        if (dr >= -1 && dr <= 1 && dg >= -2 && dg <= 2 && db >= -1 && db <= 1) {
+          near++;
+        } else {
+          rowbad[y]++;
+          if (!bad) {
+            bx = x;
+            by = y;
+            bsw = sw;
+            bge = g;
+          }
+          bad++;
+        }
+      }
+    }
+  bool m7 = g_m7_nq > 0;
+  if (m7) {
+    g_m7_vn++;
+    g_m7_vbad += bad;
+    g_m7_vnear += near;
+  }
+  if (g_m7_img) {
+    g_m7i_vn++;
+    g_m7i_vbad += bad;
+    if (g_m7i_vn >= 3 && g_m7i_vbad / g_m7i_vn > 600) {
+      g_m7i_ok = false;
+      PspLog("m7verify: image mode 7 differs, GE image path disabled");
+    }
+  }
+  if (m7 && g_m7_nq > kM7BaseQuads) {
+    g_m7_bigv++;
+    g_m7_bigbad += bad;
+    if (g_m7_bigv >= 3 && g_m7_bigbad / g_m7_bigv > 600) {
+      g_m7big_ok = false;
+      PspLog("m7verify: large mode 7 frames differ, quad cap back to %d", (int)kM7BaseQuads);
+    }
+  }
+  if (g_bright_rows)
+    g_br_vn++;
+  if (g_win_rows && !g_sh_frame && !g_w2_frame) {  /* half-colour and window-2 frames have their own audits (gates 4t-d/u) */
+    g_win_vn++;
+    g_win_vbad += bad;
+    if (g_win_vn >= 3 && g_win_vbad / g_win_vn > 600) {
+      g_win_ok = false;
+      PspLog("geaudit: window frames differ too much, GE windows disabled");
+    }
+  }
+  if (g_prev_rows) {
+    g_prev_vn++;
+    g_prev_vbad += bad;
+    if (g_prev_vn >= 3 && g_prev_vbad / g_prev_vn > 600) {
+      g_prev_ok = false;
+      PspLog("geaudit: prevent-math no-op frames differ too much, GE no-op rule disabled");
+    }
+  }
+  if (g_cw_rows) {
+    g_cw_vn++;
+    g_cw_vbad += bad;
+    if (g_cw_vn >= 3 && g_cw_vbad / g_cw_vn > 600) {
+      g_cw_ok = false;
+      PspLog("geaudit: colour-window tint frames differ too much, GE colour window disabled");
+    }
+  }
+  if (g_sf_frame) {
+    uint32_t *vn = g_sfo_frame ? &g_sfo_vn : g_sf_zero ? &g_sf0_vn : &g_sf_vn;
+    uint32_t *vbad = g_sfo_frame ? &g_sfo_vbad : g_sf_zero ? &g_sf0_vbad : &g_sf_vbad;
+    const char *nm = g_sfo_frame ? "subfixo" : g_sf_zero ? "subfix0" : "subfix";
+    (*vn)++;
+    *vbad += bad;
+    PspLog("%s f=%u rows=%d..%d fix=%04x bruns=%d masks=%d bad=%u", nm, (unsigned)g_frame, g_sf_r0, g_sf_r1 - 1,
+           (unsigned)g_sf_col, g_nbruns, g_sf_masks, (unsigned)bad);
+    if (*vn >= 3 && *vbad / *vn > 600) {
+      if (g_sfo_frame)
+        g_sfo_ok = false;
+      else if (g_sf_zero)
+        g_sf0_ok = false;
+      else
+        g_sf_ok = false;
+      PspLog("geaudit: subscreen + fixed colour frames differ too much, GE %s disabled", nm);
+    }
+  }
+  if (g_sh_frame) {
+    static const char *const kShName[3] = {"subhalf", "subhobj", "subhneg"};
+    int k = g_shn_frame ? 2 : g_shobj_frame ? 1 : 0;
+    uint32_t *vn = k == 2 ? &g_shn_vn : k == 1 ? &g_sho_vn : &g_sh_vn;
+    uint32_t *vbad = k == 2 ? &g_shn_vbad : k == 1 ? &g_sho_vbad : &g_sh_vbad;
+    (*vn)++;
+    *vbad += bad;
+    PspLog("%s f=%u rows=%d..%d fix=%04x bruns=%d masks=%d winrows=%u bad=%u", kShName[k],
+           (unsigned)g_frame, g_sf_r0, g_sf_r1 - 1, (unsigned)g_sf_col, g_nbruns, g_sf_masks, (unsigned)g_win_rows,
+           (unsigned)bad);
+    if ((*vn >= 3 && *vbad / *vn > 600) || bad > 8192) {
+      if (k == 2)
+        g_shn_ok = false;
+      else if (k == 1)
+        g_shobj_ok = false;
+      else
+        g_sh_ok = false;
+      PspLog("geaudit: half-colour frames differ too much, GE %s disabled", kShName[k]);
+     }
+   }
+  if (g_w2_frame) {
+    g_w2_vn++;
+    g_w2_vbad += bad;
+    PspLog("w2rows f=%u winrows=%u cw=%u bad=%u", (unsigned)g_frame, (unsigned)g_win_rows, (unsigned)g_cw_rows,
+           (unsigned)bad);
+    if ((g_w2_vn >= 3 && g_w2_vbad / g_w2_vn > 600) || bad > 8192) {
+      g_w2_ok = false;
+      PspLog("geaudit: window-2 frames differ too much, GE window 2 disabled");
+    }
+  }
+  if (g_ovf_rows) {
+    g_ovf_vn++;
+    g_ovf_vbad += bad;
+    if (g_ovf_vn >= 3 && g_ovf_vbad / g_ovf_vn > 64) {
+      g_ovf_ok = false;
+      PspLog("geaudit: sprite-limit frames differ, GE sprite limit disabled");
+    }
+  }
+  if (g_mos_frame) {
+    g_mos_vn++;
+    g_mos_vbad += bad;
+    if (g_mos_vn >= 3 && g_mos_vbad / g_mos_vn > 600) {
+      g_mos_ok = false;
+      PspLog("geaudit: mosaic frames differ too much, GE mosaic disabled");
+    }
+  }
+  if (g_nbband > 1) {
+    g_bnd_vn++;
+    g_bnd_vbad += bad;
+    if (g_bnd_vn >= 3 && g_bnd_vbad / g_bnd_vn > 600) {
+      g_band_ok = false;
+      PspLog("geaudit: multi-band subscreen blend differs too much, disabled");
+    }
+  }
+  PspLog("%s f=%u exact=%u near=%u bad=%u (mode=%d quads=%d tint=%d blend=%d bright=%u win=%u ovf=%d mos=%d img=%d m7rows=%d bands=%d prev=%u cw=%u) first bad (%d,%d) sw=%04x ge=%04x", (m7 || g_m7_img) ? "m7verify" : "geaudit",
+         (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad, g_frame_mode, g_m7_nq, g_ntint, g_nbruns,
+         (unsigned)g_bright_rows, (unsigned)g_win_rows, g_ovf_rows, g_mos_frame ? g_mos_size : 0, g_m7_img ? 1 : 0,
+         g_m7_rows, g_nbband, (unsigned)g_prev_rows, (unsigned)g_cw_rows, bx, by, bsw, bge);
+  (void)bx; (void)by; (void)bsw; (void)bge;
+  if (bad) {
+    int shown = 0;
+    for (int y = 0; y < g_line_count && shown < 8; y++)
+      if (rowbad[y]) {
+        shown++;
+        if (m7) {
+          uint32_t Y = (((uint32_t)g_m7c.m[3] * (uint32_t)(y + 1)) & ~63u) + g_m7_yc;
+          (void)Y;
+          PspLog("  badrow y=%d n=%u py=%u forced=%d bright=%d a=%d d=%d c=(%d,%d) s=(%d,%d)", y, (unsigned)rowbad[y], (unsigned)(Y >> 8),
+                 g_lines[y].forced, g_lines[y].brightness, g_m7c.m[0], g_m7c.m[3], g_m7c.m[4], g_m7c.m[5], g_m7c.m[6], g_m7c.m[7]);
+        } else {
+          PspLog("  badrow y=%d n=%u forced=%d bright=%d cg0=%04x", y, (unsigned)rowbad[y], g_lines[y].forced, g_lines[y].brightness,
+                 g_lines[y].cg0);
+        }
+      }
+  }
+  if (g_frame_multisub) {
+    g_ms_vn++;
+    g_ms_vbad += bad;
+    if (g_ms_vn >= 3 && g_ms_vbad / g_ms_vn > 600) {
+      g_multisub_ok = false;
+      PspLog("geaudit: multi-layer subscreen differs too much, disabled");
+    }
+  }
+  if (m7 && g_m7_vn >= 6 && g_m7_vbad / g_m7_vn > 600) {
+    g_m7q_ok = false;
+    PspLog("m7verify: too many differences, GE mode 7 tile quads disabled (image path takes over)");
+  }
+}
+
+static void Present(void) {
+  uint32_t t = Now();
+  g_build_us = t - g_t_list_start;
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  g_gewait_us = Now() - t;
+  if (g_verify_now) {
+    g_verify_now = false;
+    PROF(g_hit_verified = true;)    
+    GeVerify();
+  }
+  Pace();
+  if (g_triple) {
+    /* The queued buffer goes on screen at the next vblank. Pace() waited for a vblank since the previous swap only
+     * if the game ran ahead, so draw the next frame into the one buffer that is neither queued nor on screen. */
+    sceDisplaySetFrameBuf((void *)((uintptr_t)sceGeEdramGetAddr() + g_draw_off), 512, PSP_DISPLAY_PIXEL_FORMAT_565,
+                          PSP_DISPLAY_SETBUF_NEXTFRAME);
+    int next = 3 - g_draw_i - g_prev_i;
+    g_prev_i = g_draw_i;
+    g_draw_i = next;
+    g_draw_off = kBufOff[next];
+  } else {
+    sceGuSwapBuffers();
+    g_draw_off ^= 0x44000;
+  }
+  g_vcount_last = sceDisplayGetVcount();
+}
+
+// Pixel values (bit i = value i, i >= 1) of palette pal whose colour is not black. 
+static uint16_t PalNonBlackMask(int l, int pal) {
+  int n = l < 2 ? 16 : 4, base = pal * n;
+  uint16_t m = 0;
+  for (int i = 1; i < n; i++)
+    if (g_cgram[(base + i) & 0xff])
+      m |= (uint16_t)(1u << i);
+  return m;
+}
+
+#if SM_PSP_LOG
+static uint32_t g_subbg_diag, g_subbg_frame, g_subbg_n;
+#endif
+
+/* Classifies layer l, shown on the subscreen over rows [r0,r1). A subscreen
+ * pixel adds cgram[index] (ppu.c), so a tile only changes the picture if it uses
+ * a pixel value whose colour is not black. BG3 HUD tiles (high priority, also on
+ * the main screen with math off) are covered by main-screen BG3 pixels and never
+ * matter. Returns -1 if the tile pool is full, 1 if the layer contributes (its
+ * tile list is kept in *keep for the blend pass), 0 if not (list discarded). */
+static int SubRunContributes(int l, const LineSnap *ls, int r0, int r1, bool all, TileList *keep) {
+#if SM_PSP_LOG
+  const BgSnap *s = &ls->bg[l];
+#endif
+  bool bpp4 = l < 2;
+  int mark = g_ent_top;
+  TileList lst;
+  if (!BuildTileList(l, ls, r0, r1, &lst))
+    return -1;
+  if (all) {  /* gate 4t-c: target is cleared to the fixed colour, so every non-empty tile matters (black ones too) */
+    if (lst.n == 0) {
+      g_ent_top = mark;
+      return 0;
+    }
+    *keep = lst;
+    return 1;
+  }
+  bool harmless_hi = l == 2 && (ls->bg[2].flags & 4) && !(ls->mathmask & 4);  /* BG3 high is level 15 */
+  uint16_t pm[8];
+  uint8_t pm_ok = 0;
+  int contrib = 0;
+#if SM_PSP_LOG
+  int shown = 0;
+  struct { int tx, ty; uint16_t pt, mask, pmask; uint8_t pal, fl; } ex[4];
+#endif
+  for (int i = 0; i < lst.n; i++) {
+    const TileEnt *e = &g_ents[lst.first + i];
+    if (harmless_hi && (e->fl & 1))
+      continue;
+    if (!(pm_ok & (1 << e->pal))) {
+      pm[e->pal] = PalNonBlackMask(l, e->pal);
+      pm_ok |= (uint8_t)(1 << e->pal);
+    }
+    uint16_t used = (bpp4 ? g_mask4 : g_mask2)[e->pt];
+    if (used & pm[e->pal]) {
+#if SM_PSP_LOG
+      if (shown < 4)
+        ex[shown++] = (typeof(ex[0])){((e->x + s->hscroll) >> 3) & 63, ((e->y + 1 + s->vscroll) >> 3) & 63,
+                                      e->pt, used, pm[e->pal], e->pal, e->fl};
+#endif
+      contrib++;
+    }
+  }
+#if SM_PSP_LOG
+  bool subbg_want = false;
+  if (contrib) {
+    subbg_want = g_subbg_diag < 3;
+    if (!subbg_want && (g_frame % 3000) == 0) {
+      if (g_subbg_frame != g_frame) { g_subbg_frame = g_frame; g_subbg_n = 0; }
+      subbg_want = g_subbg_n++ < 4;
+    }
+  }
+  if (subbg_want) {
+    g_subbg_diag++;
+    PspLog("SUBBG f=%u l=%d rows=%d-%d map=%04x tiles=%04x hs=%d vs=%d fl=%02x b3p=%d math=%02x nonempty=%d contrib=%d",
+           (unsigned)g_frame, l, r0, r1, s->mapadr, s->tileadr, s->hscroll, s->vscroll, s->flags,
+           ls->bg3prio, ls->mathmask, (int)lst.n, contrib);
+    for (int i = 0; i < shown; i++)
+      PspLog("  tile tx=%d ty=%d pt=%u pal=%u fl=%u used=%04x nonblack=%04x", ex[i].tx, ex[i].ty, ex[i].pt,
+             ex[i].pal, ex[i].fl, ex[i].mask, ex[i].pmask);
+  }
+#endif
+  if (contrib) {
+    *keep = lst;
+    return 1;
+  }
+  g_ent_top = mark;
+  return 0;
+}
+
+static void CountReasons(int mask) {
+  for (int i = 0; i < kReasonCount; i++)
+    if (mask & (1 << i))
+      g_reason_counts[i]++;
+}
+
+/* Depth levels (ppu.c z values, level * kZLevel): BG3 low 1, OBJ prio0 2, OBJ1 6, BG2 low 7, BG1 low 8,
+ * OBJ2 10, BG2 high 11, BG1 high 12, OBJ3 14, BG3 high 15. ppu.c always uses 15 for BG3 high (it never
+ * looks at the BG3-priority bit). Sprites: (prio*4+2)*kZLevel + 127-k, k = precedence index. */
+
+enum { kVtTile = GU_TEXTURE_32BITF | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+       kVtColor = GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+       kVtTexF = GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D };
+
+static inline void GeDraw(int vtype, int n, const void *v) {
+  PROF(g_c_draws++; g_c_verts += (uint32_t)n;)
+  sceGuDrawArray(GU_SPRITES, vtype, n, NULL, v);
+}
+
+/* Splits [x0,x1) at multiples of 64 framebuffer pixels. PPSSPP's GE notes say
+ * 2D images are cheaper to draw in 64-pixel-wide vertical strips on 16-bit
+ * targets. Returns the strip count; edges[0..n] are the boundaries. */
+static int StripEdges(int x0, int x1, int *edges) {
+#if SM_PSP_GE_STRIPS
+  int n = 0;
+  edges[n++] = x0;
+  for (int x = (x0 / 64 + 1) * 64; x < x1; x += 64)
+    edges[n++] = x;
+  edges[n++] = x1;
+  return n - 1;
+#else
+  edges[0] = x0;
+  edges[1] = x1;
+  return 1;
+#endif
+}
+
+static void BindBg(int l, int b, int p) {
+  PROF(g_c_clut++;)
+  sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
+  if (l < 2) {
+    sceGuClutLoad(2, g_clut4[b][p]);
+    sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+    sceGuTexImage(0, 256, 512, 256, g_atlas4);
+  } else {
+    sceGuClutLoad(1, g_clut2[b][p]);
+    sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+    sceGuTexImage(0, 512, 512, 512, g_atlas2);
+  }
+}
+
+/* Gate 4t-d: BG3 with the alpha 0x80 palette (half-colour subscreen target). */
+static void BindBgHalf(int p) {
+  PROF(g_c_clut++;)
+  sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
+  sceGuClutLoad(1, g_clut2h[p]);
+  sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+  sceGuTexImage(0, 512, 512, 512, g_atlas2);
+}
+
+/* Mosaic layer: the stretched image of this priority, one nearest-sampled quad per run and window span. */
+static void DrawMosPass(int l, int pr) {
+  const MosLayer *m = &g_mos[l];
+  if (!m->any[pr])
+    return;
+  sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+  sceGuTexImage(0, kMosDim, kMosDim, kMosDim, g_mosd[l][pr]);
+  sceGuTexFlush();
+  for (int i = 0; i < g_nruns[l]; i++) {
+    const BgSnap *wb = &g_lines[g_runs[l][i].first].bg[l];
+    int wa[2], we[2];
+    int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+    for (int k = 0; k < ns; k++)
+      GeDraw(kVtTile, 2, m->v + ((i * 2 + k) * 2 + pr) * 2);
+  }
+}
+
+static void DrawBgPass(int l, int pr) {
+  if (g_mos[l].on) {
+    DrawMosPass(l, pr);
+    return;
+  }
+  /* One draw per palette: the vertices of a palette are contiguous across runs (see the geometry pass), so
+   * consecutive runs with the same brightness (same CLUT) merge. Runs cover disjoint rows: order is irrelevant. */
+  int nr = g_nruns[l];
+  for (int p = 0; p < 8; p++) {
+    for (int i = 0; i < nr;) {
+      const Geom *g = &g_geom[l][i][pr][p];
+      if (g->n == 0) {
+        i++;
+        continue;
+      }
+      const TileVert *v = g->v;
+      int n = g->n, j = i + 1;
+      for (; j < nr; j++) {
+        const Geom *h = &g_geom[l][j][pr][p];
+        if (h->n == 0)
+          continue;
+        if (h->v != v + n)
+          break;
+        n += h->n;
+      }
+      BindBg(l, kClutBright, p);
+      GeDraw(kVtTile, n, v);
+      i = j;
+    }
+  }
+}
+
+/* Same merging for the subscreen blend runs (grouped by layer; depth markers or disjoint rows decide overlaps). */
+static void DrawBlendBgs(bool half) {
+  for (int l = 0; l < kLayers; l++) {
+    for (int pr = 0; pr < 2; pr++) {
+      for (int p = 0; p < 8; p++) {
+        for (int i = 0; i < g_nbruns;) {
+          const Geom *g = &g_bgeom[i][pr][p];
+          if (g_bruns[i].l != l || g->n == 0) {
+            i++;
+            continue;
+          }
+          const TileVert *v = g->v;
+          int n = g->n, j = i + 1;
+          for (; j < g_nbruns; j++) {
+            const Geom *h = &g_bgeom[j][pr][p];
+            if (g_bruns[j].l != l || h->n == 0)
+              continue;
+            if (h->v != v + n)
+              break;
+            n += h->n;
+          }
+          if (half && l == 2)
+            BindBgHalf(p);
+          else
+            BindBg(l, kClutBright, p);
+          GeDraw(kVtTile, n, v);
+          i = j;
+        }
+      }
+    }
+  }
+}
+
+/* only_excluded: draw just the sprites that never take part in colour math
+ * (OBJ palettes 0-3 always; 4-7 when the OBJ math bit is off). */
+static void DrawObjSegs(const ObjSeg *segs, int n, const TileVert *base, int bright, bool only_excluded, int mathmask) {
+  for (int i = 0; i < n; i++) {
+    const ObjSeg *sg = &segs[i];
+    if (only_excluded && !(sg->pal < 4 || !(mathmask & 0x10)))
+      continue;
+    PROF(g_c_clut++;)
+    sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
+    sceGuClutLoad(2, g_clutobj[bright][sg->pal]);
+    sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+    sceGuTexImage(0, 256, 512, 256, g_atlas4);
+    GeDraw(kVtTile, sg->n, base + sg->first);
+  }
+}
+
+static void DrawM7(void) {
+  if (g_m7_img) {
+    PROF(g_c_clut++;)
+    sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+    sceGuClutLoad(32, g_clut7);
+    sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
+    sceGuTexImage(0, 256, 256, 256, g_m7img);
+    sceGuTexFlush();  /* the image is rewritten every frame */
+    GeDraw(kVtTile, g_m7_nrng * 2, g_m7v);
+    return;
+  }
+  if (g_m7_nq == 0)
+    return;
+  PROF(g_c_clut++;)
+  sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+  sceGuClutLoad(32, g_clut7);
+  sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
+  sceGuTexImage(0, 128, 128, 128, g_atlas7);
+  GeDraw(kVtTile, g_m7_nq * 2, g_m7v);
+}
+
+static void ScissorRows(int r0, int r1) {
+  int y0 = kTop + r0, y1 = kTop + r1;
+  if (g_scissor_mode == 2)
+    sceGuScissor(0, y0, kPspWidth, y1 - y0);
+  else
+    sceGuScissor(0, y0, kPspWidth, y1);
+}
+
+/* Restore the layers whose colour-math bit is off: redraw them where their depth marker is still in the
+ * buffer (the overlay neither tests nor writes depth). */
+static void RestoreLayers(int mask, int obj_bright, const ColorVert *bd, int nbd) {
+  sceGuEnable(GU_DEPTH_TEST);
+  sceGuDepthFunc(GU_EQUAL);
+  sceGuDepthMask(GU_TRUE);  /* GU_TRUE masks depth writes */
+  if (!(mask & 0x20)) {
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
+    GeDraw(kVtColor, nbd, bd);
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuEnable(GU_ALPHA_TEST);
+  }
+  if (!(mask & 1))
+    DrawM7();
+  for (int l = 0; l < kLayers; l++)
+    if (!(mask & (1 << l)))
+      for (int pr = 0; pr < 2; pr++)
+        DrawBgPass(l, pr);
+  DrawObjSegs(g_objseg, g_nobjseg, g_objbase, obj_bright, true, mask);
+  sceGuDepthMask(GU_FALSE);
+  sceGuDisable(GU_DEPTH_TEST);
+}
+
+/* Gate 5d: display-list guard. sceGuGetMemory() carves vertex data out of the display list and never checks the
+ * list end, so the frame must be known to fit before the list is opened. This is an upper bound of everything one frame
+ * writes: every vertex buffer (all sizes are known after pass A), the commands of every draw (a texture bind plus a
+ * DrawArray is at most ~16 words, 96 B is used), the state set-up, and the 8 B header of each sceGuGetMemory. */
+#if SM_PSP_GE_STRIPS
+enum { kMaxStrips = 5 };
+#else
+enum { kMaxStrips = 1 };
+#endif
+enum { kDrawCmdBytes = 96, kListFixedBytes = 8 * 1024, kListAllocBytes = 160 * 16, kListSlackBytes = 16 * 1024 };
+static uint32_t g_peak_tiles, g_peak_list, g_peak_vtx;  /* since the last log line */
+
+static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend, bool tint, bool sobj, uint32_t *vtx) {
+  uint32_t big = ((uint32_t)total + (uint32_t)obj_quads) * 2 * sizeof(TileVert) +
+                 (uint32_t)(g_m7_nq + g_m7_nrng) * 2 * sizeof(TileVert);  /* tiles, sprites, mode 7 */
+  uint32_t geom = 0;
+  uint32_t mos_draws = 0;
+  for (int l = 0; l < kLayers; l++) {
+    if (!g_mos[l].on)
+      continue;
+    geom += (uint32_t)g_nruns[l] * 8 * sizeof(TileVert);
+    mos_draws += (uint32_t)g_nruns[l] * 4;
+  }
+#if SM_PSP_VTX_POOL
+  *vtx = big + kVtxPadBytes;  /* built in the cached pool, not in the list */
+#else
+  *vtx = 0;
+  geom += big;
+#endif
+  geom += (uint32_t)g_line_count * (kMaxStrips * 2 + 2) * sizeof(ColorVert);  /* backdrop + brightness rects */
+  if (blend)  /* subscreen composite quads + subscreen window masks, per row */
+    geom += (uint32_t)g_line_count * (4 * sizeof(TileVert) + 18 * sizeof(ColorVert));
+  geom += (uint32_t)g_ntint * 4 * sizeof(ColorVert);
+  uint32_t passes = 1 + (blend ? (g_nbband > 1 ? (uint32_t)g_nbband : 1u) : 0u) + (tint ? (uint32_t)g_ntr : 0u);
+  uint32_t per_pass = 2 * kLayers * 8 + 2 + mos_draws + (uint32_t)g_nspr * (uint32_t)obj_np;  /* BG, M7 + backdrop, OBJ segments */
+  uint32_t draws = passes * per_pass + 48 + (sobj ? (uint32_t)g_nspr : 0u) + (uint32_t)g_ntint + 16;
+  return geom + draws * kDrawCmdBytes + kListFixedBytes + kListAllocBytes + kListSlackBytes;
+}
+
+// Returns false (nothing drawn, GE idle) if the frame must use the software image.
+static bool DrawGe(void) {
+  g_t_draw_start = Now();
+  g_ent_top = 0;
+  g_rows_top = 0;
+  g_m7_nq = 0;
+  g_m7_img = false;
+  g_m7_nrng = 0;
+  g_ovf_rows = 0;
+  g_verify_now = false;
+  g_bright_rows = 0;
+  g_win_rows = 0;
+  g_frame_multisub = false;
+  g_mos_frame = false;
+  g_nbband = 0;
+  g_prev_rows = 0;
+  g_cw_rows = 0;
+  g_sf_frame = false;
+  g_sf_zero = false;
+  g_sfo_frame = false;
+  g_sh_frame = false;
+  g_shobj_frame = false;
+  g_shn_frame = false;
+  g_w2_frame = false;
+  if (g_frame_reasons) {
+    CountReasons(g_frame_reasons);
+    return false;
+  }
+  for (int r = 0; r < g_line_count; r++)
+    g_prev_rows += g_lines[r].prevnoop;
+
+  if (++g_stamp == 0) {
+    memset(g_seen2, 0, sizeof(g_seen2));
+    memset(g_seen4, 0, sizeof(g_seen4));
+    memset(g_seen7, 0, sizeof(g_seen7));
+    g_clut7_stamp = 0;
+    g_clut2h_stamp = 0;
+    memset(g_clut2_stamp, 0, sizeof(g_clut2_stamp));
+    memset(g_clut4_stamp, 0, sizeof(g_clut4_stamp));
+    memset(g_clutobj_stamp, 0, sizeof(g_clutobj_stamp));
+    memset(g_rc, 0, sizeof(g_rc));
+    g_stamp = 1;
+  }
+
+  /* Subscreen OBJ (gate 4i): drawn into the multisub target. Needs one contiguous row range,
+   * brightness 15, no OBJ window on the subscreen, and multisub not disabled by the audit. */
+  bool sobj = SubObjHit();
+  int s0 = 0, s1 = 0;
+  if (sobj) {
+    bool have = false, ok = g_multisub_ok;
+    for (int r = 0; r < g_line_count; r++) {
+      if (!g_lines[r].subobj)
+        continue;
+      if (!have) {
+        s0 = r;
+        have = true;
+      } else if (r != s1) {
+        ok = false;
+      }
+      s1 = r + 1;
+    }
+    if (!ok) {
+      CountReasons(kReasonSubObj);
+      return false;
+    }
+  }
+
+  /* Gate 4t-c: a subscreen BG layer added with a non-zero fixed colour (X-ray visor). In ppu.c every math pixel gets
+   * the subscreen pixel's colour where its index is non-zero (also black), the fixed colour everywhere else. So the
+   * target is cleared to the fixed colour, every non-empty tile matters, the colour goes onto every row of the blend,
+   * and layer windows are painted over the target in the fixed colour (only valid with one subscreen layer). */
+  bool subfix = false, sfseen = false, subhalf = false;
+  uint16_t subfixc = 0;
+  int sf0 = -1, sf1 = 0, nsm = 0, nhalf = 0;
+  for (int r = 0; r < g_line_count; r++) {
+    const LineSnap *ls = &g_lines[r];
+    if (!ls->submath)
+      continue;
+    if (!sfseen) {
+      sfseen = true;
+      subfixc = ls->subfix;
+      sf0 = r;
+    } else if (ls->subfix != subfixc) {
+      NOTE_SUBMULTI("subfix-varies", r, subfixc, ls->subfix);
+      CountReasons(kReasonSubMulti);
+      return false;
+    }
+    nsm++;
+    nhalf += ls->subhalf;
+    sf1 = r + 1;
+  }
+  if (nhalf) {  /* gate 4t-d: all subscreen-math rows of the frame must be half rows */
+    if (nhalf != nsm) {
+      NOTE_SUBMULTI("half-varies", sf0, nhalf, nsm);
+      CountReasons(kReasonSubMulti);
+      return false;
+    }
+    for (int r = 0; r < g_line_count; r++)  /* gate 4u: subscreen OBJ rows must be half rows too */
+      if (g_lines[r].subobj && !g_lines[r].subhalf) {
+        NOTE_SUBMULTI("half-obj-row", r, 0, 0);
+        CountReasons(kReasonSubMulti);
+        return false;
+      }
+    subhalf = true;
+  }
+  if (subfixc != 0 || subhalf) {
+    subfix = true;
+    if ((sobj && !subhalf && !g_sfo_ok) || g_ge_level != 1 || !(subhalf ? g_sh_ok : g_sf_ok)) {  /* level 2 (hardware bisect): tint frames use the software image */
+      CountReasons(kReasonMathTint);
+      return false;
+    }
+    if (sobj && !subhalf && (s0 < sf0 || s1 > sf1)) {  /* gate 5e: sprite rows must lie inside the fixed-colour rows */
+      NOTE_SUBMULTI("subfix-obj-rows", s0, sf0, sf1);
+      CountReasons(kReasonSubObj);
+      return false;
+    }
+    for (int r = sf0; r < sf1; r++)
+      if (!g_lines[r].submath) {
+        NOTE_SUBMULTI("subfix-gap", r, sf0, sf1);
+        CountReasons(kReasonSubMulti);
+        return false;
+      }
+    if (sobj && !subhalf)  /* gate 5e: a window mask painted over the target would also erase the sprites */
+      for (int r = sf0; r < sf1; r++)
+        for (int l = 0; l < kLayers; l++)
+          if (g_lines[r].bg[l].sm) {
+            CountReasons(kReasonSubWin);
+            return false;
+          }
+  }
+
+  /* Subscreen classification (fixed == 0, no half colour; see LineReasons).
+   * Subscreen pixels only change the picture where a subscreen BG layer shows a
+   * non-black pixel. No such layer: the add is a no-op. Exactly one such layer:
+   * real blending below. More than one: the subscreen layers are composited by priority
+   * in an offscreen target first (multisub). */
+  g_frame_subnoop = false;
+  g_nbruns = 0;
+  int sub_layer = -1;
+  bool multisub = sobj || subfix;
+  int sublayers = 0;
+  for (int l = 0; l < kLayers; l++) {
+    int n = 0;
+    for (int r = 0; r < g_line_count; r++) {
+      if (!g_lines[r].submath || !(g_lines[r].bg[l].flags & 8))
+        continue;
+      if (g_lines[r].mosmask & (1 << l)) {  /* mosaic on a subscreen layer: not drawn by the GE path */
+        CountReasons(kReasonMosaic);
+        return false;
+      }
+      g_frame_subnoop = true;
+      if (n && g_subruns[n - 1].r1 == r &&
+          (subfix ? SameSubNoWin(&g_lines[g_subruns[n - 1].first], &g_lines[r], l)
+                  : SameSub(&g_lines[g_subruns[n - 1].first], &g_lines[r], l)))
+        g_subruns[n - 1].r1 = (uint16_t)(r + 1);
+      else
+        g_subruns[n++] = (Run){(uint16_t)r, (uint16_t)(r + 1), (uint16_t)r};
+    }
+    for (int i = 0; i < n; i++) {
+      TileList kept;
+      int rc = SubRunContributes(l, &g_lines[g_subruns[i].first], g_subruns[i].r0, g_subruns[i].r1, subfix, &kept);
+      if (rc < 0) {
+        BUDGET(1, "subpool", g_ent_top, kEntPool);
+        return false;
+      }
+      if (rc == 0)
+        continue;
+      {
+        const BgSnap *sb = &g_lines[g_subruns[i].first].bg[l];
+        int wa[2], we[2];
+        if (!subfix && WinSpans(sb->sm, sb->sl, sb->sr, wa, we) == 0)
+          continue;  /* masked completely on the subscreen: adds nothing (its tile list stays unused in the pool) */
+      }
+      if (sub_layer >= 0 && sub_layer != l) {
+        if (!g_multisub_ok) {
+          NOTE_SUBMULTI("two-sub-layers", g_subruns[i].r0, sub_layer, l);
+          CountReasons(kReasonSubMulti);
+          return false;
+        }
+        multisub = true;  /* several subscreen layers: composite them (by priority) in an offscreen target first */
+      }
+      if (g_nbruns >= kMaxLines) {
+        BUDGET(2, "nbruns", g_nbruns, kMaxLines);
+        return false;
+      }
+      sub_layer = l;
+      sublayers |= 1 << l;
+      g_bruns[g_nbruns++] = (BRun){(uint8_t)l, g_subruns[i].first, g_subruns[i].r0, g_subruns[i].r1, kept};
+    }
+  }
+  if (subfix && (sublayers & (sublayers - 1))) {  /* several subscreen layers: a window mask would erase the others */
+    for (int r = sf0; r < sf1; r++)
+      for (int l = 0; l < kLayers; l++)
+        if ((sublayers & (1 << l)) && g_lines[r].bg[l].sm) {
+          NOTE_SUBMULTI("subfix-win-multi", r, l, sublayers);
+          CountReasons(kReasonSubMulti);
+          return false;
+        }
+  }
+  bool blend = false;
+  int bmath = 0, bneg = 0;
+  if (g_nbruns || sobj || subfix) {
+    bool first = true;
+    for (int r = 0; r < g_line_count; r++) {
+      bool on = g_lines[r].submath || (sobj && g_lines[r].subobj);
+      if (!on)
+        continue;
+      if (first) {
+        bneg = g_lines[r].subneg;
+        first = false;
+      } else if (g_lines[r].subneg != bneg) {
+        NOTE_SUBMULTI("blend-neg-varies", r, bneg, g_lines[r].subneg);
+        CountReasons(kReasonSubMulti);
+        return false;
+      }
+      {  /* band = rows of one colour-math mask; blend-free gap rows are absorbed into the band */
+        BlendBand *bb = g_nbband ? &g_bband[g_nbband - 1] : NULL;
+        if (bb && bb->mask == g_lines[r].mathmask) {
+          bb->r1 = (uint16_t)(r + 1);
+        } else {
+          if (g_nbband == kMaxBlendBands || (g_nbband >= 1 && (g_scissor_mode == 0 || !g_band_ok))) {
+            NOTE_SUBMULTI("blend-bands", r, g_nbband, g_lines[r].mathmask);
+            CountReasons(kReasonSubMulti);
+            return false;
+          }
+          g_bband[g_nbband++] = (BlendBand){(uint16_t)r, (uint16_t)(r + 1), g_lines[r].mathmask};
+        }
+      }
+      if (g_lines[r].subwin & (sublayers | ((sobj && g_lines[r].subobj) ? 8 : 0))) {
+        CountReasons(kReasonSubWin);
+        return false;
+      }
+    }
+    blend = true;
+    bmath = g_nbband ? g_bband[0].mask : 0;  /* single-band restore; with several bands each uses its own */
+    g_frame_subnoop = false;
+  }
+  g_frame_multisub = blend && multisub && !subfix;
+  g_sf_frame = blend && subfix && !subhalf;
+  g_sf_zero = g_sf_frame && (subfixc & 0x7fff) == 0;  /* bit 15 only marks a subfix row */
+  g_sfo_frame = g_sf_frame && sobj;
+  g_sh_frame = blend && subhalf;
+  g_shobj_frame = g_sh_frame && sobj;
+  g_shn_frame = g_sh_frame && bneg != 0;
+
+  /* Tint rows: colour math with the fixed colour (no subscreen layer involved). All tint rows must
+   * share the layer mask and add/subtract mode; the colour and halving may change per row. */
+  bool tint = false;
+  g_ntint = 0;
+  g_ntr = 0;
+  for (int r = 0; r < g_line_count; r++) {
+    const LineSnap *ls = &g_lines[r];
+    if (!ls->tint)
+      continue;
+    TintRange *rg = g_ntr ? &g_trange[g_ntr - 1] : NULL;
+    bool newrange = false;
+    if (rg && rg->r1 == r && rg->mask == ls->mathmask && rg->neg == ls->subneg) {
+      rg->r1 = (uint16_t)(r + 1);
+    } else {
+      if (g_ntr == kMaxTintRanges || (g_ntr >= 1 && g_scissor_mode == 0)) {
+        NOTE_SUBMULTI("tint-mask-varies", r, g_trange[0].mask << 1 | g_trange[0].neg, ls->mathmask << 1 | ls->subneg);
+        CountReasons(kReasonSubMulti);
+        return false;
+      }
+      g_trange[g_ntr++] = (TintRange){(uint16_t)r, (uint16_t)(r + 1), (uint16_t)g_ntint, 0, ls->mathmask, ls->subneg};
+      newrange = true;
+    }
+    TintRun *tr = g_ntint ? &g_tint[g_ntint - 1] : NULL;
+    if (!newrange && tr && tr->r1 == r && tr->fix == ls->tintfix && tr->half == ls->tinthalf &&
+        tr->cwm == ls->cwm && tr->cwl == ls->cwl && tr->cwr == ls->cwr)
+      tr->r1 = (uint16_t)(r + 1);
+    else
+      g_tint[g_ntint++] = (TintRun){(uint16_t)r, (uint16_t)(r + 1), ls->tintfix, 0, ls->tinthalf, ls->cwm, ls->cwl,
+                                    ls->cwr, 0};
+    if (ls->cwm)
+      g_cw_rows++;
+    g_trange[g_ntr - 1].n = (uint16_t)(g_ntint - g_trange[g_ntr - 1].first);
+  }
+  if (g_ntr) {
+    tint = true;
+    bmath = g_trange[0].mask;
+    bneg = g_trange[0].neg;
+  }
+  if (tint && blend) {  /* subscreen-layer blend and fixed-colour tint in one frame: not drawn */
+    NOTE_SUBMULTI("tint+blend", 0, g_nbruns, g_ntint);
+    CountReasons(kReasonSubMulti);
+    return false;
+  }
+  if (tint && g_ge_level != 1) {  /* level 2 (hardware bisect): tint frames use the software image */
+    CountReasons(kReasonMathTint);
+    return false;
+  }
+
+  PROF(uint32_t t_cls = Now(); g_pc_class = t_cls - g_t_draw_start;)
+
+  /* Pass A, before the list is opened: runs, atlas decode, CLUTs. The GE is
+   * idle here (the previous frame was synced in Present), so CPU writes to the
+   * atlases cannot race it. */
+  int total = 0;
+  bool w2rows = false;
+  for (int r = 0; r < g_line_count && !w2rows; r++)
+    w2rows = g_lines[r].w2main != 0;
+  g_w2_frame = w2rows && !g_sh_frame;
+  bool winrows = g_sh_frame || w2rows;  /* gates 4t-d/u: runs by geometry only, window state per row at emission */
+  for (int l = 0; l < kLayers; l++) {
+    int n = 0;
+    for (int r = 0; r < g_line_count; r++) {
+      if (!(g_lines[r].bg[l].flags & 4))
+        continue;
+      if (n && g_runs[l][n - 1].r1 == r &&
+          (winrows ? SameGeom(&g_lines[g_runs[l][n - 1].first], &g_lines[r], l)
+                   : SameBg(&g_lines[g_runs[l][n - 1].first], &g_lines[r], l)))
+        g_runs[l][n - 1].r1 = (uint16_t)(r + 1);
+      else
+        g_runs[l][n++] = (Run){(uint16_t)r, (uint16_t)(r + 1), (uint16_t)r};
+    }
+    g_nruns[l] = n;
+    if (MosPrepare(l) < 0) {
+      CountReasons(kReasonMosaic);
+      return false;
+    }
+    if (winrows && g_mos[l].on) {  /* mosaic together with per-row windows: not drawn */
+      CountReasons(kReasonMosaic);
+      return false;
+    }
+    for (int i = 0; i < n; i++) {
+      memset(g_counts[l][i], 0, sizeof(g_counts[l][i]));
+      const Run *run = &g_runs[l][i];
+      if (g_mos[l].on) {  /* drawn from the mosaic image, no tiles */
+        g_mlist[l][i] = (TileList){0, 0};
+        continue;
+      }
+      if (!BuildTileList(l, &g_lines[run->first], run->r0, run->r1, &g_mlist[l][i])) {
+        BUDGET(3, "mainpool", g_ent_top, l);
+        return false;
+      }
+      if (winrows) {
+        BuildRowWin(l, run->r0, run->r1);
+        CountListWin(l, &g_mlist[l][i], run->r0, run->r1, g_counts[l][i]);
+        for (int r = run->r0; r < run->r1; r++)
+          if (g_lines[r].bg[l].wm)
+            g_win_rows++;
+      } else {
+      CountList(&g_mlist[l][i], g_counts[l][i]);
+      {
+        const BgSnap *wb = &g_lines[run->first].bg[l];
+        int wa[2], we[2];
+        int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+        if (wb->wm)
+          g_win_rows += (uint32_t)(run->r1 - run->r0);
+        if (ns != 1)  /* 0: masked completely; 2: a tile may be emitted once per span */
+          for (int pr = 0; pr < 2; pr++)
+            for (int p = 0; p < 8; p++)
+              g_counts[l][i][pr][p] *= ns;
+      }
+      }
+      for (int pr = 0; pr < 2; pr++)
+        for (int p = 0; p < 8; p++)
+          total += g_counts[l][i][pr][p];
+      if (l < 2)
+        BuildClut4(kClutBright);
+      else
+        BuildClut2(kClutBright);
+    }
+  }
+  for (int i = 0; i < g_nbruns; i++) {
+    const BRun *br = &g_bruns[i];
+    memset(g_bcounts[i], 0, sizeof(g_bcounts[i]));
+    CountList(&br->lst, g_bcounts[i]);
+    {
+      const BgSnap *sb = &g_lines[br->first].bg[br->l];
+      int wa[2], we[2];
+      int ns = subfix ? 1 : WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
+      if (sb->sm && !subfix)
+        g_win_rows += (uint32_t)(br->r1 - br->r0);
+      if (ns != 1)  /* a tile may be emitted once per span */
+        for (int pr = 0; pr < 2; pr++)
+          for (int p = 0; p < 8; p++)
+            g_bcounts[i][pr][p] *= ns;
+    }
+    for (int pr = 0; pr < 2; pr++)
+      for (int p = 0; p < 8; p++)
+        total += g_bcounts[i][pr][p];
+    if (br->l < 2)
+      BuildClut4(kClutBright);
+    else
+      BuildClut2(kClutBright);
+  }
+  if (subhalf)
+    BuildClut2Half();
+  if (g_m7_rows) {
+    if (!M7Prepare()) {
+      BUDGET(4, "m7quads", g_m7_nq, kM7MaxQuads);
+      return false;
+    }
+    BuildClut7(kClutBright);
+  }
+  if ((uint32_t)total > g_peak_tiles)
+    g_peak_tiles = (uint32_t)total;
+  if (total > kMaxTilesPerFrame) {  /* never draw a frame with holes */
+    BUDGET(5, "tiles", total, kMaxTilesPerFrame);
+    return false;
+  }
+  PROF(uint32_t t_bg = Now(); g_pc_bg = t_bg - t_cls;)
+
+  /* Sprites: one contiguous range of rows [o0,o1) with OBJ enabled on the main
+   * screen and one brightness (HUD rows have TM=4, so no sprites there). */
+  int o0 = 0, o1 = 0;
+  const int obj_bright = kClutBright;
+  bool obj_ok = true;
+  for (int r = 0; r < g_line_count; r++) {
+    if (!g_lines[r].objon)
+      continue;
+    if (o1 == 0) {
+      o0 = r;
+    } else if (r != o1) {
+      obj_ok = false;
+    }
+    o1 = r + 1;
+  }
+  g_nspr = 0;
+  g_spr_quads = 0;
+  g_nobjseg = 0;
+  g_objbase = NULL;
+  g_nsobjseg = 0;
+  g_sobjbase = NULL;
+  g_nobjband = 0;
+  if (obj_ok) {  /* OBJ window: row bands of one window state */
+    for (int r = o0; r < o1; r++) {
+      const LineSnap *ls = &g_lines[r];
+      ObjBand *ob = g_nobjband ? &g_objband[g_nobjband - 1] : NULL;
+      if (ob && ob->wm == ls->owm && ob->wl == ls->owl && ob->wr == ls->owr) {
+        ob->r1 = (uint16_t)(r + 1);
+      } else if (g_nobjband == kMaxObjBands) {
+        CountReasons(kReasonWindow);
+        return false;
+      } else {
+        g_objband[g_nobjband++] = (ObjBand){(uint16_t)r, (uint16_t)(r + 1), ls->owm, ls->owl, ls->owr};
+      }
+    }
+    for (int b = 0; b < g_nobjband; b++)
+      if (g_objband[b].wm)
+        g_win_rows += (uint32_t)(g_objband[b].r1 - g_objband[b].r0);
+  }
+  if (!obj_ok) {
+    CountReasons(kReasonObjCfg);
+    return false;
+  }
+  
+  /* Sprites for the main rows and the subscreen rows share one list: prepare the union of both ranges. */
+  int u0 = o0, u1 = o1;
+  if (sobj) {
+    if (u1 == u0) {
+      u0 = s0;
+      u1 = s1;
+    } else {
+      if (s0 < u0) u0 = s0;
+      if (s1 > u1) u1 = s1;
+    }
+  }
+  int obj_quads = 0, obj_np = 0;  /* gate 5d: sprite quads BuildObjGeom will emit (main bands + subscreen) */
+  if (u1 > u0) {
+    if (!PrepareObj(u0, u1))
+      return false;
+    int np = 0, wa[2], we[2];
+    for (int b = 0; b < g_nobjband; b++)
+      np += WinSpans(g_objband[b].wm, g_objband[b].wl, g_objband[b].wr, wa, we);
+    obj_np = np;
+    obj_quads = g_spr_quads * np + (sobj ? g_spr_quads : 0);
+    if (np > 1 && g_spr_quads * np > 2 * kMaxSpriteQuads) {  /* window bands/spans multiply the sprite quads */
+      BUDGET(6, "sprquads*win", g_spr_quads * np, 2 * kMaxSpriteQuads);
+      return false;
+    }
+    if (g_ovf_rows) {  /* limited rows split tiles: check the quads that will really be emitted */
+      ObjBand sbd = {(uint16_t)s0, (uint16_t)s1, 0, 0, 0};
+      int nm = ObjCountQuads(g_objband, g_nobjband);
+      int nsb = sobj ? ObjCountQuads(&sbd, 1) : 0;
+      if (nm > 2 * kMaxSpriteQuads || nsb > kMaxSpriteQuads) {
+        BUDGET(7, "sprquads*ovf", nm, nsb);
+        return false;
+      }
+      obj_quads = nm + nsb;
+    }
+    if (o1 > o0)
+      BuildClutObj(obj_bright);
+    if (sobj)
+      BuildClutObj(15);
+  }
+  {  /* gates 5d/5f: the list must hold every command (and, without the pool, every vertex) of this frame; the pool every big vertex buffer */
+    uint32_t vtx = 0;
+    uint32_t need = ListBytesNeeded(total, obj_quads, obj_np, blend, tint, sobj, &vtx);
+    if (need > g_peak_list)
+      g_peak_list = need;
+    if (vtx > g_peak_vtx)
+      g_peak_vtx = vtx;
+    if (need > (uint32_t)kListBytes) {
+      BUDGET(8, "listkb", (int)(need >> 10), (int)(kListBytes >> 10));
+      return false;
+    }
+    if (vtx > (uint32_t)kVtxPoolBytes) {
+      BUDGET(9, "vtxkb", (int)(vtx >> 10), (int)(kVtxPoolBytes >> 10));
+      return false;
+    }
+  }
+
+  sceKernelDcacheWritebackRange(g_clut2[kClutBright], sizeof(g_clut2[0]));
+  sceKernelDcacheWritebackRange(g_clut4[kClutBright], sizeof(g_clut4[0]));
+  sceKernelDcacheWritebackRange(g_clutobj[kClutBright], sizeof(g_clutobj[0]));
+  sceKernelDcacheWritebackRange(g_clut7, sizeof(g_clut7));
+  sceKernelDcacheWritebackRange(g_clut2h, sizeof(g_clut2h));
+
+  g_zbg[0][0] = 8 * kZLevel;  g_zbg[0][1] = 12 * kZLevel;  /* BG1 low / high */
+  g_zbg[1][0] = 7 * kZLevel;  g_zbg[1][1] = 11 * kZLevel;  /* BG2 */
+  g_zbg[2][0] = 1 * kZLevel;  g_zbg[2][1] = 15 * kZLevel;  /* BG3 */
+
+  /* Pass B: the display list. Depth is always on. Sprites are drawn first with the depth test ALWAYS
+   * (the last one drawn, the lowest OAM index, wins an overlap) and leave their depth marker; BG
+   * passes then draw with GEQUAL against it (z = SNES priority level), so layering against the BGs
+   * follows the priority bits. In an overlay frame (subscreen blend or tint) the markers also
+   * identify every pass, so the layers that don't take part in colour math can be restored exactly
+   * after the overlay with an EQUAL test. */
+  g_t_list_start = Now();
+  PROF(g_pc_obj = g_t_list_start - t_bg;)
+  g_prep_us = g_t_list_start - g_t_draw_start;
+  VTX_RESET();  /* the previous frame was synced in Present: the GE no longer reads the pool */
+  sceGuStart(GU_DIRECT, g_gu_list);
+  SelectDrawBuffer();
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuClearColor(0xff000000);
+  sceGuDepthRange(65535, 0);
+  sceGuClearDepth(0);
+  sceGuEnable(GU_DEPTH_TEST);
+  sceGuDepthMask(GU_FALSE);
+  sceGuDepthFunc(GU_ALWAYS);
+  sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
+  sceGuDepthFunc(GU_GEQUAL);
+
+  /* Backdrop, merged into runs of identical colour, drawn as vertical strips
+   * that don't cross 64-pixel framebuffer columns (strip-major order, so
+   * consecutive rects stay in one column). */
+  int edges[8];
+  int nstrip = StripEdges(kLeft, kLeft + kGameWidth, edges);
+  static int16_t bd_y0[kMaxLines], bd_y1[kMaxLines];
+  static uint32_t bd_col[kMaxLines];
+  int nrect = 0;
+  for (int r = 0; r < g_line_count;) {
+    int e = r + 1;
+    while (e < g_line_count && g_lines[e].cg0 == g_lines[r].cg0 && g_lines[e].forced == g_lines[r].forced) e++;
+    bd_y0[nrect] = (int16_t)r;
+    bd_y1[nrect] = (int16_t)e;
+    bd_col[nrect++] = g_lines[r].forced ? 0xff000000u : BakeColor(g_lines[r].cg0, kClutBright, false);
+    r = e;
+  }
+  ColorVert *bd = sceGuGetMemory(nstrip * nrect * 2 * sizeof(ColorVert));
+  int nbd = 0;
+  for (int st = 0; st < nstrip; st++) {
+    for (int k = 0; k < nrect; k++) {
+      bd[nbd++] = (ColorVert){bd_col[k], (int16_t)edges[st], (int16_t)(kTop + bd_y0[k]), kZBackdrop};
+      bd[nbd++] = (ColorVert){bd_col[k], (int16_t)edges[st + 1], (int16_t)(kTop + bd_y1[k]), kZBackdrop};
+    }
+  }
+  sceGuDisable(GU_TEXTURE_2D);
+  GeDraw(kVtColor, nbd, bd);
+
+  /* Geometry for every layer/run. One buffer per layer/priority/palette; the runs fill it one after another. */
+  for (int l = 0; l < kLayers; l++) {
+    TileVert *w[2][8];
+    for (int pr = 0; pr < 2; pr++) {
+      for (int p = 0; p < 8; p++) {
+        int c = 0;
+        for (int i = 0; i < g_nruns[l]; i++)
+          c += g_counts[l][i][pr][p];
+        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(TileVert)) : NULL;
+       }
+    }
+    for (int i = 0; i < g_nruns[l]; i++) {
+      TileVert *v0[2][8];
+      memcpy(v0, w, sizeof(v0));
+      const Run *run = &g_runs[l][i];
+      if (winrows) {
+        EmitListWin(l, &g_mlist[l][i], run->r0, run->r1, w, kLeft, kTop);
+      } else {
+        const BgSnap *wb = &g_lines[run->first].bg[l];
+        int wa[2], we[2];
+        int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+        for (int k = 0; k < ns; k++)
+          EmitList(l, &g_mlist[l][i], run->r0, run->r1, w, kLeft, kTop, wa[k], we[k]);
+      }
+      for (int pr = 0; pr < 2; pr++) {
+        for (int p = 0; p < 8; p++) {
+          int c = g_counts[l][i][pr][p];
+          g_geom[l][i][pr][p].v = c ? v0[pr][p] : NULL;
+          g_geom[l][i][pr][p].n = c ? (int)(w[pr][p] - v0[pr][p]) : 0;
+        }
+      }
+    }
+  }
+  /* Mosaic layers: the stretched image is one quad per run, window span and priority. u/v are placed so that
+   * nearest sampling picks column x / size and row (y + 1 - start) / size (see MosBuild); g_uvh as in M7Prepare. */
+  for (int l = 0; l < kLayers; l++) {
+    MosLayer *m = &g_mos[l];
+    if (!m->on)
+      continue;
+    const float inv = 1.0f / (float)m->size;
+    m->v = sceGuGetMemory(g_nruns[l] * 8 * sizeof(TileVert));
+    for (int i = 0; i < g_nruns[l]; i++) {
+      const Run *run = &g_runs[l][i];
+      const BgSnap *wb = &g_lines[run->first].bg[l];
+      int wa[2], we[2];
+      int ns = WinSpans(wb->wm, wb->wl, wb->wr, wa, we);
+      float vt = ((float)(run->r0 + 1 - m->start) + 0.5f - g_uvh[1]) * inv;
+      float vb = vt + (float)(run->r1 - run->r0) * inv;
+      for (int k = 0; k < ns; k++) {
+        float ul = ((float)wa[k] + 0.5f - g_uvh[0]) * inv;
+        float ur = ul + (float)(we[k] - wa[k]) * inv;
+        for (int pr = 0; pr < 2; pr++) {
+          TileVert *q = m->v + ((i * 2 + k) * 2 + pr) * 2;
+          q[0] = (TileVert){ul, vt, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + run->r0), (int16_t)g_zbg[l][pr]};
+          q[1] = (TileVert){ur, vb, (int16_t)(kLeft + we[k]), (int16_t)(kTop + run->r1), (int16_t)g_zbg[l][pr]};
+        }
+      }
+    }
+  }
+  /* Subscreen overlay geometry. */
+  for (int l = 0; l < kLayers; l++) {
+    TileVert *w[2][8];
+    for (int pr = 0; pr < 2; pr++) {
+      for (int p = 0; p < 8; p++) {
+        int c = 0;
+        for (int i = 0; i < g_nbruns; i++)
+          if (g_bruns[i].l == l)
+            c += g_bcounts[i][pr][p];
+        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(TileVert)) : NULL;
+      }
+    }
+    for (int i = 0; i < g_nbruns; i++) {
+      const BRun *br = &g_bruns[i];
+      if (br->l != l)
+        continue;
+      TileVert *v0[2][8];
+      memcpy(v0, w, sizeof(v0));
+      {
+        const BgSnap *sb = &g_lines[br->first].bg[l];
+        int wa[2] = {0, 0}, we[2] = {kGameWidth, kGameWidth};
+        int ns = subfix ? 1 : WinSpans(sb->sm, sb->sl, sb->sr, wa, we);
+        for (int k = 0; k < ns; k++)
+          EmitList(br->l, &br->lst, br->r0, br->r1, w, multisub ? 0 : kLeft, multisub ? 0 : kTop, wa[k], we[k]);
+      }
+      for (int pr = 0; pr < 2; pr++) {
+        for (int p = 0; p < 8; p++) {
+          int c = g_bcounts[i][pr][p];
+          g_bgeom[i][pr][p].v = c ? v0[pr][p] : NULL;
+          g_bgeom[i][pr][p].n = c ? (int)(w[pr][p] - v0[pr][p]) : 0;
+        }
+      }
+    }
+  }
+
+  /* Multi-layer subscreen: black clear rectangle for the offscreen target (also clears its depth) and the
+   * quad that adds the finished composite to the main image. */
+  ColorVert *subclear = NULL;
+  TileVert *subadd = NULL;
+  ColorVert *submask = NULL;
+  int nsubmask = 0;
+  int nsubadd = 0;
+  if (multisub) {
+    int rlo = g_line_count, rhi = 0;
+    for (int i = 0; i < g_nbruns; i++) {
+      if (g_bruns[i].r0 < rlo) rlo = g_bruns[i].r0;
+      if (g_bruns[i].r1 > rhi) rhi = g_bruns[i].r1;
+    }
+    if (sobj) {
+      if (s0 < rlo) rlo = s0;
+      if (s1 > rhi) rhi = s1;
+    }
+    if (subfix) {  /* the fixed colour goes onto every row of the blend, with or without a subscreen tile */
+      rlo = sf0;
+      rhi = sf1;
+    }
+    uint32_t clrcol = subfix ? BakeColor(subfixc, kClutBright, false) : 0xff000000u;
+    if (subhalf)
+      clrcol &= 0x00ffffffu;  /* alpha 0 = no subscreen pixel; BG3 pixels are written with alpha 0x80 */
+    subclear = sceGuGetMemory(2 * sizeof(ColorVert));
+    subclear[0] = (ColorVert){clrcol, 0, 0, 0};
+    subclear[1] = (ColorVert){clrcol, (int16_t)kGameWidth, (int16_t)g_line_count, 0};
+    if (subhalf) {  /* only where the colour window lets math apply */
+      nsubadd = SubAddRows(rlo, rhi, NULL);
+      subadd = nsubadd ? sceGuGetMemory(nsubadd * sizeof(TileVert)) : NULL;
+      if (nsubadd)
+        SubAddRows(rlo, rhi, subadd);
+    } else {
+      nsubadd = 2;
+      subadd = sceGuGetMemory(2 * sizeof(TileVert));
+      subadd[0] = (TileVert){0.0f, (float)rlo, (int16_t)kLeft, (int16_t)(kTop + rlo), 0};
+      subadd[1] = (TileVert){(float)kGameWidth, (float)rhi, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + rhi), 0};
+    }
+    if (subfix && sublayers) {  /* layer windows: hidden spans of every row are painted over the target in the fixed colour */
+      for (int pass = 0; pass < 2; pass++) {
+        int nv = 0;
+        for (int i = 0; i < g_nbruns; i++) {
+          const BRun *br = &g_bruns[i];
+          for (int r = br->r0; r < br->r1;) {
+            const BgSnap *s = &g_lines[r].bg[br->l];
+            int e = r + 1;
+            while (e < br->r1 && g_lines[e].bg[br->l].sm == s->sm && g_lines[e].bg[br->l].sl == s->sl &&
+                   g_lines[e].bg[br->l].sr == s->sr)
+              e++;
+            int ha[3], hb[3];
+            int nh = s->sm ? HiddenSpans(s->sm, s->sl, s->sr, ha, hb) : 0;
+            for (int k = 0; k < nh; k++, nv += 2) {
+              if (pass) {
+                submask[nv] = (ColorVert){clrcol, (int16_t)ha[k], (int16_t)r, 0};
+                submask[nv + 1] = (ColorVert){clrcol, (int16_t)hb[k], (int16_t)e, 0};
+              }
+            }
+            r = e;
+          }
+        }
+        if (pass)
+          nsubmask = nv;
+        else if (nv)
+          submask = sceGuGetMemory(nv * sizeof(ColorVert));
+        else
+          break;
+      }
+    }
+    if (subfix) {
+      g_sf_r0 = rlo;
+      g_sf_r1 = rhi;
+      g_sf_col = subfixc;
+      g_sf_masks = nsubmask / 2;
+    }
+  }
+
+  /* Sprite geometry: reverse precedence order, so the sprite that wins an overlap on hardware (lowest
+   * OAM index) is drawn last. Every sprite carries its own depth marker; consecutive sprites that
+   * share a palette share one draw. */
+  g_nobjseg = BuildObjGeom(g_objband, g_nobjband, kLeft, kTop, g_objseg, &g_objbase);
+  ObjBand sband = {(uint16_t)s0, (uint16_t)s1, 0, 0, 0};
+  g_nsobjseg = sobj ? BuildObjGeom(&sband, 1, 0, 0, g_sobjseg, &g_sobjbase) : 0;
+
+  /* Mode 7 geometry (z = SNES level 5: above OBJ priority 0, below priorities 1-3). */
+  g_m7v = NULL;
+  if (g_m7_nq > 0) {
+    g_m7v = VtxAlloc(g_m7_nq * 2 * sizeof(TileVert));
+    for (int i = 0; i < g_m7_nq; i++) {
+      const M7Quad *q = &g_m7q[i];
+      g_m7v[2 * i] = (TileVert){q->u0, q->v0, (int16_t)(kLeft + q->x0), (int16_t)(kTop + q->y0), (int16_t)(5 * kZLevel)};
+      g_m7v[2 * i + 1] = (TileVert){q->u1, q->v1, (int16_t)(kLeft + q->x1), (int16_t)(kTop + q->y1), (int16_t)(5 * kZLevel)};
+    }
+  } else if (g_m7_img) {  /* image path: one 1:1 quad per row range (texel (x, row) = pixel (x, row)) */
+    g_m7v = VtxAlloc(g_m7_nrng * 2 * sizeof(TileVert));
+    const float iu = 0.5f - g_uvh[0];
+    for (int i = 0; i < g_m7_nrng; i++) {
+      int r0 = g_m7rng[i][0], r1 = g_m7rng[i][1];
+      float iv = (float)r0 + 0.5f - g_uvh[1];
+      g_m7v[2 * i] = (TileVert){iu, iv, (int16_t)kLeft, (int16_t)(kTop + r0), (int16_t)(5 * kZLevel)};
+      g_m7v[2 * i + 1] = (TileVert){iu + (float)kGameWidth, iv + (float)(r1 - r0),
+                                    (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + r1), (int16_t)(5 * kZLevel)};
+    }
+  }
+
+  VTX_FLUSH();  /* every pool vertex is written: make it visible to the GE before any draw that reads it */
+  PROF(g_pc_emit = Now() - g_t_list_start;)
+  /* Tint overlay: one rectangle per span of each run of rows with the same fixed colour and colour-window state
+   * (gate 4t-b: 0, 1 or 2 spans where the colour window lets the math apply; unlimited rows: the full width). */
+  ColorVert *tv = NULL;
+  if (tint) {
+    int nv = 0;
+    for (int i = 0; i < g_ntint; i++) {
+      int wa[2], we[2];
+      int ns = WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we);
+      g_tint[i].v0 = (uint16_t)nv;
+      g_tint[i].vn = (uint8_t)(ns * 2);
+      nv += ns * 2;
+    }
+    tv = nv ? sceGuGetMemory(nv * sizeof(ColorVert)) : NULL;
+    for (int i = 0; i < g_ntint; i++) {
+      uint32_t col = BakeColor(g_tint[i].fix, 15, false);
+      int wa[2], we[2];
+      int ns = WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we);
+      for (int k = 0; k < ns; k++) {
+        ColorVert *c = &tv[g_tint[i].v0 + 2 * k];
+        c[0] = (ColorVert){col, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + g_tint[i].r0), 0};
+        c[1] = (ColorVert){col, (int16_t)(kLeft + we[k]), (int16_t)(kTop + g_tint[i].r1), 0};
+      }
+    }
+  }
+
+  /* Gate 4l: brightness is applied last, as dst *= b/15 (colour math is done at 15, as on the SNES).
+   * Runs of rows with the same brightness < 15; forced-blank rows are black anyway. */
+  static int16_t br_y0[kMaxLines], br_y1[kMaxLines];
+  static uint8_t br_b[kMaxLines];
+  int nbr = 0;
+  for (int r = 0; r < g_line_count;) {
+    int b = g_lines[r].brightness;
+    if (g_lines[r].forced || b >= 15) {
+      r++;
+      continue;
+    }
+    int e = r + 1;
+    while (e < g_line_count && !g_lines[e].forced && g_lines[e].brightness == b)
+      e++;
+    br_y0[nbr] = (int16_t)r;
+    br_y1[nbr] = (int16_t)e;
+    br_b[nbr++] = (uint8_t)b;
+    g_bright_rows += (uint32_t)(e - r);
+    r = e;
+  }
+  ColorVert *brv = nbr ? sceGuGetMemory(nbr * 2 * sizeof(ColorVert)) : NULL;
+  for (int i = 0; i < nbr; i++) {
+    brv[2 * i] = (ColorVert){0xff000000u, (int16_t)kLeft, (int16_t)(kTop + br_y0[i]), 0};
+    brv[2 * i + 1] = (ColorVert){0xff000000u, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + br_y1[i]), 0};
+  }
+
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuEnable(GU_ALPHA_TEST);
+  sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+
+  /* Sprites: depth ALWAYS, the markers they leave decide the layering against the BGs below. */
+  sceGuDepthFunc(GU_ALWAYS);
+  DrawObjSegs(g_objseg, g_nobjseg, g_objbase, obj_bright, false, bmath);
+  sceGuDepthFunc(GU_GEQUAL);
+  DrawM7();
+  for (int l = 0; l < kLayers; l++)
+    for (int pr = 0; pr < 2; pr++)
+      DrawBgPass(l, pr);
+
+  if (blend) {
+    if (multisub) {
+      /* Composite the subscreen layers into the offscreen target: depth GEQUAL with the same level markers
+       * as the main screen decides which subscreen layer wins a pixel; uncovered pixels stay black. */
+      sceGuDrawBufferList(GU_PSM_8888, (void *)kVramSub, 256);
+      sceGuDepthBuffer((void *)kVramSubZ, 256);
+      sceGuEnable(GU_DEPTH_TEST);
+      sceGuDepthMask(GU_FALSE);
+      sceGuDepthFunc(GU_ALWAYS);
+      sceGuDisable(GU_TEXTURE_2D);
+      sceGuDisable(GU_ALPHA_TEST);
+      if (subhalf) {  /* gate 4t-d: the alpha channel of the target is its stencil value; 0 = no subscreen pixel */
+        sceGuEnable(GU_STENCIL_TEST);
+        sceGuStencilFunc(GU_ALWAYS, 0, 0xff);
+        sceGuStencilOp(GU_REPLACE, GU_REPLACE, GU_REPLACE);
+      }
+      GeDraw(kVtColor, 2, subclear);
+      sceGuEnable(GU_TEXTURE_2D);
+      sceGuEnable(GU_ALPHA_TEST);
+      if (subhalf) {  /* gate 4u: subscreen sprites write alpha 0x80 where opaque, like BG3 */
+        sceGuStencilFunc(GU_ALWAYS, 0x80, 0xff);
+        sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
+      }
+      if (g_nsobjseg)
+        DrawObjSegs(g_sobjseg, g_nsobjseg, g_sobjbase, 15, false, 0);
+      sceGuDepthFunc(GU_GEQUAL);
+      if (subhalf) {  /* BG3 pixels (CLUT alpha != 0 passes the alpha test) write 0x80 */
+        sceGuStencilFunc(GU_ALWAYS, 0x80, 0xff);
+        sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
+      }
+      DrawBlendBgs(subhalf);
+      if (nsubmask) {  /* window masks of the subscreen layer (gate 4t-c) */
+        sceGuDepthFunc(GU_ALWAYS);
+        if (subhalf) {  /* hidden BG3 spans: no subscreen pixel again */
+          sceGuStencilFunc(GU_ALWAYS, 0, 0xff);
+          sceGuStencilOp(GU_REPLACE, GU_REPLACE, GU_REPLACE);
+        }
+        sceGuDisable(GU_TEXTURE_2D);
+        sceGuDisable(GU_ALPHA_TEST);
+        GeDraw(kVtColor, nsubmask, submask);
+        sceGuEnable(GU_TEXTURE_2D);
+        sceGuEnable(GU_ALPHA_TEST);
+      }
+      /* back to the main target; the composite is then added to (or subtracted from) the main image */
+      if (subhalf)
+        sceGuDisable(GU_STENCIL_TEST);  /* the 5650 main target has no stencil bits */
+      sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+      sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
+      sceGuDisable(GU_DEPTH_TEST);
+      sceGuEnable(GU_BLEND);
+      if (subhalf) {  /* alpha 0: main +/- fixed; alpha 0x80: (main +/- sub) / 2 (gate 5c: reverse subtract = dst - src) */
+        sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_ONE_MINUS_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+        sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+      } else {
+        sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
+        sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+      }
+      sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+      sceGuTexImage(0, 256, 256, 256, g_vram_u + kVramSub);
+      sceGuTexFlush();
+      sceGuTexSync();
+      sceGuDisable(GU_ALPHA_TEST);
+      if (nsubadd)
+        GeDraw(kVtTile, nsubadd, subadd);
+      sceGuEnable(GU_ALPHA_TEST);
+      sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+      PROF(g_c_clut++;)
+    } else {
+      sceGuDisable(GU_DEPTH_TEST);
+      sceGuEnable(GU_BLEND);
+      /* Blend the subscreen layer over everything it covers (colour math adds or subtracts the subscreen
+       * pixel; fixed colour is 0 so uncovered pixels are unchanged). */
+      sceGuBlendFunc(bneg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, 0x00ffffff, 0x00ffffff);
+      DrawBlendBgs(false);
+    }
+    sceGuDisable(GU_BLEND);
+    if (g_nbband > 1) {  /* each band restores the layers its own colour-math mask excludes */
+      for (int k = 0; k < g_nbband; k++) {
+        ScissorRows(g_bband[k].r0, g_bband[k].r1);
+        RestoreLayers(g_bband[k].mask, obj_bright, bd, nbd);
+      }
+      sceGuScissor(0, 0, kPspWidth, kPspHeight);
+    } else {
+      RestoreLayers(bmath, obj_bright, bd, nbd);
+    }
+    g_frames_blend++;
+  } else if (tint) {
+    /* Tint: dst = dst +/- fixed, or (dst +/- fixed) / 2 with half colour (factors 0.5 / 0.5), per range of
+     * rows that share a layer mask and add/subtract mode. */
+    for (int k = 0; k < g_ntr; k++) {
+      const TintRange *rg = &g_trange[k];
+      if (g_ntr > 1)
+        sceGuScissor(0, 0, kPspWidth, kPspHeight);
+      sceGuDisable(GU_DEPTH_TEST);
+      sceGuEnable(GU_BLEND);
+      sceGuDisable(GU_TEXTURE_2D);
+      sceGuDisable(GU_ALPHA_TEST);
+      for (int i = rg->first; i < rg->first + rg->n;) {
+        int j = i;
+        while (j < rg->first + rg->n && g_tint[j].half == g_tint[i].half)
+          j++;
+        int nvert = g_tint[j - 1].v0 + g_tint[j - 1].vn - g_tint[i].v0;
+        if (nvert > 0) {
+          unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
+          sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
+          GeDraw(kVtColor, nvert, tv + g_tint[i].v0);
+        }
+        i = j;
+      }
+      sceGuEnable(GU_TEXTURE_2D);
+      sceGuEnable(GU_ALPHA_TEST);
+      sceGuDisable(GU_BLEND);
+      if (g_ntr > 1)
+        ScissorRows(rg->r0, rg->r1);
+      RestoreLayers(rg->mask, obj_bright, bd, nbd);
+    }
+    if (g_ntr > 1)
+      sceGuScissor(0, 0, kPspWidth, kPspHeight);
+    g_frames_tint++;
+  }
+  if (nbr) {
+    /* src factor 0, dst factor b*17/255 per channel; no depth test, so no depth write either (as the tint overlay). */
+    sceGuDisable(GU_DEPTH_TEST);
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
+    sceGuEnable(GU_BLEND);
+    for (int i = 0; i < nbr;) {
+      int j = i;
+      while (j < nbr && br_b[j] == br_b[i])
+        j++;
+      unsigned f = (unsigned)br_b[i] * 0x00111111u;
+      sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x00000000u, f);
+      GeDraw(kVtColor, (j - i) * 2, brv + 2 * i);
+      i = j;
+    }
+    sceGuDisable(GU_BLEND);
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuEnable(GU_ALPHA_TEST);
+  }
+  bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
+  bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
+  bool winwant = g_win_rows != 0 && !g_sh_frame && !g_w2_frame && g_win_vn < kWinVerify;
+  bool ovfwant = g_ovf_rows != 0 && g_ovf_vn < kOvfVerify;
+  bool moswant = g_mos_frame && g_mos_vn < kMosVerify;
+  bool m7iwant = g_m7_img && g_m7i_vn < kM7IVerify;
+  bool bandwant = g_nbband > 1 && g_bnd_vn < kBandVerify;
+  bool prevwant = g_prev_rows != 0 && g_prev_vn < kPrevVerify;
+  bool cwwant = g_cw_rows != 0 && g_cw_vn < kCwVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || cwwant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant || prevwant || cwwant) && g_ppu_skip_draw)
+    g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
+  if (g_sf_frame && (g_sfo_frame ? g_sfo_vn : g_sf_zero ? g_sf0_vn : g_sf_vn) < kSfVerify) {  /* gates 4t-c/5b/5e: first frames of each class are checked */
+    if (g_ppu_skip_draw)
+      g_want_ms_verify = true;
+    else
+      g_verify_now = true;
+  }
+  if (g_sh_frame && (g_shn_frame ? g_shn_vn : g_shobj_frame ? g_sho_vn : g_sh_vn) < kShVerify) {  /* gates 4t-d/u/5c: the same for the half-colour paths */
+    if (g_ppu_skip_draw)
+      g_want_ms_verify = true;
+    else
+      g_verify_now = true;
+  }
+  if (g_w2_frame && g_w2_vn < kW2Verify) {  /* gate 4u: window 2 on main BG layers */
+    if (g_ppu_skip_draw)
+      g_want_ms_verify = true;
+    else
+      g_verify_now = true;
+  }
+  if (ovfwant && g_ppu_skip_draw && g_ovf_vn < kOvfArm && g_ovf_arms < kOvfArms) {
+    g_ovf_arms++;
+    g_ovf_watch = kOvfWatch;  /* no software image for this overflow frame: draw both for a while so later ones get audited */
+  }
+  if (g_ovf_rows)
+    g_frames_ovf++;
+  if (g_mos_frame)
+    g_frames_mos++;
+  if (g_prev_rows)
+    g_frames_prev++;
+  if (g_cw_rows)
+    g_frames_cw++;
+  if (g_sf_frame)
+    g_frames_sf++;
+  if (g_sfo_frame)
+    g_frames_sfo++;
+  if (g_sh_frame)
+    g_frames_sh++;
+  if (g_shobj_frame)
+    g_frames_sho++;
+  if (g_shn_frame)
+    g_frames_shn++;
+  if (g_w2_frame)
+    g_frames_w2++;
+  if (g_m7_img)
+    g_frames_m7i++;
+  g_audit_now = false;
+  Present();
+  return true;
+}
+
+/* ------------------------------------------------------------- lifecycle */
+
+void PspRenderer_ToggleGe(void) {
+  if (!g_ge_ok) {
+    PspLog("toggle ignored: VRAM budget too small");
+    return;
+  }
+  g_ge_level = (g_ge_level + 1) % 3;
+  g_ge_active = g_ge_level != 0;
+  g_line_count = 0;
+  g_ppu_skip_draw = false;  /* the next frame must be drawn by the software PPU */
+  g_streak = 0;
+  PspLog("f=%u renderer -> %s", (unsigned)g_frame,
+         g_ge_level == 0 ? "software" : g_ge_level == 1 ? "GE (BG1-3 + OBJ + tint)" : "GE without tint");
+  PspLog_Flush();
+}
+
+bool PspRenderer_GeActive(void) {
+  return g_ge_active;
+}
+
+/* After a sleep VRAM is not trusted: forget what the atlases hold so every tile used is decoded again, and let
+ * the software PPU draw the next frames until the GE streak is rebuilt. Main thread, between frames. */
+void PspRenderer_Resume(void) {
+  memset(g_hash2, 0xff, sizeof(g_hash2));
+  memset(g_hash4, 0xff, sizeof(g_hash4));
+  memset(g_hash7, 0xff, sizeof(g_hash7));
+  g_line_count = 0;
+  g_streak = 0;
+  g_ppu_skip_draw = false;
+  g_vcount_last = sceDisplayGetVcount();
+  PspLog("resume: atlases invalidated");
+}
+
+/* Measures where the GE samples texture coordinates inside a pixel, because mode 7 quads depend on it:
+ * a sprite drawn 3 pixels per texel from u = 0.3 shows texel 1 at x = 2 if the GE samples at the pixel
+ * centre, texel 0 if it samples at the pixel corner (same test vertically). Anything else disables
+ * GE mode 7. Draws into the draw buffer before the first frame. */
+static void UvSelfTest(void) {
+  g_uvh[0] = g_uvh[1] = 0.5f;
+  uint16_t *tex = g_texture;
+  for (int k = 0; k < 8; k++) {
+    tex[k] = (uint16_t)k;
+    tex[k * kTexWidth] = (uint16_t)k;
+  }
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+  sceGuTexImage(0, kTexWidth, kTexHeight, kTexWidth, g_texture);
+  sceGuTexFlush();
+  TileVert *tv = sceGuGetMemory(4 * sizeof(TileVert));
+  tv[0] = (TileVert){0.3f, 0.5f, 0, 0, 0};
+  tv[1] = (TileVert){8.3f, 0.5f, 24, 1, 0};
+  tv[2] = (TileVert){0.5f, 0.3f, 40, 0, 0};
+  tv[3] = (TileVert){0.5f, 8.3f, 41, 24, 0};
+  GeDraw(kVtTile, 4, tv);
+  /* scissor semantics: sceGuScissor(0, 4, 480, 8) clips to rows 4..7 if the last two arguments are the
+   * right/bottom edge, to rows 4..11 if they are width/height. */
+  sceGuDisable(GU_TEXTURE_2D);
+  sceGuScissor(0, 4, kPspWidth, 8);
+  ColorVert *cv = sceGuGetMemory(2 * sizeof(ColorVert));
+  cv[0] = (ColorVert){0xffffffffu, 60, 0, 0};
+  cv[1] = (ColorVert){0xffffffffu, 64, 16, 0};
+  GeDraw(kVtColor, 2, cv);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  const uint16_t *px = (const uint16_t *)g_vram_u;  /* draw buffer 0, 5650, stride 512 */
+  int okc[2] = {1, 1}, okk[2] = {1, 1};
+  for (int axis = 0; axis < 2; axis++)
+    for (int i = 2; i < 22; i += 3) {  /* texels 1..7 only; texel 8 is not set */
+      int got = (axis == 0 ? px[i] : px[i * 512 + 40]) & 31;
+      int centre = (int)(0.3f + ((float)i + 0.5f) / 3.0f), corner = (int)(0.3f + (float)i / 3.0f);
+      if (got != centre) okc[axis] = 0;
+      if (got != corner) okk[axis] = 0;
+    }
+  bool ok = true;
+  for (int axis = 0; axis < 2; axis++) {
+    if (okc[axis])
+      g_uvh[axis] = 0.5f;
+    else if (okk[axis])
+      g_uvh[axis] = 0.0f;
+    else
+      ok = false;
+  }
+  int white = 0;
+  for (int y = 0; y < 16; y++)
+    white += px[y * 512 + 62] == 0xffff;
+  g_scissor_mode = white == 4 ? 1 : white == 8 ? 2 : 0;
+  PspLog("scissor: %d rows -> mode %d (0 = unknown: tint frames with several colour-math ranges stay in software)", white,
+         g_scissor_mode);
+  if (!ok)
+    g_m7_ok = false;
+  PspLog("uvconv: x=%s y=%s (centre = 0.5, corner = 0) -> GE mode 7 %s", okc[0] ? "centre" : okk[0] ? "corner" : "?",
+         okc[1] ? "centre" : okk[1] ? "corner" : "?", ok ? "enabled" : "DISABLED");
+}
+
+static bool PspRenderer_Initialize(void) {
+  uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
+  g_atlas2 = (uint8_t *)(vram + kVramAtlas2);
+  g_atlas4 = (uint8_t *)(vram + kVramAtlas4);
+  g_atlas7 = (uint8_t *)(vram + kVramAtlas7);
+  g_vram_u = (uint8_t *)vram;
+  g_texture = (uint16_t *)(vram + kVramTexture);
+  g_ge_ok = (unsigned)sceGeEdramGetSize() >= (unsigned)kVramNeeded;
+  PspLog("edram size=%u needed=%u ge_ok=%d", (unsigned)sceGeEdramGetSize(),
+         (unsigned)kVramNeeded, (int)g_ge_ok);
+
+  sceGuInit();
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuDrawBuffer(GU_PSM_5650, (void *)0, 512);
+  sceGuDispBuffer(kPspWidth, kPspHeight, (void *)(512 * 272 * 2), 512);
+  sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
+  sceGuOffset(2048 - kPspWidth / 2, 2048 - kPspHeight / 2);
+  sceGuViewport(2048, 2048, kPspWidth, kPspHeight);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuEnable(GU_SCISSOR_TEST);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_CULL_FACE);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_DITHER);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuClearColor(0xff000000);
+  sceGuClear(GU_COLOR_BUFFER_BIT);
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  sceDisplayWaitVblankStart();
+  sceGuDisplay(GU_TRUE);
+  g_vcount_last = sceDisplayGetVcount();
+
+  g_triple = SM_PSP_TRIPLE && (unsigned)sceGeEdramGetSize() >= (unsigned)(kVramBuf2 + kBufBytes);
+  if (g_triple) {  /* the buffers the swap rotates through: software frames do not cover the borders */
+    memset(g_vram_u + kBufOff[1], 0, kBufBytes);
+    memset(g_vram_u + kBufOff[2], 0, kBufBytes);
+  }
+  PspLog("triple buffer: %d (needs %u of %u)", (int)g_triple, (unsigned)(kVramBuf2 + kBufBytes),
+         (unsigned)sceGeEdramGetSize());
+
+  if (g_ge_ok) {
+    memset(g_hash2, 0xff, sizeof(g_hash2));
+    memset(g_hash4, 0xff, sizeof(g_hash4));
+    memset(g_hash7, 0xff, sizeof(g_hash7));
+    memset(g_atlas2, 0, kAtlas2Bytes);
+    memset(g_atlas4, 0, kAtlas4Bytes);
+    memset(g_atlas7, 0, kAtlas7Bytes);
+    UvSelfTest();
+  }
+  g_ppu_line_hook = PspRenderer_CaptureLine;
+#if SM_PSP_GE_DEFAULT
+  // Start in GE + tint mode when the VRAM budget allows it. L+R+SELECT then cycles
+  // GE+tint -> GE without tint -> software -> GE+tint.
+  if (g_ge_ok) {
+    g_ge_level = 1;
+    g_ge_active = true;
+    PspLog("renderer: GE (BG1-3 + OBJ + tint) by default");
+  }
+#endif
+#if SM_PSP_LOG
+  g_ppu_draw_begin = ProfPpuBegin;
+  g_ppu_draw_end = ProfPpuEnd;
+  {
+    uint32_t t0 = Now(), x = 0;
+    for (int i = 0; i < 2000; i++)
+      x += Now();
+    uint32_t dt = Now() - t0;
+    PspLog("clock read cost: %u ns/call (x=%u); ppu timing on; strips=%d", (unsigned)(dt * 1000 / 2000),
+           (unsigned)(x & 1), (int)SM_PSP_GE_STRIPS);
+  }
+#endif
+  return true;
+}
+
+static void PspRenderer_Destroy(void) {
+  g_ppu_line_hook = NULL;
+  g_ppu_draw_begin = g_ppu_draw_end = NULL;
+  g_ppu_skip_draw = false;
+  sceGuDisplay(GU_FALSE);
+  sceGuTerm();
+  g_atlas2 = g_atlas4 = NULL;
+  g_texture = NULL;
+}
+
+static void PspRenderer_BeginDraw(int width, int height, uint8 **pixels, int *pitch) {
+  if (width != kGameWidth || height != kGameHeight)
+    Die("PSP renderer requires a 256x240 framebuffer");
+  *pixels = g_framebuffer;
+  *pitch = kGameWidth * 4;
+}
+
+typedef struct PspVertex { float u, v; float x, y, z; } PspVertex;
+
+#if SM_PSP_LOG
+static void ProfLog(void) {
+  M7Log();
+  for (int c = 0; c < 3; c++) {
+    const Prof *p = &g_prof[c];
+    if (p->period.n == 0)
+      continue;
+#define AVG(st) (unsigned)((st).n ? (st).sum / (st).n : 0), (unsigned)(st).max
+    PspLog("T[%s] n=%u game=%u/%u ppu=%u/%u prep=%u/%u build=%u/%u", kProfName[c], (unsigned)p->period.n,
+           AVG(p->game), AVG(p->ppu), AVG(p->prep), AVG(p->build));
+    PspLog("  gewait=%u/%u vbwait=%u/%u period=%u/%u late=%u miss=%u hold=%u skip=%d",
+           AVG(p->gewait), AVG(p->vbwait), AVG(p->period), (unsigned)p->late, (unsigned)p->miss,
+           (unsigned)p->hold, (int)g_ppu_skip_draw);
+    PspLog("  cap=%u/%u cpy=%u/%u class=%u/%u bg=%u/%u obj=%u/%u emit=%u/%u", AVG(p->cap), AVG(p->cpy), AVG(p->cls),
+           AVG(p->bg), AVG(p->obj), AVG(p->emit));
+    PspLog("  tiles seen=%u/%u decoded=%u/%u | draws=%u/%u clut=%u/%u verts=%u/%u", AVG(p->tseen),
+           AVG(p->tdec), AVG(p->draws), AVG(p->clut), AVG(p->verts));
+    if (p->m7i.n)
+      PspLog("  m7img cpu=%u/%u us n=%u", AVG(p->m7i), (unsigned)p->m7i.n);
+#undef AVG
+  }
+  PspAudioMe_LogStats();  // no-op unless PSP_LOG, PSP_AUDIO_ME and PSP_ME_LOG are all on
+  memset(g_prof, 0, sizeof(g_prof));
+}
+#endif
+
+static void PspRenderer_EndDraw(void) {
+  PROF(uint32_t t_enter = Now();)
+  g_frame++;
+  g_prep_us = g_build_us = g_gewait_us = g_vbwait_us = 0;
+  bool drew_ge = false, held = false;
+
+  if (g_ge_active && g_line_count > 0) {
+    if (DrawGe())
+      drew_ge = true;
+    else if (g_ppu_skip_draw)
+      held = true;  /* the software PPU skipped this frame, so there is no software image to fall back to */
+  }
+
+  if (drew_ge) {
+    g_frames_ge++;
+    g_streak++;
+    if (g_frame_subnoop)
+      g_frames_subnoop++;
+  } else if (held) {
+    /* Misprediction: repeat the previous image for one frame (nothing is drawn
+     * or swapped, so the panel keeps showing it), keep the pacing, and let the
+     * software PPU draw the next frames until the GE has been stable again. */
+    g_frames_sw++;
+    PROF(g_holds++;)
+    g_streak = 0;
+    g_ppu_skip_draw = false;
+    Pace();
+    g_vcount_last = sceDisplayGetVcount();
+  } else {
+    /* Software path (unchanged behaviour). Also used when the GE path hands a
+     * frame back, and for the first frame after a toggle. */
+    if (g_ge_active)
+      g_frames_sw++;
+    g_streak = 0;
+    g_t_draw_start = Now();
+    int swpath = g_swpath >= 0 ? g_swpath : (int)((g_cal_frames / kSwCalFrames) % kSwPaths);
+    if (swpath == 0)
+      PspRenderer_Convert();
+    sceKernelDcacheWritebackRange(g_framebuffer, sizeof(g_framebuffer));
+    g_t_list_start = Now();
+    g_prep_us = g_t_list_start - g_t_draw_start;
+    sceGuStart(GU_DIRECT, g_gu_list);
+    SelectDrawBuffer();
+    sceGuDisable(GU_ALPHA_TEST);
+    sceGuDisable(GU_DEPTH_TEST);
+    sceGuDisable(GU_BLEND);
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+    if (swpath == 0) {
+      sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+      sceGuTexImage(0, kTexWidth, kTexHeight, kTexWidth, g_texture);
+    } else {
+      /* GE copy RAM -> VRAM (physical address 0x04xxxxxx), then sample the VRAM copy. */
+      void *vram_phys = (void *)(0x04000000u | ((uintptr_t)g_texture & 0x001fffffu));
+      sceGuCopyImage(GU_PSM_8888, 0, 0, kGameWidth, kGameHeight, kGameWidth, g_framebuffer, 0, 0, 256, vram_phys);
+      sceGuTexSync();
+      sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+      sceGuTexImage(0, 256, 256, 256, g_texture);
+    }
+    sceGuTexFlush();
+    int edges[8];
+    int nstrip = StripEdges(kLeft, kLeft + kGameWidth, edges);
+    PspVertex *v = (PspVertex *)sceGuGetMemory(nstrip * 2 * sizeof(PspVertex));
+    for (int st = 0; st < nstrip; st++) {
+      v[2 * st] = (PspVertex){(float)(edges[st] - kLeft), 0, (float)edges[st], kTop, 0};
+      v[2 * st + 1] = (PspVertex){(float)(edges[st + 1] - kLeft), kGameHeight, (float)edges[st + 1],
+                                  kTop + kGameHeight, 0};
+    }
+    GeDraw(kVtTexF, nstrip * 2, v);
+    Present();
+    if (g_swpath < 0) {  /* calibration: CPU + GE cost of getting the frame on screen, per path */
+      uint32_t k = g_cal_frames++;
+      if (k % kSwCalFrames >= kSwCalSkip) {
+        g_cal_sum[swpath] += g_prep_us + g_gewait_us;
+        g_cal_n[swpath]++;
+      }
+      if (g_cal_frames == kSwPaths * kSwCalFrames) {
+        uint32_t a0 = g_cal_n[0] ? g_cal_sum[0] / g_cal_n[0] : ~0u, a1 = g_cal_n[1] ? g_cal_sum[1] / g_cal_n[1] : ~0u;
+        g_swpath = a1 < a0 ? 1 : 0;
+        PspLog("swpath: convert565=%u us, gecopy8888=%u us -> using %d", (unsigned)a0, (unsigned)a1, g_swpath);
+      }
+    }
+  }
+
+  /* Decide for the NEXT frame whether the software PPU may skip its drawing. */
+  g_ppu_skip_draw = g_ge_active && g_streak >= kSkipAfter;
+  if (g_ovf_watch) {
+    g_ovf_watch--;
+    g_ppu_skip_draw = false;
+  }
+  if (g_want_ms_verify) {  /* the first multi-layer subscreen frames are checked against the software image */
+    g_want_ms_verify = false;
+    g_ppu_skip_draw = false;
+    g_audit_now = true;
+  }
+#if SM_PSP_LOG
+  if (g_ge_active && kAuditFrames && (g_frame + 1) % kAuditFrames == 0) {  /* next frame: software PPU draws too, GE image gets checked */
+    g_ppu_skip_draw = false;
+    g_audit_now = true;
+  }
+#endif
+
+#if SM_PSP_LOG
+  /* Per-frame timing. "game" is everything since the previous frame finished:
+   * the game logic, input and the software PPU (its share is "ppu"). */
+#if SM_PSP_PROBES
+  M7FrameEnd();
+  WinFrameEnd();
+  FlickFrameEnd();
+#endif
+  uint32_t t_end = Now();
+  if (g_t_prev_end != 0) {
+    Prof *p = &g_prof[!g_ge_active ? 2 : (drew_ge ? 0 : 1)];
+    uint32_t period = t_end - g_t_prev_end;
+    StatAdd(&p->game, t_enter - g_t_prev_end);
+    StatAdd(&p->ppu, g_ppu_us);
+    StatAdd(&p->prep, g_prep_us);
+    StatAdd(&p->build, g_build_us);
+    StatAdd(&p->gewait, g_gewait_us);
+    StatAdd(&p->vbwait, g_vbwait_us);
+    StatAdd(&p->period, period);
+    StatAdd(&p->cap, g_cap_us);
+    StatAdd(&p->cpy, g_cpy_us);
+    StatAdd(&p->cls, g_pc_class);
+    StatAdd(&p->bg, g_pc_bg);
+    StatAdd(&p->obj, g_pc_obj);
+    StatAdd(&p->emit, g_pc_emit);
+    StatAdd(&p->tseen, g_c_tseen);
+    StatAdd(&p->tdec, g_c_tdec);
+    StatAdd(&p->draws, g_c_draws);
+    StatAdd(&p->clut, g_c_clut);
+    StatAdd(&p->verts, g_c_verts);
+    if (g_m7i_us)
+      StatAdd(&p->m7i, g_m7i_us);
+    if (period > kLateUs)
+      p->late++;
+    if (period > kMissUs)
+      p->miss++;
+    if (held)
+      p->hold++;
+    if (period > kHitchUs && g_hitch_n++ < (uint32_t)kHitchPerWindow) {
+      uint32_t game = t_enter - g_t_prev_end;
+      uint32_t logic = game > g_cap_us + g_ppu_us ? game - g_cap_us - g_ppu_us : 0;
+      PspLog("HITCH f=%u period=%u logic=%u cap=%u ppu=%u prep=%u build=%u gewait=%u vb=%u | ge=%d held=%d ver=%d tint=%d bruns=%d m7=%d/%d ovf=%d mos=%d sh=%d sf=%d w2=%d",
+             (unsigned)g_frame, (unsigned)period, (unsigned)logic, (unsigned)g_cap_us, (unsigned)g_ppu_us,
+             (unsigned)g_prep_us, (unsigned)g_build_us, (unsigned)g_gewait_us, (unsigned)g_vbwait_us,
+             drew_ge, held, g_hit_verified, g_ntint, g_nbruns, g_m7_nq, g_m7_img, g_ovf_rows, g_mos_frame,
+             g_sh_frame, g_sf_frame, g_w2_frame);
+    }
+  }
+  g_ppu_us = g_cap_us = g_cpy_us = g_m7i_us = 0;
+  g_hit_verified = false;
+  g_pc_class = g_pc_bg = g_pc_obj = g_pc_emit = 0;
+  g_c_tseen = g_c_tdec = g_c_draws = g_c_clut = g_c_verts = 0;
+  g_t_prev_end = t_end;
+  if (g_note_pending) {
+    g_note_pending = false;
+    PspLog("NEW reason bits=0x%x line=%d mode=%u TM=%02x TS=%02x math=%02x add=%u sub=%u half=%u fixed=%04x clip=%u prev=%u tmw=%02x tsw=%02x wsel=%x",
+           g_note.bits, g_note.line, g_note.mode, g_note.tm, g_note.ts, g_note.mathmask, g_note.add,
+           g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.tsw, g_note.wsel);
+  }
+  if (g_ge_active && (g_frame % 300) == 0) {
+    PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u shf=%u sho=%u w2f=%u shn=%u sfo=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
+           (unsigned)g_frames_subnoop, (unsigned)g_frames_blend, (unsigned)g_frames_tint, (unsigned)g_frames_sw,
+           (unsigned)g_capture_gaps, (unsigned)g_frames_ovf, (unsigned)g_frames_mos, (unsigned)g_frames_m7i,
+           (unsigned)g_frames_prev, (unsigned)g_frames_cw, (unsigned)g_frames_sf, (unsigned)g_frames_sh,
+           (unsigned)g_frames_sho, (unsigned)g_frames_w2, (unsigned)g_frames_shn, (unsigned)g_frames_sfo);
+    PspLog("  why: mode=%u big=%u mos=%u win=%u clip=%u tint=%u b3p=%u budget=%u subobj=%u subbg=%u",
+           (unsigned)g_reason_counts[0], (unsigned)g_reason_counts[1], (unsigned)g_reason_counts[2],
+           (unsigned)g_reason_counts[3], (unsigned)g_reason_counts[4], (unsigned)g_reason_counts[5],
+           (unsigned)g_reason_counts[6], (unsigned)g_reason_counts[7], (unsigned)g_reason_counts[8],
+           (unsigned)g_reason_counts[9]);
+    PspLog("  why2: objcfg=%u objlimit=%u subwin=%u submulti=%u mathbright=%u m7=%u", (unsigned)g_reason_counts[10],
+           (unsigned)g_reason_counts[11], (unsigned)g_reason_counts[12], (unsigned)g_reason_counts[13],
+           (unsigned)g_reason_counts[14], (unsigned)g_reason_counts[15]);
+    PspLog("  peak: tiles=%u/%d list=%uKB/%dKB vtx=%uKB/%dKB (pool=%d)", (unsigned)g_peak_tiles, (int)kMaxTilesPerFrame,
+           (unsigned)(g_peak_list >> 10), (int)(kListBytes >> 10), (unsigned)(g_peak_vtx >> 10),
+           (int)(kVtxPoolBytes >> 10), (int)SM_PSP_VTX_POOL);
+    g_peak_tiles = g_peak_list = g_peak_vtx = 0;
+    PspLog("  rowcache: hit=%u miss=%u", (unsigned)g_rc_hit, (unsigned)g_rc_miss);
+    g_rc_hit = g_rc_miss = 0;
+    PspLog("  capreuse: reused=%u full=%u chk=%u bad=%u on=%d", (unsigned)g_cap_n_reuse, (unsigned)g_cap_n_full,
+           (unsigned)g_cap_n_chk, (unsigned)g_cap_n_bad, (int)g_cap_reuse_ok);
+    g_cap_n_reuse = g_cap_n_full = g_cap_n_chk = g_cap_n_bad = 0;
+  }
+  if ((g_frame % 300) == 0) {
+    if (g_hitch_n > (uint32_t)kHitchPerWindow)
+      PspLog("hitches: %u in the last 300 frames (first %d shown)", (unsigned)g_hitch_n, (int)kHitchPerWindow);
+    g_hitch_n = 0;
+#if SM_PSP_PROBES
+    FlickLog();
+#endif
+    ProfLog();
+  }
+#endif
+  /* Write the buffered log when due. The stall is kept out of the statistics. */
+  if (PspLog_Tick((unsigned)g_frame)) {
+    PROF(g_t_prev_end = Now();)
+  }
+}
+
+static const struct RendererFuncs kPspRendererFuncs = {
+  &PspRenderer_Initialize,
+  &PspRenderer_Destroy,
+  &PspRenderer_BeginDraw,
+  &PspRenderer_EndDraw,
+};
+
+uint8_t *PspRenderer_FrameBuffer(void) {
+  return g_framebuffer;
+}
+
+void PspRenderer_Create(struct RendererFuncs *funcs) {
+  *funcs = kPspRendererFuncs;
+}

@@ -120,7 +120,31 @@ typedef struct LineSnap {
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
 typedef struct ColorVert { uint32_t color; int16_t x, y, z; } ColorVert;
 typedef struct Run { uint16_t r0, r1, first; } Run;
-typedef struct Geom { TileVert *v; int n; } Geom;
+/* Gate 5h-c: BG and sprite quads (two vertices each) use a 10-byte vertex with 16-bit texture coordinates (texel units in
+ * through mode, always integers here) and are written as five 32-bit words per quad instead of ten 16/32-bit stores
+ * into the uncached display list. PSP_VTX16=0 restores the 16-byte float vertex. Mode 7, mosaic and composite quads
+ * keep TileVert (fractional texture coordinates). */
+#if SM_PSP_VTX16
+typedef struct BgVert { uint16_t u, v; int16_t x, y, z; } BgVert;
+#else
+typedef struct BgVert { float u, v; int16_t x, y, z; } BgVert;
+#endif
+CASSERT(sizeof(BgVert) == (SM_PSP_VTX16 ? 10 : 16));
+/* w must be 4-byte aligned: list and pool allocations are, and every emitter advances by whole quads (20 bytes). */
+static inline void BgQuad(BgVert *w, int ul, int vt, int ur, int vb, int x0, int y0, int x1, int y1, int z) {
+#if SM_PSP_VTX16
+  uint32_t *p = (uint32_t *)w;  /* vertex 0: u v x y z, vertex 1: u v x y z = ten halfwords */
+  p[0] = (uint32_t)(uint16_t)ul | (uint32_t)vt << 16;
+  p[1] = (uint32_t)(uint16_t)x0 | (uint32_t)y0 << 16;
+  p[2] = (uint32_t)(uint16_t)z | (uint32_t)ur << 16;
+  p[3] = (uint32_t)(uint16_t)vb | (uint32_t)x1 << 16;
+  p[4] = (uint32_t)(uint16_t)y1 | (uint32_t)z << 16;
+#else
+  w[0] = (BgVert){(float)ul, (float)vt, (int16_t)x0, (int16_t)y0, (int16_t)z};
+  w[1] = (BgVert){(float)ur, (float)vb, (int16_t)x1, (int16_t)y1, (int16_t)z};
+#endif
+}
+typedef struct Geom { BgVert *v; int n; } Geom;
 
 static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
 
@@ -215,7 +239,7 @@ static ObjSeg g_objseg[128 * kMaxObjBands * 2];  /* runs of consecutive sprites 
 static int g_nobjseg;
 static ObjBand g_objband[kMaxObjBands];
 static int g_nobjband;
-static TileVert *g_objbase;
+static BgVert *g_objbase;
 static uint32_t g_clutobj[16][8][16] __attribute__((aligned(64)));
 static uint16_t g_clutobj_stamp[16];
 
@@ -1559,7 +1583,7 @@ static void CountList(const TileList *lst, int counts[2][8]) {
 
 /* Emits CPU-clipped quads for rows [r0,r1) into out[prio][pal] (no negative or
  * off-screen vertex ever reaches the GE) and for x in [vx0,vx1) (a window span). */
-static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8], int ox, int oy, int vx0,
+static void EmitList(int l, const TileList *lst, int r0, int r1, BgVert *out[2][8], int ox, int oy, int vx0,
                      int vx1) {
   int cols = l < 2 ? 32 : 64;
   for (int i = 0; i < lst->n; i++) {
@@ -1569,13 +1593,12 @@ static void EmitList(int l, const TileList *lst, int r0, int r1, TileVert *out[2
     int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
     if (cl + cr >= 8 || ct + cb >= 8)
       continue;
-    float u = (float)((pt & (cols - 1)) * 8), v = (float)((pt >> (cols == 32 ? 5 : 6)) * 8);
-    float ul, ur, vt, vb;
+    int u = (pt & (cols - 1)) * 8, v = (pt >> (cols == 32 ? 5 : 6)) * 8;
+    int ul, ur, vt, vb;
     if (e->fl & 2) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
     if (e->fl & 4) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
-    TileVert *w = out[prio][pal];
-    w[0] = (TileVert){ul, vt, (int16_t)(ox + x0 + cl), (int16_t)(oy + y0 + ct), (int16_t)g_zbg[l][prio]};
-    w[1] = (TileVert){ur, vb, (int16_t)(ox + x0 + 8 - cr), (int16_t)(oy + y0 + 8 - cb), (int16_t)g_zbg[l][prio]};
+    BgQuad(out[prio][pal], ul, vt, ur, vb, ox + x0 + cl, oy + y0 + ct, ox + x0 + 8 - cr, oy + y0 + 8 - cb,
+           g_zbg[l][prio]);
     out[prio][pal] += 2;
   }
 }
@@ -1599,24 +1622,22 @@ static void BuildRowWin(int l, int r0, int r1) {
 }
 
 /* One quad of tile e: x in [xl,xr), rows [ra,rb), clipped on the CPU (same maths as EmitList). */
-static void PutTileQuad(TileVert *out[2][8], const TileEnt *e, int l, int ox, int oy, int xl, int xr, int ra, int rb) {
+static void PutTileQuad(BgVert *out[2][8], const TileEnt *e, int l, int ox, int oy, int xl, int xr, int ra, int rb) {
   int cols = l < 2 ? 32 : 64;
   int x0 = e->x, y0 = e->y;
   int cl = xl - x0, cr = x0 + 8 - xr, ct = ra - y0, cb = y0 + 8 - rb;
   int prio = e->fl & 1, pal = e->pal, pt = e->pt;
-  float u = (float)((pt & (cols - 1)) * 8), v = (float)((pt >> (cols == 32 ? 5 : 6)) * 8);
-  float ul, ur, vt, vb;
+  int u = (pt & (cols - 1)) * 8, v = (pt >> (cols == 32 ? 5 : 6)) * 8;
+  int ul, ur, vt, vb;
   if (e->fl & 2) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
   if (e->fl & 4) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
-  TileVert *w = out[prio][pal];
-  w[0] = (TileVert){ul, vt, (int16_t)(ox + xl), (int16_t)(oy + ra), (int16_t)g_zbg[l][prio]};
-  w[1] = (TileVert){ur, vb, (int16_t)(ox + xr), (int16_t)(oy + rb), (int16_t)g_zbg[l][prio]};
+  BgQuad(out[prio][pal], ul, vt, ur, vb, ox + xl, oy + ra, ox + xr, oy + rb, g_zbg[l][prio]);
   out[prio][pal] += 2;
 }
 
 /* Quads of tile e for rows [r0,r1) under the per-row window table; consecutive rows with the same visible interval
  * merge. out == NULL only counts (identical control flow, so counts and emission always agree). */
-static int TileRowsEmit(const TileEnt *e, int l, int r0, int r1, TileVert *out[2][8], int ox, int oy) {
+static int TileRowsEmit(const TileEnt *e, int l, int r0, int r1, BgVert *out[2][8], int ox, int oy) {
   int x0 = e->x;
   int ra = e->y > r0 ? e->y : r0, rb = e->y + 8 < r1 ? e->y + 8 : r1;
   int nq = 0;
@@ -1686,7 +1707,7 @@ static void CountListWin(int l, const TileList *lst, int r0, int r1, int counts[
   }
 }
 
-static void EmitListWin(int l, const TileList *lst, int r0, int r1, TileVert *out[2][8], int ox, int oy) {
+static void EmitListWin(int l, const TileList *lst, int r0, int r1, BgVert *out[2][8], int ox, int oy) {
   for (int i = 0; i < lst->n; i++) {
     uint8_t k = g_tkind[lst->first + i];
     if (k == kTkFull) {
@@ -1831,7 +1852,7 @@ static const uint8_t kSpriteSizes[8][2] = {
   {8, 16}, {8, 32}, {8, 64}, {16, 32}, {16, 64}, {32, 64}, {16, 32}, {16, 32}
 };
 
-static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf, int z,
+static void EmitQuad8(BgVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf, int z,
                       int vx0, int vx1) {
   int cl = x0 < vx0 ? vx0 - x0 : 0, cr = x0 + 8 > vx1 ? x0 + 8 - vx1 : 0;
   int ct = y0 < r0 ? r0 - y0 : 0, cb = y0 + 8 > r1 ? y0 + 8 - r1 : 0;
@@ -1841,13 +1862,11 @@ static void EmitQuad8(TileVert **w, int ox, int oy, int x0, int y0, int r0, int 
     g_obj_dry_n++;
     return;
   }
-  float u = (float)((pt & 31) * 8), v = (float)((pt >> 5) * 8);
-  float ul, ur, vt, vb;
+  int u = (pt & 31) * 8, v = (pt >> 5) * 8;
+  int ul, ur, vt, vb;
   if (hf) { ul = u + 8 - cl; ur = u + cr; } else { ul = u + cl; ur = u + 8 - cr; }
   if (vf) { vt = v + 8 - ct; vb = v + cb; } else { vt = v + ct; vb = v + 8 - cb; }
-  TileVert *o = *w;
-  o[0] = (TileVert){ul, vt, (int16_t)(ox + x0 + cl), (int16_t)(oy + y0 + ct), (int16_t)z};
-  o[1] = (TileVert){ur, vb, (int16_t)(ox + x0 + 8 - cr), (int16_t)(oy + y0 + 8 - cb), (int16_t)z};
+  BgQuad(*w, ul, vt, ur, vb, ox + x0 + cl, oy + y0 + ct, ox + x0 + 8 - cr, oy + y0 + 8 - cb, z);
   *w += 2;
 }
 
@@ -1873,7 +1892,7 @@ static inline bool ObjRowKeeps(int k, int r, int vi) {
 }
 
 /* EmitQuad8 for the rows of the tile on which sprite k keeps this column (hardware sprite/sliver limit). */
-static void EmitQuad8Rows(TileVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf,
+static void EmitQuad8Rows(BgVert **w, int ox, int oy, int x0, int y0, int r0, int r1, int pt, bool hf, bool vf,
                           int z, int vx0, int vx1, int k, int vi) {
   int b = y0 + 8 < r1 ? y0 + 8 : r1;
   int r = y0 > r0 ? y0 : r0;
@@ -1894,7 +1913,7 @@ static void EmitQuad8Rows(TileVert **w, int ox, int oy, int x0, int y0, int r0, 
  * open). Otherwise emit CPU-clipped quads for rows [o0,o1). Tile selection
  * mirrors ppu.c: 16x16-page wrap for the low nibble, row offset added to the
  * high nibble, hflip mirrors columns, vflip mirrors rows. */
-static void WalkSprite(const Sprite *sp, int o0, int o1, TileVert **w, int z, int ox, int oy, int vx0, int vx1) {
+static void WalkSprite(const Sprite *sp, int o0, int o1, BgVert **w, int z, int ox, int oy, int vx0, int vx1) {
   int n = sp->size >> 3;
   bool hf = (sp->attr & 0x4000) != 0, vf = (sp->attr & 0x8000) != 0;
   int adr = (sp->attr & 0x100) ? g_obj_adr2 : g_obj_adr1;
@@ -2017,12 +2036,12 @@ static bool PrepareObj(int o0, int o1) {
 
 static ObjSeg g_sobjseg[128];
 static int g_nsobjseg;
-static TileVert *g_sobjbase;
+static BgVert *g_sobjbase;
 
 /* Number of quads BuildObjGeom will emit for these bands (limited rows split tiles, so g_spr_quads is no bound). */
 static int ObjCountQuads(const ObjBand *bands, int nb) {
   int wa[2], we[2];
-  TileVert *w = NULL;  /* never written: EmitQuad8 only counts */
+  BgVert *w = NULL;  /* never written: EmitQuad8 only counts */
   g_obj_dry = true;
   g_obj_dry_n = 0;
   for (int b = 0; b < nb; b++) {
@@ -2038,7 +2057,7 @@ static int ObjCountQuads(const ObjBand *bands, int nb) {
 /* Emits the sprite quads of every window band at offset (ox,oy); returns the number of palette segments.
  * Per band the visible spans are clipped on the CPU. Bands and spans never overlap, so their order does not
  * matter; inside one the sprite with the lowest OAM index is still drawn last. */
-static int BuildObjGeom(const ObjBand *bands, int nb, int ox, int oy, ObjSeg *segs, TileVert **base_out) {
+static int BuildObjGeom(const ObjBand *bands, int nb, int ox, int oy, ObjSeg *segs, BgVert **base_out) {
   int nseg = 0, npairs = 0;
   int sa[kMaxObjBands][2], sb[kMaxObjBands][2], ns[kMaxObjBands];
   *base_out = NULL;
@@ -2055,15 +2074,15 @@ static int BuildObjGeom(const ObjBand *bands, int nb, int ox, int oy, ObjSeg *se
     cap = ObjCountQuads(bands, nb);  /* limited rows split tiles: count what is really emitted */
   if (cap <= 0)
     return 0;
-  TileVert *base = VtxAlloc(cap * 2 * sizeof(TileVert));
-  TileVert *w = base;
+  BgVert *base = VtxAlloc(cap * 2 * sizeof(BgVert));
+  BgVert *w = base;
   *base_out = base;
   for (int b = 0; b < nb; b++) {
     for (int s = 0; s < ns[b]; s++) {
       for (int k = g_nspr - 1; k >= 0; k--) {
         const Sprite *sp = &g_spr[k];
         int pal = (sp->attr >> 9) & 7, prio = (sp->attr >> 12) & 3;
-        TileVert *start = w;
+        BgVert *start = w;
         WalkSprite(sp, bands[b].r0, bands[b].r1, &w, (prio * 4 + 2) * kZLevel + 127 - k, ox, oy, sa[b][s],
                    sb[b][s]);
         if (w == start)
@@ -2632,6 +2651,7 @@ static void CountReasons(int mask) {
  * looks at the BG3-priority bit). Sprites: (prio*4+2)*kZLevel + 127-k, k = precedence index. */
 
 enum { kVtTile = GU_TEXTURE_32BITF | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+       kVtBg = (SM_PSP_VTX16 ? GU_TEXTURE_16BIT : GU_TEXTURE_32BITF) | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
        kVtColor = GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
        kVtTexF = GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D };
 
@@ -2713,7 +2733,7 @@ static void DrawBgPass(int l, int pr) {
         i++;
         continue;
       }
-      const TileVert *v = g->v;
+      const BgVert *v = g->v;
       int n = g->n, j = i + 1;
       for (; j < nr; j++) {
         const Geom *h = &g_geom[l][j][pr][p];
@@ -2724,7 +2744,7 @@ static void DrawBgPass(int l, int pr) {
         n += h->n;
       }
       BindBg(l, kClutBright, p);
-      GeDraw(kVtTile, n, v);
+      GeDraw(kVtBg, n, v);
       i = j;
     }
   }
@@ -2741,7 +2761,7 @@ static void DrawBlendBgs(bool half) {
             i++;
             continue;
           }
-          const TileVert *v = g->v;
+          const BgVert *v = g->v;
           int n = g->n, j = i + 1;
           for (; j < g_nbruns; j++) {
             const Geom *h = &g_bgeom[j][pr][p];
@@ -2755,7 +2775,7 @@ static void DrawBlendBgs(bool half) {
             BindBgHalf(p);
           else
             BindBg(l, kClutBright, p);
-          GeDraw(kVtTile, n, v);
+          GeDraw(kVtBg, n, v);
           i = j;
         }
       }
@@ -2765,7 +2785,7 @@ static void DrawBlendBgs(bool half) {
 
 /* only_excluded: draw just the sprites that never take part in colour math
  * (OBJ palettes 0-3 always; 4-7 when the OBJ math bit is off). */
-static void DrawObjSegs(const ObjSeg *segs, int n, const TileVert *base, int bright, bool only_excluded, int mathmask) {
+static void DrawObjSegs(const ObjSeg *segs, int n, const BgVert *base, int bright, bool only_excluded, int mathmask) {
   for (int i = 0; i < n; i++) {
     const ObjSeg *sg = &segs[i];
     if (only_excluded && !(sg->pal < 4 || !(mathmask & 0x10)))
@@ -2775,7 +2795,7 @@ static void DrawObjSegs(const ObjSeg *segs, int n, const TileVert *base, int bri
     sceGuClutLoad(2, g_clutobj[bright][sg->pal]);
     sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
     sceGuTexImage(0, 256, 512, 256, g_atlas4);
-    GeDraw(kVtTile, sg->n, base + sg->first);
+    GeDraw(kVtBg, sg->n, base + sg->first);
   }
 }
 
@@ -2845,7 +2865,7 @@ enum { kDrawCmdBytes = 96, kListFixedBytes = 8 * 1024, kListAllocBytes = 160 * 1
 static uint32_t g_peak_tiles, g_peak_list, g_peak_vtx;  /* since the last log line */
 
 static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend, bool tint, bool sobj, uint32_t *vtx) {
-  uint32_t big = ((uint32_t)total + (uint32_t)obj_quads) * 2 * sizeof(TileVert) +
+  uint32_t big = ((uint32_t)total + (uint32_t)obj_quads) * 2 * sizeof(BgVert) +
                  (uint32_t)(g_m7_nq + g_m7_nrng) * 2 * sizeof(TileVert);  /* tiles, sprites, mode 7 */
   uint32_t geom = 0;
   uint32_t mos_draws = 0;
@@ -3439,17 +3459,17 @@ static bool DrawGe(void) {
 
   /* Geometry for every layer/run. One buffer per layer/priority/palette; the runs fill it one after another. */
   for (int l = 0; l < kLayers; l++) {
-    TileVert *w[2][8];
+    BgVert *w[2][8];
     for (int pr = 0; pr < 2; pr++) {
       for (int p = 0; p < 8; p++) {
         int c = 0;
         for (int i = 0; i < g_nruns[l]; i++)
           c += g_counts[l][i][pr][p];
-        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(TileVert)) : NULL;
+        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(BgVert)) : NULL;
        }
     }
     for (int i = 0; i < g_nruns[l]; i++) {
-      TileVert *v0[2][8];
+      BgVert *v0[2][8];
       memcpy(v0, w, sizeof(v0));
       const Run *run = &g_runs[l][i];
       if (winrows) {
@@ -3498,21 +3518,21 @@ static bool DrawGe(void) {
   }
   /* Subscreen overlay geometry. */
   for (int l = 0; l < kLayers; l++) {
-    TileVert *w[2][8];
+    BgVert *w[2][8];
     for (int pr = 0; pr < 2; pr++) {
       for (int p = 0; p < 8; p++) {
         int c = 0;
         for (int i = 0; i < g_nbruns; i++)
           if (g_bruns[i].l == l)
             c += g_bcounts[i][pr][p];
-        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(TileVert)) : NULL;
+        w[pr][p] = c ? VtxAlloc(c * 2 * sizeof(BgVert)) : NULL;
       }
     }
     for (int i = 0; i < g_nbruns; i++) {
       const BRun *br = &g_bruns[i];
       if (br->l != l)
         continue;
-      TileVert *v0[2][8];
+      BgVert *v0[2][8];
       memcpy(v0, w, sizeof(v0));
       {
         const BgSnap *sb = &g_lines[br->first].bg[l];
@@ -4018,6 +4038,7 @@ static bool PspRenderer_Initialize(void) {
   g_ge_ok = (unsigned)sceGeEdramGetSize() >= (unsigned)kVramNeeded;
   PspLog("edram size=%u needed=%u ge_ok=%d", (unsigned)sceGeEdramGetSize(),
          (unsigned)kVramNeeded, (int)g_ge_ok);
+  PspLog("vtx16: %d bgvert=%u bytes", (int)SM_PSP_VTX16, (unsigned)sizeof(BgVert));
 
   sceGuInit();
   sceGuStart(GU_DIRECT, g_gu_list);
