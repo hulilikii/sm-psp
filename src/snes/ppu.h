@@ -167,6 +167,8 @@ struct Ppu {
   uint8_t brightnessMult[32 + 31];
   uint8_t brightnessMultHalf[32 * 2];
   uint8_t mosaicModulo[kPpuXPixels];
+  // 1 = 512-byte VRAM page written since the renderer last copied it. After pixelbuffer_placeholder: not saved.
+  uint8_t vramDirty[128];
 
 };
 
