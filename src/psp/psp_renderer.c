@@ -1036,9 +1036,107 @@ static void WinFrameEnd(void) {
 }
 #endif
 
+#if SM_PSP_LOG
+/* Flicker probe (log only, no effect on drawing). The game may fake transparency by alternating something every
+ * other frame. Per frame: a hash of the layer / colour-math / window-select registers over all rows (reg), of OAM
+ * (oam) and of VRAM (vram). A hash that equals its value two frames ago but not last frame's is an A-B-A-B step. */
+enum { kFlkReg, kFlkOam, kFlkVram, kFlkKinds, kFlkRun = 6, kFlkLogMax = 6 };
+static struct {
+  uint32_t cur[kFlkKinds], p1[kFlkKinds], p2[kFlkKinds];
+  uint32_t run[kFlkKinds], frames[kFlkKinds], logged[kFlkKinds];
+  uint32_t tm, ts, math, sel, fix;
+  uint8_t add, half, neg;
+  int lines;
+} g_flk;
+
+static inline uint32_t FlkMix(uint32_t h, uint32_t w) {
+  return (h ^ w) * 16777619u;
+}
+
+static void FlickProbe(const Ppu *p, int line) {
+  if (line < 1 || line > kMaxLines)
+    return;
+  uint32_t mm = 0;
+  for (int i = 0; i < 6; i++)
+    mm |= (uint32_t)(p->mathEnabled[i] ? 1 : 0) << i;
+  uint32_t fix = (uint32_t)(p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10);
+  uint32_t w0 = (uint32_t)p->screenEnabled[0] | (uint32_t)p->screenEnabled[1] << 8 | mm << 16 |
+                (uint32_t)(p->addSubscreen ? 1 : 0) << 22 | (uint32_t)(p->halfColor ? 1 : 0) << 23 |
+                (uint32_t)(p->subtractColor ? 1 : 0) << 24 | (uint32_t)p->preventMathMode << 25 |
+                (uint32_t)p->clipMode << 27 | (uint32_t)(p->forcedBlank ? 1 : 0) << 29;
+  uint32_t w1 = fix | (uint32_t)p->brightness << 16;
+  uint32_t w3 = (uint32_t)p->screenWindowed[0] | (uint32_t)p->screenWindowed[1] << 8 | (uint32_t)p->mode << 16;
+  if (line == 1) {
+    g_flk.lines = 0;
+    g_flk.cur[kFlkReg] = 2166136261u;
+    uint32_t h = 2166136261u, w;
+    for (int i = 0; i < 256; i += 2) {
+      memcpy(&w, &p->oam[i], 4);
+      h = FlkMix(h, w);
+    }
+    for (int i = 0; i < 32; i += 4) {
+      memcpy(&w, &p->highOam[i], 4);
+      h = FlkMix(h, w);
+    }
+    g_flk.cur[kFlkOam] = h;
+    h = 2166136261u;
+    for (int i = 0; i < 0x8000; i += 2) {
+      memcpy(&w, &p->vram[i], 4);
+      h = FlkMix(h, w);
+    }
+    g_flk.cur[kFlkVram] = h;
+    g_flk.tm = p->screenEnabled[0];
+    g_flk.ts = p->screenEnabled[1];
+    g_flk.math = mm;
+    g_flk.sel = p->windowsel;
+    g_flk.fix = fix;
+    g_flk.add = p->addSubscreen ? 1 : 0;
+    g_flk.half = p->halfColor ? 1 : 0;
+    g_flk.neg = p->subtractColor ? 1 : 0;
+  }
+  uint32_t h = g_flk.cur[kFlkReg];
+  h = FlkMix(h, w0);
+  h = FlkMix(h, w1);
+  h = FlkMix(h, (uint32_t)p->windowsel);
+  h = FlkMix(h, w3);
+  g_flk.cur[kFlkReg] = h;
+  g_flk.lines++;
+}
+
+static void FlickFrameEnd(void) {
+  static const char *const kName[kFlkKinds] = {"reg", "oam", "vram"};
+  if (g_flk.lines == 0)
+    return;
+  for (int k = 0; k < kFlkKinds; k++) {
+    bool alt = g_flk.cur[k] == g_flk.p2[k] && g_flk.cur[k] != g_flk.p1[k];
+    g_flk.run[k] = alt ? g_flk.run[k] + 1 : 0;
+    if (g_flk.run[k] >= (uint32_t)kFlkRun) {
+      g_flk.frames[k]++;
+      if (g_flk.run[k] == (uint32_t)kFlkRun && g_flk.logged[k] < (uint32_t)kFlkLogMax) {
+        g_flk.logged[k]++;
+        PspLog("FLICKER f=%u kind=%s | row0 TM=%02x TS=%02x math=%02x add=%d half=%d neg=%d fix=%04x wsel=%06x lines=%d",
+               (unsigned)g_frame, kName[k], (unsigned)g_flk.tm, (unsigned)g_flk.ts, (unsigned)g_flk.math,
+               g_flk.add, g_flk.half, g_flk.neg, (unsigned)g_flk.fix, (unsigned)g_flk.sel, g_flk.lines);
+      }
+    }
+    g_flk.p2[k] = g_flk.p1[k];
+    g_flk.p1[k] = g_flk.cur[k];
+  }
+  g_flk.lines = 0;
+}
+
+static void FlickLog(void) {
+  if (g_flk.frames[kFlkReg] | g_flk.frames[kFlkOam] | g_flk.frames[kFlkVram])
+    PspLog("FLK frames in A-B alternation (of 300): reg=%u oam=%u vram=%u", (unsigned)g_flk.frames[kFlkReg],
+           (unsigned)g_flk.frames[kFlkOam], (unsigned)g_flk.frames[kFlkVram]);
+  memset(g_flk.frames, 0, sizeof(g_flk.frames));
+}
+#endif
+
 void PspRenderer_CaptureLine(const Ppu *p, int line) {
 #if SM_PSP_LOG
   WinProbe(p, line);
+  FlickProbe(p, line);
   uint32_t t = Now();
   M7Probe(p, line);
   CaptureImpl(p, line);
@@ -4041,6 +4139,7 @@ static void PspRenderer_EndDraw(void) {
    * the game logic, input and the software PPU (its share is "ppu"). */
   M7FrameEnd();
   WinFrameEnd();
+  FlickFrameEnd();
   uint32_t t_end = Now();
   if (g_t_prev_end != 0) {
     Prof *p = &g_prof[!g_ge_active ? 2 : (drew_ge ? 0 : 1)];
@@ -4114,6 +4213,7 @@ static void PspRenderer_EndDraw(void) {
     if (g_hitch_n > (uint32_t)kHitchPerWindow)
       PspLog("hitches: %u in the last 300 frames (first %d shown)", (unsigned)g_hitch_n, (int)kHitchPerWindow);
     g_hitch_n = 0;
+    FlickLog();
     ProfLog();
   }
 #endif
