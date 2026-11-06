@@ -197,5 +197,7 @@ extern void (*g_ppu_line_hook)(const Ppu *ppu, int line);
 extern void (*g_ppu_draw_begin)(void);
 extern void (*g_ppu_draw_end)(void);
 extern bool g_ppu_skip_draw;
+// Writes that changed the line capture, counted by PPU register (log builds, see ppu_write).
+extern uint32_t g_ppu_gen_hist[64];
 
 #endif

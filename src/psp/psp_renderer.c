@@ -218,9 +218,11 @@ static uint32_t g_capture_gaps;
 /* Per-line capture reuse: a line whose PPU registers (Ppu.regGen) and OAM address equal the previous line's copies that
  * line's snapshot and re-reads only BG scroll and CGRAM entry 0. Log builds recompute every 16th frame and compare. */
 static bool g_cap_reuse_ok = SM_PSP_CAP_REUSE;
+static bool g_cap_win_ok = SM_PSP_CAP_WIN;  /* cleared if a window-edge-only line differs from a full capture */
 static uint32_t g_cap_gen, g_cap_oamadr;
+static uint8_t g_cap_win[4];  /* window 1 left/right, window 2 left/right as of the last full or window-refreshed capture */
 #if SM_PSP_LOG
-static uint32_t g_cap_n_reuse, g_cap_n_full, g_cap_n_chk, g_cap_n_bad;
+static uint32_t g_cap_n_reuse, g_cap_n_full, g_cap_n_chk, g_cap_n_bad, g_cap_n_win;
 #endif
 static uint16_t g_vram[0x8000] __attribute__((aligned(16)));
 static uint16_t g_cgram[256] __attribute__((aligned(16)));
@@ -769,6 +771,46 @@ static void CaptureRefresh(const Ppu *p, LineSnap *d, const LineSnap *prev) {
   d->cg0 = p->cgram[0];
 }
 
+/* Window edges ($2126-$2129) as of the last full or window-refreshed capture. */
+static inline bool CapWinSame(const Ppu *p) {
+  return p->window1left == g_cap_win[0] && p->window1right == g_cap_win[1] && p->window2left == g_cap_win[2] &&
+         p->window2right == g_cap_win[3];
+}
+
+static inline void CapWinStore(const Ppu *p) {
+  g_cap_win[0] = p->window1left;
+  g_cap_win[1] = p->window1right;
+  g_cap_win[2] = p->window2left;
+  g_cap_win[3] = p->window2right;
+}
+
+/* Gate 5k: a line whose registers equal the previous line's except for the window edges. The edges only reach wm/wl/wr,
+ * sm/sl/sr, owm/owl/owr, cwm/cwl/cwr and w2main, so only those are derived again, with the same calls as CaptureImpl
+ * and LineReasons (log builds compare the result with a full capture on every 16th frame). */
+static void CaptureWinRefresh(const Ppu *p, LineSnap *s) {
+  bool forced = p->forcedBlank;
+  s->w2main = 0;
+  for (int l = 0; l < kLayers; l++) {
+    BgSnap *b = &s->bg[l];
+    bool drawn = (b->flags & 4) != 0;
+    b->wm = b->wl = b->wr = 0;
+    if (drawn)
+      LayerWin(p, l, 0, &b->wm, &b->wl, &b->wr);
+    if (drawn && b->wm && ((p->windowsel >> (l * 4)) & 8))
+      s->w2main = 1;
+    b->sm = b->sl = b->sr = 0;
+    if (!forced && p->mode == 1 && (p->screenEnabled[1] & (1 << l)) && !p->bgLayer[l].bigTiles)
+      LayerWin(p, l, 1, &b->sm, &b->sl, &b->sr);
+  }
+  s->owm = s->owl = s->owr = 0;
+  if (s->objon)
+    LayerWin(p, 4, 0, &s->owm, &s->owl, &s->owr);
+  s->cwm = s->cwl = s->cwr = 0;
+  if (!forced && s->mathmask != 0 && p->preventMathMode != 3 && p->preventMathMode != 0 &&
+      !(g_prev_ok && MathHasNoEffect(p)) && (s->tint || s->subhalf))
+    ColorWinMath(p, &s->cwm, &s->cwl, &s->cwr);
+}
+
 static void CaptureImpl(const Ppu *p, int line) {
   if (!g_ge_active || line < 1 || line > kMaxLines)
     return;
@@ -797,15 +839,23 @@ static void CaptureImpl(const Ppu *p, int line) {
   LineSnap cand;
   bool check = false;
 #endif
-  if (g_cap_reuse_ok && line > 1 && p->regGen == g_cap_gen && p->oamAdr == g_cap_oamadr) {
+  bool winsame = CapWinSame(p);
+  if (g_cap_reuse_ok && line > 1 && p->regGen == g_cap_gen && p->oamAdr == g_cap_oamadr && (winsame || g_cap_win_ok)) {
 #if SM_PSP_LOG
     if ((g_frame & 15) == 0) {
       check = true;
       CaptureRefresh(p, &cand, &g_lines[line - 2]);
+      if (!winsame)
+        CaptureWinRefresh(p, &cand);
     } else
 #endif
     {
       CaptureRefresh(p, s, &g_lines[line - 2]);
+      if (!winsame) {
+        CaptureWinRefresh(p, s);
+        CapWinStore(p);
+        PROF(g_cap_n_win++;)
+      }
       if (s->m7on)
         g_m7_rows++;  /* same matrix as the previous mode 7 row: g_m7c and g_m7_same already cover it */
       PROF(g_cap_n_reuse++;)
@@ -815,6 +865,7 @@ static void CaptureImpl(const Ppu *p, int line) {
   }
   g_cap_gen = p->regGen;
   g_cap_oamadr = p->oamAdr;
+  CapWinStore(p);
   PROF(g_cap_n_full++;)
   bool forced = p->forcedBlank;
   s->w2main = 0;
@@ -948,9 +999,12 @@ static void CaptureImpl(const Ppu *p, int line) {
       while (off < sizeof(cand) && ca[off] == cs[off])
         off++;
       g_cap_n_bad++;
-      g_cap_reuse_ok = false;
-      PspLog("capreuse: f=%u line=%d byte %u of %u differs, reuse disabled", (unsigned)g_frame, line, off,
-             (unsigned)sizeof(cand));
+      if (winsame)
+        g_cap_reuse_ok = false;
+      else
+        g_cap_win_ok = false;
+      PspLog("capreuse: f=%u line=%d byte %u of %u differs, %s disabled", (unsigned)g_frame, line, off,
+             (unsigned)sizeof(cand), winsame ? "reuse" : "window path");
     }
   }
 #endif
@@ -2900,7 +2954,7 @@ enum { kS5Sub = kLayers, kS5Obj = kLayers + 1, kS5Cols = kLayers + 2, kS5Heavy =
 typedef struct S5Col { uint32_t n, runs, rows, thin, quads, qmax, scrollonly, mapsame, mapstatic; } S5Col;
 static struct {
   S5Col c[kS5Cols];
-  uint32_t frames, qsum, qmax, tdec0, cgsame, blend, tint, bands, bandmax, heavy;
+  uint32_t frames, qsum, qmax, tdec0, cgsame, blend, tint, bands, bandmax, heavy, submask;
 } g_s5;
 static uint32_t g_s5_hash[kLayers], g_s5_cg;
 static bool g_s5_hash_ok[kLayers];
@@ -2968,9 +3022,10 @@ static void S5iFrame(int total, int obj_quads, bool blend, bool tint) {
     c->mapsame += lms[l];
     c->mapstatic += lms[l] && cgsame && tdec0;
   }
-  uint32_t srows = 0, sthin = 0, squads = 0;
+  uint32_t srows = 0, sthin = 0, squads = 0, smask = 0;
   for (int i = 0; i < g_nbruns; i++) {
     int h = g_bruns[i].r1 - g_bruns[i].r0;
+    smask |= 1u << g_bruns[i].l;
     srows += (uint32_t)h;
     if (h <= 2)
       sthin++;
@@ -2980,6 +3035,7 @@ static void S5iFrame(int total, int obj_quads, bool blend, bool tint) {
   }
   if (g_nbruns)
     S5iAdd(&g_s5.c[kS5Sub], (uint32_t)g_nbruns, srows, sthin, squads);
+  g_s5.submask |= smask;
   if (g_nspr || obj_quads)
     S5iAdd(&g_s5.c[kS5Obj], (uint32_t)g_nspr, (uint32_t)g_ovf_rows, 0, (uint32_t)obj_quads);
   uint32_t q = (uint32_t)total + (uint32_t)obj_quads;
@@ -3002,7 +3058,8 @@ static void S5iFrame(int total, int obj_quads, bool blend, bool tint) {
         PspLog("  BG%d runs=%d rows=%u thin=%u q=%u scrollonly=%d mapsame=%d", l + 1, g_nruns[l], (unsigned)lrows[l],
                (unsigned)lthin[l], (unsigned)lquads[l], (int)lso[l], (int)lms[l]);
     if (g_nbruns)
-      PspLog("  SUB runs=%d rows=%u thin=%u q=%u", g_nbruns, (unsigned)srows, (unsigned)sthin, (unsigned)squads);
+      PspLog("  SUB runs=%d layers=%x rows=%u thin=%u q=%u", g_nbruns, (unsigned)smask, (unsigned)srows, (unsigned)sthin,
+             (unsigned)squads);
   }
 }
 
@@ -3024,11 +3081,22 @@ static void S5iLog(void) {
   }
   const S5Col *s = &g_s5.c[kS5Sub], *o = &g_s5.c[kS5Obj];
   if (s->n)
-    PspLog("  SUB n=%u runs=%u thin=%u rows=%u q=%u/%u", (unsigned)s->n, S5AVG(s->runs, s->n), S5AVG(s->thin, s->n),
-           S5AVG(s->rows, s->n), S5AVG(s->quads, s->n), (unsigned)s->qmax);
+    PspLog("  SUB n=%u layers=%x runs=%u thin=%u rows=%u q=%u/%u", (unsigned)s->n, (unsigned)g_s5.submask, S5AVG(s->runs, s->n),
+           S5AVG(s->thin, s->n), S5AVG(s->rows, s->n), S5AVG(s->quads, s->n), (unsigned)s->qmax);
   if (o->n)
     PspLog("  OBJ n=%u spr=%u ovfrows=%u q=%u/%u", (unsigned)o->n, S5AVG(o->runs, o->n), S5AVG(o->rows, o->n),
            S5AVG(o->quads, o->n), (unsigned)o->qmax);
+  {  /* capture-relevant PPU register writes in this window, by register (what still forces a full line capture) */
+    char buf[200];
+    int len = 0;
+    buf[0] = 0;
+    for (int a = 0; a < 64 && len < (int)sizeof(buf) - 16; a++)
+      if (g_ppu_gen_hist[a])
+        len += snprintf(buf + len, sizeof(buf) - (size_t)len, " %02x=%u", a, (unsigned)g_ppu_gen_hist[a]);
+    if (len)
+      PspLog("  regbump:%s", buf);
+    memset(g_ppu_gen_hist, 0, sizeof(g_ppu_gen_hist));
+  }
 #undef S5AVG
   memset(&g_s5, 0, sizeof(g_s5));
 }
@@ -4178,6 +4246,264 @@ static void UvSelfTest(void) {
          okc[1] ? "centre" : okk[1] ? "corner" : "?", ok ? "enabled" : "DISABLED");
 }
 
+#if SM_PSP_BENCH_ON
+/* Gate 5i-b: boot-time micro-benchmark for a layer-image redesign (nothing here is used by the game). A 512x256 layer
+ * image drawn as 97 two-row strips (one quad per HDMA band, own horizontal and vertical scroll) is compared with the
+ * 3492 eight-by-two tile quads the BG path emits for the same rows today. The strips are checked pixel by pixel against
+ * the image (does GE texture wrap work in through mode? the split variant needs none), and the CPU cost of building
+ * such an image from tile data is timed. */
+enum { kBenchImgW = 512, kBenchImgH = 256, kBenchBands = 97, kBenchBandRows = 2, kBenchTiles = 36, kBenchIters = 40 };
+enum { kBenchQuads, kBenchT8, kBenchT8Split, kBenchT4 };
+static uint8_t g_bench_img[kBenchImgW * kBenchImgH] __attribute__((aligned(64)));
+static uint32_t g_bench_clut[256] __attribute__((aligned(64)));
+static uint16_t g_bench_vram[0x8000] __attribute__((aligned(16)));
+static uint8_t *g_bench_img4;  /* 512x256 4 bit image in free VRAM, or NULL */
+static uint32_t g_bench_rng = 0x2545F491u;
+
+static uint32_t BenchRand(void) {
+  g_bench_rng ^= g_bench_rng << 13;
+  g_bench_rng ^= g_bench_rng >> 17;
+  g_bench_rng ^= g_bench_rng << 5;
+  return g_bench_rng;
+}
+
+/* Test pattern: a hash of the pixel position, so a wrong texel or a wrong wrap shows up. */
+static inline unsigned BenchPix(int x, int y) {
+  return (unsigned)((((uint32_t)x * 73856093u) ^ ((uint32_t)y * 19349663u)) >> 7) & 255u;
+}
+
+/* CLUT entry i, built so that the 5650 conversion is exact: R = i & 31, G = (i >> 5) & 7, B = (i * 5) & 31. */
+static uint32_t BenchColor(unsigned i) {
+  uint32_t r = (i & 31) << 3, g = ((i >> 5) & 7) << 2, b = ((i * 5) & 31) << 3;
+  return 0xff000000u | b << 16 | g << 8 | r;
+}
+
+static unsigned Bench565(unsigned i) {
+  return (i & 31) | (((i >> 5) & 7) << 5) | (((i * 5) & 31) << 11);
+}
+
+static inline int BenchHs(int i) { return (i * 53 + 17) & (kBenchImgW - 1); }
+static inline int BenchVs(int i) { return (i * 29) & (kBenchImgH - 1); }
+
+static void BenchInit(void) {
+  for (int i = 0; i < 256; i++)
+    g_bench_clut[i] = BenchColor((unsigned)i);
+  for (int y = 0; y < kBenchImgH; y++)
+    for (int x = 0; x < kBenchImgW; x++)
+      g_bench_img[y * kBenchImgW + x] = (uint8_t)BenchPix(x, y);
+  sceKernelDcacheWritebackRange(g_bench_img, sizeof(g_bench_img));
+  sceKernelDcacheWritebackRange(g_bench_clut, sizeof(g_bench_clut));
+  if (g_bench_img4) {
+    uint32_t *d = (uint32_t *)g_bench_img4;  /* uncached VRAM, 32 bit stores, pixel x in nibble x & 7 */
+    for (int y = 0; y < kBenchImgH; y++)
+      for (int x = 0; x < kBenchImgW; x += 8) {
+        uint32_t w = 0;
+        for (int k = 0; k < 8; k++)
+          w |= (uint32_t)(BenchPix(x + k, y) & 15u) << (4 * k);
+        *d++ = w;
+      }
+  }
+}
+
+/* CPU cost of building a 64x32-tile 4 bpp layer as an 8 bit image (palette baked in: index = pal * 16 + pixel, 0 =
+ * transparent). Same plane decode as EnsureTile. Timing only: its output is not compared with anything. */
+static void BenchBuildImage(uint8_t *dst, const uint16_t *vram, int mapadr, int tileadr) {
+  for (int ty = 0; ty < 32; ty++) {
+    for (int tx = 0; tx < 64; tx++) {
+      unsigned t = vram[(mapadr + ((tx & 32) ? 0x400 : 0) + ty * 32 + (tx & 31)) & 0x7fff];
+      int base = tileadr + (int)(t & 0x3ff) * 16;
+      unsigned pal = (t >> 6) & 0x70;
+      bool hf = (t & 0x4000) != 0, vf = (t & 0x8000) != 0;
+      uint8_t *d = dst + ty * 8 * kBenchImgW + tx * 8;
+      for (int y = 0; y < 8; y++, d += kBenchImgW) {
+        int row = vf ? 7 - y : y;
+        uint32_t w0 = vram[(base + row) & 0x7fff], w1 = vram[(base + 8 + row) & 0x7fff];
+        for (int x = 0; x < 8; x++) {
+          int s = 7 - x;
+          unsigned px = ((w0 >> s) & 1) | ((w0 >> (s + 7)) & 2) | (((w1 >> s) & 1) << 2) | ((w1 >> (s + 5)) & 8);
+          d[hf ? 7 - x : x] = (uint8_t)(px ? pal + px : 0);
+        }
+      }
+    }
+  }
+}
+
+static void BenchImageBuild(void) {
+  for (int i = 0; i < 0x8000; i++)
+    g_bench_vram[i] = (uint16_t)(BenchRand() >> 8);
+  BenchBuildImage(g_bench_img, g_bench_vram, 0x1000, 0x4000);  /* warm up */
+  uint32_t t0 = Now();
+  for (int i = 0; i < 4; i++)
+    BenchBuildImage(g_bench_img, g_bench_vram, 0x1000, 0x4000);
+  uint32_t build = (Now() - t0) / 4;
+  t0 = Now();
+  sceKernelDcacheWritebackRange(g_bench_img, sizeof(g_bench_img));
+  uint32_t wb = Now() - t0;
+  PspLog("bench: image build %u us (2048 tiles, %u ns/tile), writeback %u us", (unsigned)build,
+         (unsigned)(build * 1000 / 2048), (unsigned)wb);
+}
+
+/* Strip i covers screen rows [2i, 2i+2) with the whole 256 px width, sampled from the image at scroll (hs, vs). Without
+ * split one quad per strip is emitted and the texture coordinates run past the image edge (GU_REPEAT). With split
+ * the strip is cut at the image edge in x and y and every piece stays inside it (GU_CLAMP is enough). Returns the vertex
+ * count. */
+static int BenchStrips(TileVert *v, bool split) {
+  int n = 0;
+  const float iu = 0.5f - g_uvh[0], iv = 0.5f - g_uvh[1];
+  for (int i = 0; i < kBenchBands; i++) {
+    int r0 = i * kBenchBandRows, r1 = r0 + kBenchBandRows;
+    int hs = BenchHs(i), vs = BenchVs(i);
+    int xa = 256, rk = r1;  /* cut points: screen column and row, or the end (no cut) */
+    if (split) {
+      if (hs + 256 > kBenchImgW)
+        xa = kBenchImgW - hs;
+      int v0 = (r0 + vs) & (kBenchImgH - 1);
+      if (v0 + kBenchBandRows > kBenchImgH)
+        rk = r0 + (kBenchImgH - v0);
+    }
+    const int xs[3] = {0, xa, 256}, rs[3] = {r0, rk, r1};
+    for (int a = 0; a < 2; a++) {
+      if (xs[a] == xs[a + 1])
+        continue;
+      for (int b = 0; b < 2; b++) {
+        if (rs[b] == rs[b + 1])
+          continue;
+        int ub = split ? ((hs + xs[a]) & (kBenchImgW - 1)) : hs + xs[a];
+        int vb = split ? ((rs[b] + vs) & (kBenchImgH - 1)) : rs[b] + vs;
+        v[n++] = (TileVert){(float)ub + iu, (float)vb + iv, (int16_t)(kLeft + xs[a]), (int16_t)(kTop + rs[b]), 0};
+        v[n++] = (TileVert){(float)(ub + xs[a + 1] - xs[a]) + iu, (float)(vb + rs[b + 1] - rs[b]) + iv,
+                            (int16_t)(kLeft + xs[a + 1]), (int16_t)(kTop + rs[b + 1]), 0};
+      }
+    }
+  }
+  return n;
+}
+
+/* One frame: list build, then GE run to completion. build = until sceGuFinish, total = until the GE is idle. */
+static void BenchFrame(int kind, uint32_t *build_us, uint32_t *total_us) {
+  uint32_t t0 = Now();
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+  if (kind == kBenchQuads) {  /* what the BG path emits today: 97 bands x 36 tile quads of 8x2 px from the T4 atlas */
+    sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+    sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
+    sceGuClutLoad(2, g_bench_clut);
+    sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+    sceGuTexImage(0, 256, 512, 256, g_atlas4);
+    sceGuTexFlush();
+    BgVert *w0 = sceGuGetMemory(kBenchBands * kBenchTiles * 2 * sizeof(BgVert)), *w = w0;
+    for (int b = 0; b < kBenchBands; b++)
+      for (int t = 0; t < kBenchTiles; t++) {
+        int pt = ((b * kBenchTiles + t) * 7) & 2047;
+        int u = (pt & 31) * 8, v = (pt >> 5) * 8, y = kTop + b * kBenchBandRows;
+        BgQuad(w, u, v, u + 8, v + kBenchBandRows, kLeft + t * 8, y, kLeft + t * 8 + 8, y + kBenchBandRows, 0);
+        w += 2;
+      }
+    sceGuDrawArray(GU_SPRITES, kVtBg, kBenchBands * kBenchTiles * 2, NULL, w0);
+  } else {
+    bool t4 = kind == kBenchT4, wrap = kind != kBenchT8Split;
+    sceGuTexWrap(wrap ? GU_REPEAT : GU_CLAMP, wrap ? GU_REPEAT : GU_CLAMP);
+    if (t4) {
+      sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
+      sceGuClutLoad(2, g_bench_clut);
+      sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+      sceGuTexImage(0, kBenchImgW, kBenchImgH, kBenchImgW, g_bench_img4);
+    } else {
+      sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+      sceGuClutLoad(32, g_bench_clut);
+      sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
+      sceGuTexImage(0, kBenchImgW, kBenchImgH, kBenchImgW, g_bench_img);
+    }
+    sceGuTexFlush();
+    TileVert *v = sceGuGetMemory(kBenchBands * 8 * sizeof(TileVert));
+    int n = BenchStrips(v, kind == kBenchT8Split);
+    sceGuDrawArray(GU_SPRITES, kVtTile, n, NULL, v);
+  }
+  uint32_t t1 = Now();
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  *build_us = t1 - t0;
+  *total_us = Now() - t0;
+}
+
+static void BenchRun(const char *name, int kind) {
+  uint32_t sb = 0, st = 0, mt = 0;
+  for (int i = 0; i <= kBenchIters; i++) {
+    uint32_t b, t;
+    BenchFrame(kind, &b, &t);
+    if (i == 0)
+      continue;  /* first frame is cold */
+    sb += b;
+    st += t;
+    if (t > mt)
+      mt = t;
+  }
+  PspLog("bench: %s build=%u total=%u max=%u us (mean of %d)", name, (unsigned)(sb / kBenchIters),
+         (unsigned)(st / kBenchIters), (unsigned)mt, (int)kBenchIters);
+}
+
+/* The strips just drawn against the image: every pixel of rows 0..193 of the game area. Reads the draw buffer (buffer 0,
+ * 5650, stride 512) through the uncached VRAM mirror. */
+static void BenchVerify(const char *name, bool t4) {
+  const uint16_t *ge = (const uint16_t *)g_vram_u;
+  uint32_t bad = 0;
+  int bx = -1, by = -1;
+  unsigned bgot = 0, bwant = 0;
+  for (int y = 0; y < kBenchBands * kBenchBandRows; y++) {
+    int hs = BenchHs(y / kBenchBandRows), vs = BenchVs(y / kBenchBandRows);
+    for (int x = 0; x < 256; x++) {
+      unsigned idx = BenchPix((x + hs) & (kBenchImgW - 1), (y + vs) & (kBenchImgH - 1));
+      if (t4)
+        idx &= 15u;
+      unsigned want = Bench565(idx), got = ge[(kTop + y) * 512 + kLeft + x];
+      if (got != want) {
+        if (!bad) {
+          bx = x;
+          by = y;
+          bgot = got;
+          bwant = want;
+        }
+        bad++;
+      }
+    }
+  }
+  PspLog("bench: %s check bad=%u of %d first (%d,%d) got=%04x want=%04x", name, (unsigned)bad, 256 * kBenchBands * kBenchBandRows,
+         bx, by, bgot, bwant);
+}
+
+static void Bench5ib(void) {
+  uint32_t off4 = (uint32_t)(g_triple ? kVramBuf2 + kBufBytes : kVramBuf2);  /* free VRAM behind the frame buffers */
+  g_bench_img4 = (uint32_t)sceGeEdramGetSize() >= off4 + kBenchImgW * kBenchImgH / 2 ? g_vram_u + off4 : NULL;
+  PspLog("bench: uv x=%.1f y=%.1f, T4 image %s (VRAM offset %u)", (double)g_uvh[0], (double)g_uvh[1],
+         g_bench_img4 ? "in VRAM" : "skipped, no room", (unsigned)off4);
+  BenchImageBuild();
+  BenchInit();
+  BenchRun("strips T8 RAM wrap ", kBenchT8);
+  BenchVerify("strips T8 RAM wrap ", false);
+  if (g_bench_img4) {
+    BenchRun("strips T4 VRAM wrap", kBenchT4);
+    BenchVerify("strips T4 VRAM wrap", true);
+  }
+  BenchRun("strips T8 RAM split", kBenchT8Split);
+  BenchVerify("strips T8 RAM split", false);
+  BenchRun("tile quads 3492    ", kBenchQuads);
+  sceGuStart(GU_DIRECT, g_gu_list);  /* leave the draw buffer black, as before */
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuClearColor(0xff000000);
+  sceGuClear(GU_COLOR_BUFFER_BIT);
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+}
+#endif
+
 static bool PspRenderer_Initialize(void) {
   uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
   g_atlas2 = (uint8_t *)(vram + kVramAtlas2);
@@ -4232,6 +4558,9 @@ static bool PspRenderer_Initialize(void) {
     memset(g_atlas4, 0, kAtlas4Bytes);
     memset(g_atlas7, 0, kAtlas7Bytes);
     UvSelfTest();
+#if SM_PSP_BENCH_ON
+    Bench5ib();
+#endif
   }
   g_ppu_line_hook = PspRenderer_CaptureLine;
 #if SM_PSP_GE_DEFAULT
@@ -4484,9 +4813,10 @@ static void PspRenderer_EndDraw(void) {
     g_peak_tiles = g_peak_list = g_peak_vtx = 0;
     PspLog("  rowcache: hit=%u miss=%u", (unsigned)g_rc_hit, (unsigned)g_rc_miss);
     g_rc_hit = g_rc_miss = 0;
-    PspLog("  capreuse: reused=%u full=%u chk=%u bad=%u on=%d", (unsigned)g_cap_n_reuse, (unsigned)g_cap_n_full,
-           (unsigned)g_cap_n_chk, (unsigned)g_cap_n_bad, (int)g_cap_reuse_ok);
-    g_cap_n_reuse = g_cap_n_full = g_cap_n_chk = g_cap_n_bad = 0;
+    PspLog("  capreuse: reused=%u full=%u chk=%u bad=%u on=%d win=%u winon=%d", (unsigned)g_cap_n_reuse,
+           (unsigned)g_cap_n_full, (unsigned)g_cap_n_chk, (unsigned)g_cap_n_bad, (int)g_cap_reuse_ok,
+           (unsigned)g_cap_n_win, (int)g_cap_win_ok);
+    g_cap_n_reuse = g_cap_n_full = g_cap_n_chk = g_cap_n_bad = g_cap_n_win = 0;
     S5I_LOG();
   }
   if ((g_frame % 300) == 0) {

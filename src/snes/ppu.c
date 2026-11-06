@@ -252,6 +252,7 @@ void (*g_ppu_line_hook)(const Ppu *ppu, int line);
 void (*g_ppu_draw_begin)(void);
 void (*g_ppu_draw_end)(void);
 bool g_ppu_skip_draw;
+uint32_t g_ppu_gen_hist[64];
 
 void ppu_runLine(Ppu* ppu, int line) {
   if(line == 0) {
@@ -1353,6 +1354,10 @@ uint8_t ppu_read(Ppu* ppu, uint8_t adr) {
   }
 }
 
+#ifndef SM_PSP_CAP_WIN
+#define SM_PSP_CAP_WIN 1  /* Gate 5k: window edge writes ($2126-$2129) are compared by the capture itself (CapWinSame) */
+#endif
+
 /* True if a write to this PPU register can change what psp_renderer.c captures per line. BG scroll, VRAM and CGRAM
  * ports are excluded (the capture re-reads the scroll and CGRAM entry 0 on every line); 0x0d/0x0e also set the
  * mode 7 scroll, which mode 7 rows snapshot. */
@@ -1363,14 +1368,22 @@ static inline bool PpuWriteChangesCapture(const Ppu *ppu, uint8_t adr) {
     return ppu->mode == 7;
   if (adr <= 0x19)
     return false;
+#if SM_PSP_CAP_WIN
+  if (adr >= 0x26 && adr <= 0x29)
+    return false;  /* window edges */
+#endif
   return adr != 0x21 && adr != 0x22;
 }
 
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
 //  if (adr != 24 && adr != 25)
 //    printf("ppu_write(%d, %d)\n", adr, val);
-  if (PpuWriteChangesCapture(ppu, adr))
+  if (PpuWriteChangesCapture(ppu, adr)) {
     ppu->regGen++;
+#if defined(SM_PSP_LOG) && SM_PSP_LOG && defined(SM_PSP_STATS) && SM_PSP_STATS
+    g_ppu_gen_hist[adr & 63]++;
+#endif
+  }
   switch(adr) {
     case 0x00: {
       // TODO: oam address reset when written on first line of vblank, (and when forced blank is disabled?)
