@@ -31,6 +31,8 @@ PSP_VRAM_DIRTY ?= 1
 PSP_CAP_REUSE ?= 1
 # PSP_VTX16=1: BG and sprite quads use a 10-byte vertex with 16-bit texture coordinates (Gate 5h-c). 0: the 16-byte float vertex.
 PSP_VTX16 ?= 1
+# PSP_STATS=1: Gate 5i-a statistics (quads, runs, cache probes per layer) in the log. Log builds only; costs about 0.1-0.2 ms per frame, 0 removes it.
+PSP_STATS ?= 1
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
@@ -68,6 +70,7 @@ CFLAGS += -DSM_PSP_TRIPLE=$(PSP_TRIPLE)
 CFLAGS += -DSM_PSP_PROBES=$(PSP_PROBES) -DSM_PSP_VRAM_DIRTY=$(PSP_VRAM_DIRTY)
 CFLAGS += -DSM_PSP_CAP_REUSE=$(PSP_CAP_REUSE)
 CFLAGS += -DSM_PSP_VTX16=$(PSP_VTX16)
+CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
 
 # SPC/DSP code runs on the Media Engine, which has no libc/syscalls: an assert()
@@ -109,7 +112,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp

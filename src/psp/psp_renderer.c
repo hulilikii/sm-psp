@@ -2891,6 +2891,154 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
   return geom + draws * kDrawCmdBytes + kListFixedBytes + kListAllocBytes + kListSlackBytes;
 }
 
+#if SM_PSP_S5I
+/* Gate 5i-a (log only, nothing here changes drawing): per drawn GE frame, the quads, runs and thin runs (2 rows or
+ * fewer) of each BG layer, of the subscreen blend and of OBJ, and three probes for a cached layer image: scrollonly
+ * (several runs that differ only in scroll: HDMA waves), mapsame (tilemap words equal to the previous frame) and
+ * mapstatic (mapsame, CGRAM unchanged and no tile decoded this frame). */
+enum { kS5Sub = kLayers, kS5Obj = kLayers + 1, kS5Cols = kLayers + 2, kS5Heavy = 5000, kS5HeavyMax = 12 };
+typedef struct S5Col { uint32_t n, runs, rows, thin, quads, qmax, scrollonly, mapsame, mapstatic; } S5Col;
+static struct {
+  S5Col c[kS5Cols];
+  uint32_t frames, qsum, qmax, tdec0, cgsame, blend, tint, bands, bandmax, heavy;
+} g_s5;
+static uint32_t g_s5_hash[kLayers], g_s5_cg;
+static bool g_s5_hash_ok[kLayers];
+
+/* Tilemap words of layer l (1, 2 or 4 screens) plus map/tile base and size flags. */
+static uint32_t S5iMapHash(const BgSnap *s) {
+  uint32_t h = 2166136261u;
+  h = (h ^ s->mapadr) * 16777619u;
+  h = (h ^ s->tileadr) * 16777619u;
+  h = (h ^ (uint32_t)(s->flags & 3)) * 16777619u;
+  int n = 1024 << ((s->flags & 1) + ((s->flags >> 1) & 1));
+  for (int i = 0; i < n; i++)
+    h = (h ^ g_vram[(s->mapadr + i) & 0x7fff]) * 16777619u;
+  return h;
+}
+
+static void S5iAdd(S5Col *c, uint32_t runs, uint32_t rows, uint32_t thin, uint32_t quads) {
+  c->n++;
+  c->runs += runs;
+  c->rows += rows;
+  c->thin += thin;
+  c->quads += quads;
+  if (quads > c->qmax)
+    c->qmax = quads;
+}
+
+static void S5iFrame(int total, int obj_quads, bool blend, bool tint) {
+  uint32_t cg = 2166136261u;
+  for (int i = 0; i < 256; i++)
+    cg = (cg ^ g_cgram[i]) * 16777619u;
+  bool cgsame = cg == g_s5_cg;
+  g_s5_cg = cg;
+  bool tdec0 = g_c_tdec == 0;
+  uint32_t lrows[kLayers] = {0}, lthin[kLayers] = {0}, lquads[kLayers] = {0};
+  bool lso[kLayers] = {false}, lms[kLayers] = {false};
+  for (int l = 0; l < kLayers; l++) {
+    int nr = g_nruns[l];
+    if (nr == 0) {
+      g_s5_hash_ok[l] = false;
+      continue;
+    }
+    const BgSnap *b0 = &g_lines[g_runs[l][0].first].bg[l];
+    bool same = true;
+    for (int i = 0; i < nr; i++) {
+      const Run *r = &g_runs[l][i];
+      const BgSnap *b = &g_lines[r->first].bg[l];
+      int h = r->r1 - r->r0;
+      lrows[l] += (uint32_t)h;
+      if (h <= 2)
+        lthin[l]++;
+      for (int pr = 0; pr < 2; pr++)
+        for (int p = 0; p < 8; p++)
+          lquads[l] += (uint32_t)g_counts[l][i][pr][p];
+      if (b->mapadr != b0->mapadr || b->tileadr != b0->tileadr || ((b->flags ^ b0->flags) & 7))
+        same = false;
+    }
+    uint32_t mh = S5iMapHash(b0);
+    lso[l] = nr > 1 && same;
+    lms[l] = g_s5_hash_ok[l] && g_s5_hash[l] == mh;
+    g_s5_hash[l] = mh;
+    g_s5_hash_ok[l] = true;
+    S5Col *c = &g_s5.c[l];
+    S5iAdd(c, (uint32_t)nr, lrows[l], lthin[l], lquads[l]);
+    c->scrollonly += lso[l];
+    c->mapsame += lms[l];
+    c->mapstatic += lms[l] && cgsame && tdec0;
+  }
+  uint32_t srows = 0, sthin = 0, squads = 0;
+  for (int i = 0; i < g_nbruns; i++) {
+    int h = g_bruns[i].r1 - g_bruns[i].r0;
+    srows += (uint32_t)h;
+    if (h <= 2)
+      sthin++;
+    for (int pr = 0; pr < 2; pr++)
+      for (int p = 0; p < 8; p++)
+        squads += (uint32_t)g_bcounts[i][pr][p];
+  }
+  if (g_nbruns)
+    S5iAdd(&g_s5.c[kS5Sub], (uint32_t)g_nbruns, srows, sthin, squads);
+  if (g_nspr || obj_quads)
+    S5iAdd(&g_s5.c[kS5Obj], (uint32_t)g_nspr, (uint32_t)g_ovf_rows, 0, (uint32_t)obj_quads);
+  uint32_t q = (uint32_t)total + (uint32_t)obj_quads;
+  g_s5.frames++;
+  g_s5.qsum += q;
+  if (q > g_s5.qmax)
+    g_s5.qmax = q;
+  g_s5.tdec0 += tdec0;
+  g_s5.cgsame += cgsame;
+  g_s5.blend += blend;
+  g_s5.tint += tint;
+  g_s5.bands += (uint32_t)g_nbband;
+  if ((uint32_t)g_nbband > g_s5.bandmax)
+    g_s5.bandmax = (uint32_t)g_nbband;
+  if (q >= (uint32_t)kS5Heavy && g_s5.heavy++ < (uint32_t)kS5HeavyMax) {
+    PspLog("S5I f=%u q=%d obj=%d tdec=%u cg=%d blend=%d tint=%d bands=%d ovf=%d", (unsigned)g_frame, total, obj_quads,
+           (unsigned)g_c_tdec, (int)cgsame, (int)blend, (int)tint, g_nbband, g_ovf_rows);
+    for (int l = 0; l < kLayers; l++)
+      if (lrows[l])
+        PspLog("  BG%d runs=%d rows=%u thin=%u q=%u scrollonly=%d mapsame=%d", l + 1, g_nruns[l], (unsigned)lrows[l],
+               (unsigned)lthin[l], (unsigned)lquads[l], (int)lso[l], (int)lms[l]);
+    if (g_nbruns)
+      PspLog("  SUB runs=%d rows=%u thin=%u q=%u", g_nbruns, (unsigned)srows, (unsigned)sthin, (unsigned)squads);
+  }
+}
+
+/* Called with the 300-frame log; averages are per frame in which the layer was drawn (n). */
+static void S5iLog(void) {
+  if (g_s5.frames == 0)
+    return;
+#define S5AVG(s, n) ((unsigned)((n) ? (s) / (n) : 0))
+  PspLog("S5 n=%u quads avg=%u max=%u tdec0=%u cgsame=%u blend=%u tint=%u bands avg=%u max=%u heavy=%u",
+         (unsigned)g_s5.frames, S5AVG(g_s5.qsum, g_s5.frames), (unsigned)g_s5.qmax, (unsigned)g_s5.tdec0,
+         (unsigned)g_s5.cgsame, (unsigned)g_s5.blend, (unsigned)g_s5.tint, S5AVG(g_s5.bands, g_s5.frames),
+         (unsigned)g_s5.bandmax, (unsigned)g_s5.heavy);
+  for (int l = 0; l < kLayers; l++) {
+    const S5Col *c = &g_s5.c[l];
+    if (c->n)
+      PspLog("  BG%d n=%u runs=%u thin=%u rows=%u q=%u/%u scrollonly=%u mapsame=%u mapstatic=%u", l + 1,
+             (unsigned)c->n, S5AVG(c->runs, c->n), S5AVG(c->thin, c->n), S5AVG(c->rows, c->n), S5AVG(c->quads, c->n),
+             (unsigned)c->qmax, (unsigned)c->scrollonly, (unsigned)c->mapsame, (unsigned)c->mapstatic);
+  }
+  const S5Col *s = &g_s5.c[kS5Sub], *o = &g_s5.c[kS5Obj];
+  if (s->n)
+    PspLog("  SUB n=%u runs=%u thin=%u rows=%u q=%u/%u", (unsigned)s->n, S5AVG(s->runs, s->n), S5AVG(s->thin, s->n),
+           S5AVG(s->rows, s->n), S5AVG(s->quads, s->n), (unsigned)s->qmax);
+  if (o->n)
+    PspLog("  OBJ n=%u spr=%u ovfrows=%u q=%u/%u", (unsigned)o->n, S5AVG(o->runs, o->n), S5AVG(o->rows, o->n),
+           S5AVG(o->quads, o->n), (unsigned)o->qmax);
+#undef S5AVG
+  memset(&g_s5, 0, sizeof(g_s5));
+}
+#define S5I_FRAME(total, oq, blend, tint) S5iFrame(total, oq, blend, tint)
+#define S5I_LOG() S5iLog()
+#else
+#define S5I_FRAME(total, oq, blend, tint) ((void)0)
+#define S5I_LOG() ((void)0)
+#endif
+
 // Returns false (nothing drawn, GE idle) if the frame must use the software image.
 static bool DrawGe(void) {
   g_t_draw_start = Now();
@@ -3395,6 +3543,8 @@ static bool DrawGe(void) {
       return false;
     }
   }
+
+  S5I_FRAME(total, obj_quads, blend, tint);  /* log only */
 
   sceKernelDcacheWritebackRange(g_clut2[kClutBright], sizeof(g_clut2[0]));
   sceKernelDcacheWritebackRange(g_clut4[kClutBright], sizeof(g_clut4[0]));
@@ -4337,6 +4487,7 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  capreuse: reused=%u full=%u chk=%u bad=%u on=%d", (unsigned)g_cap_n_reuse, (unsigned)g_cap_n_full,
            (unsigned)g_cap_n_chk, (unsigned)g_cap_n_bad, (int)g_cap_reuse_ok);
     g_cap_n_reuse = g_cap_n_full = g_cap_n_chk = g_cap_n_bad = 0;
+    S5I_LOG();
   }
   if ((g_frame % 300) == 0) {
     if (g_hitch_n > (uint32_t)kHitchPerWindow)
