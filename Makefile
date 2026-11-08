@@ -35,8 +35,10 @@ PSP_VTX16 ?= 1
 PSP_STATS ?= 1
 # PSP_CAP_WIN=1: window edge writes ($2126-$2129) no longer count as register changes in ppu_write; a line whose only change is the edges re-derives just its window fields (Gate 5k). 0: they force a full capture, as before.
 PSP_CAP_WIN ?= 1
-# PSP_BENCH=1: Gate 5i-b boot-time micro-benchmark of layer-image strips, about 1 s at boot (log builds only). 0 removes it.
-PSP_BENCH ?= 1
+# PSP_BENCH=1: Gate 5i-b boot-time micro-benchmark of layer-image strips, about 1 s at boot (log builds only). Done: off by default.
+PSP_BENCH ?= 0
+# PSP_LAYER_IMG=1: Gate 5l, BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run). 0: tile quads as before.
+PSP_LAYER_IMG ?= 1
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
@@ -76,6 +78,7 @@ CFLAGS += -DSM_PSP_CAP_REUSE=$(PSP_CAP_REUSE)
 CFLAGS += -DSM_PSP_VTX16=$(PSP_VTX16)
 CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
+CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
 
 # SPC/DSP code runs on the Media Engine, which has no libc/syscalls: an assert()
@@ -117,7 +120,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp

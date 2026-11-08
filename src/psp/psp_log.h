@@ -44,7 +44,10 @@
 #define SM_PSP_CAP_WIN 1  /* Gate 5k: window edge writes do not force a full capture of the line */
 #endif
 #ifndef SM_PSP_BENCH
-#define SM_PSP_BENCH 1  /* Gate 5i-b: boot-time layer-image strip benchmark (log builds only) */
+#define SM_PSP_BENCH 0  /* Gate 5i-b: boot-time layer-image strip benchmark (log builds only), done */
+#endif
+#ifndef SM_PSP_LAYER_IMG
+#define SM_PSP_LAYER_IMG 1  /* Gate 5l: BG2/BG3 layers with many scroll runs are drawn from a cached image */
 #endif
 #if SM_PSP_LOG && SM_PSP_BENCH
 #define SM_PSP_BENCH_ON 1
@@ -53,7 +56,7 @@
 #endif
 #define PSP_STR2(x) #x
 #define PSP_STR(x) PSP_STR2(x)
-#define PSP_LOG_FILE "smpsp_g5k_vd" PSP_STR(SM_PSP_VRAM_DIRTY) "_cr" PSP_STR(SM_PSP_CAP_REUSE) "_cw" PSP_STR(SM_PSP_CAP_WIN) "_pr" PSP_STR(SM_PSP_PROBES) "_tb" PSP_STR(SM_PSP_TRIPLE) "_v16" PSP_STR(SM_PSP_VTX16) "_st" PSP_STR(SM_PSP_STATS) "_bn" PSP_STR(SM_PSP_BENCH) ".log"
+#define PSP_LOG_FILE "smpsp_g5l_vd" PSP_STR(SM_PSP_VRAM_DIRTY) "_cr" PSP_STR(SM_PSP_CAP_REUSE) "_cw" PSP_STR(SM_PSP_CAP_WIN) "_pr" PSP_STR(SM_PSP_PROBES) "_tb" PSP_STR(SM_PSP_TRIPLE) "_v16" PSP_STR(SM_PSP_VTX16) "_st" PSP_STR(SM_PSP_STATS) "_bn" PSP_STR(SM_PSP_BENCH) "_li" PSP_STR(SM_PSP_LAYER_IMG) ".log"
 
 #include <stdbool.h>
 
