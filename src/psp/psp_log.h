@@ -47,7 +47,7 @@
 #define SM_PSP_BENCH 0  /* Gate 5i-b: boot-time layer-image strip benchmark (log builds only), done */
 #endif
 #ifndef SM_PSP_LAYER_IMG
-#define SM_PSP_LAYER_IMG 1  /* Gate 5l: BG2/BG3 layers with many scroll runs are drawn from a cached image */
+#define SM_PSP_LAYER_IMG 3  /* Gate 5l/5m: BG2/BG3 layers with many scroll runs are drawn from a cached image (2: + 32x64 maps, 3: + scan skip) */
 #endif
 #if SM_PSP_LOG && SM_PSP_BENCH
 #define SM_PSP_BENCH_ON 1

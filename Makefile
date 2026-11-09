@@ -37,8 +37,9 @@ PSP_STATS ?= 1
 PSP_CAP_WIN ?= 1
 # PSP_BENCH=1: Gate 5i-b boot-time micro-benchmark of layer-image strips, about 1 s at boot (log builds only). Done: off by default.
 PSP_BENCH ?= 0
-# PSP_LAYER_IMG=1: Gate 5l, BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run). 0: tile quads as before.
-PSP_LAYER_IMG ?= 1
+# PSP_LAYER_IMG: BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run).
+# 0: tile quads. 1: Gate 5l (32x32 / 64x32 maps). 2: also 32x64 maps (Gate 5m). 3: also skip the image scan when no VRAM page of the map or tiles was written (Gate 5m).
+PSP_LAYER_IMG ?= 3
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif

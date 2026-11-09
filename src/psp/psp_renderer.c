@@ -736,11 +736,14 @@ static uint16_t M7Line(const Ppu *p, LineSnap *s) {
  * ppu_write) switches to full copies for good. */
 enum { kVramPages = 128, kVramPageWords = 256 };
 static bool g_vd_ok = SM_PSP_VRAM_DIRTY;
+static void ImgMarkDirty(int pg0, int pg1);  /* gate 5m: layer images learn which pages were written */
+static void ImgMarkAllDirty(void);
 static void SnapshotVram(const Ppu *p) {
   uint8_t *dirty = (uint8_t *)p->vramDirty;  /* the renderer owns the clear; the Ppu object is not const */
   if (!g_vd_ok) {
     memcpy(g_vram, p->vram, sizeof(g_vram));
     memset(dirty, 0, kVramPages);
+    ImgMarkAllDirty();
     return;
   }
   for (int pg = 0; pg < kVramPages;) {
@@ -752,12 +755,14 @@ static void SnapshotVram(const Ppu *p) {
     while (e < kVramPages && dirty[e])
       e++;
     memcpy(&g_vram[pg * kVramPageWords], &p->vram[pg * kVramPageWords], (size_t)(e - pg) * kVramPageWords * 2);
+    ImgMarkDirty(pg, e);
     memset(&dirty[pg], 0, (size_t)(e - pg));
     pg = e;
   }
   if ((g_frame & 63) == 0 && memcmp(g_vram, p->vram, sizeof(g_vram)) != 0) {
     g_vd_ok = false;
     memcpy(g_vram, p->vram, sizeof(g_vram));
+    ImgMarkAllDirty();
     PspLog("vramdirty: snapshot differs from VRAM, dirty tracking disabled");
   }
 }
@@ -1453,9 +1458,9 @@ static void BuildClut7(int b) {
  * data changed, and every run is one textured strip (GU_REPEAT does the scroll wrap). The palette and the tile
  * priority come from two CLUTs (one per priority pass; entries of the other priority are transparent). */
 enum { kImgSlots = 2, kImgW = 512, kImgH = 256, kImgCells = 64 * 32, kImgMinRuns = 12, kImgVerify = 8,
-       kImgBytes = kImgW * kImgH,  /* VRAM: two images behind the third frame buffer (BG2, BG3) */
+       kImgBytes = kImgW * kImgH,  /* VRAM: two images behind the third frame buffer (BG2, BG3); 512x256 (wide map) or 256x512 (high map) */
        kVramImg0 = kVramBuf2 + kBufBytes, kVramImgEnd = kVramImg0 + kImgSlots * kImgBytes };
-typedef struct LayerImg { uint16_t map, tile; uint8_t wide, valid; uint16_t nhi; } LayerImg;
+typedef struct LayerImg { uint16_t map, tile; uint8_t wide, high, valid; uint16_t nhi, maxt; } LayerImg;  /* maxt: highest tile number + 1 */
 static LayerImg g_img[kImgSlots];                       /* slot = layer - 1 (BG2 4bpp, BG3 2bpp) */
 static uint16_t g_img_cw[kImgSlots][kImgCells];         /* tilemap word each image cell was built from */
 static uint32_t g_img_cv[kImgSlots][kImgCells];         /* tile version it was built from, 0xffffffff = invalid */
@@ -1463,21 +1468,42 @@ static uint32_t g_climg[kImgSlots][2][256] __attribute__((aligned(64)));
 static uint16_t g_climg_stamp[kImgSlots];
 static uint8_t *g_img_tex[kImgSlots];                   /* uncached VRAM */
 static bool g_img_ok = SM_PSP_LAYER_IMG;                /* cleared if the first verified frames differ from software */
-static bool g_img_on[kLayers], g_img_frame;
+static bool g_imgh_ok = SM_PSP_LAYER_IMG >= 2;          /* gate 5m: 32x64 tilemaps; cleared if the first verified such frames differ */
+static bool g_img_skip_ok = SM_PSP_LAYER_IMG >= 3;      /* gate 5m: no written page in map or tiles since the last scan: skip it */
+static uint8_t g_img_dirty[kImgSlots][kVramPages];      /* VRAM pages written since this image's last scan (SnapshotVram) */
+static bool g_img_on[kLayers], g_img_frame, g_imgh_frame;
 static TileVert *g_imgv[kLayers][2];
 static int g_imgn[kLayers][2], g_img_nv;
-static uint32_t g_img_vn, g_img_vbad, g_frames_img;
+static uint32_t g_img_vn, g_img_vbad, g_frames_img, g_imgh_vn, g_imgh_vbad;
 #if SM_PSP_LOG
-static uint32_t g_li_n, g_li_upd, g_li_updmax, g_li_us, g_li_usmax;
+static uint32_t g_li_n, g_li_upd, g_li_updmax, g_li_us, g_li_usmax, g_li_skip;
 #endif
 
-/* One tilemap cell into the image (same plane decode as EnsureTile, flips applied here). */
-static void ImgRenderCell(int slot, bool bpp4, int tx, int ty, unsigned t, int tileadr) {
+static void ImgMarkDirty(int pg0, int pg1) {
+  for (int s = 0; s < kImgSlots; s++)
+    memset(&g_img_dirty[s][pg0], 1, (size_t)(pg1 - pg0));
+}
+
+static void ImgMarkAllDirty(void) {
+  ImgMarkDirty(0, kVramPages);
+}
+
+/* True if a VRAM page of [word0, word0 + nwords) (modulo the 32 K words) was written since the last scan of slot. */
+static bool ImgPagesDirty(int slot, int word0, int nwords) {
+  int pg = (word0 >> 8) & (kVramPages - 1), n = (nwords + kVramPageWords - 1) / kVramPageWords;
+  for (int i = 0; i < n; i++)
+    if (g_img_dirty[slot][(pg + i) & (kVramPages - 1)])
+      return true;
+  return false;
+}
+
+/* One tilemap cell into the image (same plane decode as EnsureTile, flips applied here). stride: 512 (wide) or 256. */
+static void ImgRenderCell(int slot, bool bpp4, int tx, int ty, unsigned t, int tileadr, int stride) {
   int base = tileadr + (int)(t & 0x3ff) * (bpp4 ? 16 : 8);
   unsigned tag = ((t >> 6) & 0x80) | (((t >> 10) & 7) << (bpp4 ? 4 : 2));
   bool hf = (t & 0x4000) != 0, vf = (t & 0x8000) != 0;
-  uint32_t *d = (uint32_t *)(g_img_tex[slot] + ty * 8 * kImgW + tx * 8);
-  for (int y = 0; y < 8; y++, d += kImgW / 4) {
+  uint32_t *d = (uint32_t *)(g_img_tex[slot] + ty * 8 * stride + tx * 8);
+  for (int y = 0; y < 8; y++, d += stride / 4) {
     int row = vf ? 7 - y : y;
     uint32_t w0 = g_vram[(base + row) & 0x7fff], w1 = bpp4 ? g_vram[(base + 8 + row) & 0x7fff] : 0;
     uint32_t a = 0, b = 0;
@@ -1513,10 +1539,10 @@ static void ImgBuildClut(int slot, bool bpp4) {
 }
 
 /* All runs of layer l must share the tilemap set-up (only scroll and window differ), and the map must be one or two
- * screens wide and one screen high. */
+ * screens wide or high (not both; gate 5m). */
 static bool ImgEligible(int l) {
   const BgSnap *b0 = &g_lines[g_runs[l][0].first].bg[l];
-  if (b0->flags & 2)
+  if ((b0->flags & 3) == 3 || ((b0->flags & 2) && !g_imgh_ok))  /* 64x64: no image; 32x64 while its audit holds */
     return false;
   for (int i = 1; i < g_nruns[l]; i++) {
     const BgSnap *b = &g_lines[g_runs[l][i].first].bg[l];
@@ -1526,57 +1552,106 @@ static bool ImgEligible(int l) {
   return true;
 }
 
-/* Brings the image of layer l up to date: a cell is rebuilt when its tilemap word or its tile's version changed. */
+#if SM_PSP_LOG
+/* Why a layer with many scroll runs is not drawn from an image (first few occurrences per layer). */
+static void NoteImgNo(int l) {
+  static unsigned n[kLayers];
+  if (n[l]++ >= 6)
+    return;
+  const BgSnap *b0 = &g_lines[g_runs[l][0].first].bg[l];
+  int diff = -1;
+  for (int i = 1; i < g_nruns[l] && diff < 0; i++) {
+    const BgSnap *b = &g_lines[g_runs[l][i].first].bg[l];
+    if (b->mapadr != b0->mapadr || b->tileadr != b0->tileadr || ((b->flags ^ b0->flags) & 3))
+      diff = i;
+  }
+  PspLog("imgno f=%u BG%d runs=%d fl=%02x map=%04x tile=%04x diffrun=%d high_ok=%d", (unsigned)g_frame, l + 1,
+         g_nruns[l], b0->flags, b0->mapadr, b0->tileadr, diff, (int)g_imgh_ok);
+}
+#define NOTE_IMGNO(l) NoteImgNo(l)
+#else
+#define NOTE_IMGNO(l) ((void)0)
+#endif
+
+/* Brings the image of layer l up to date: a cell is rebuilt when its tilemap word or its tile's version changed.
+ * Gate 5m: if no VRAM page of the tilemap or of the tiles it uses was written since the last scan, the scan is skipped
+ * (log builds scan every 16th skip anyway and disable skipping if that finds anything). */
 static void ImgUpdate(int l) {
   int slot = l - 1;
   bool bpp4 = l < 2;
   const BgSnap *s = &g_lines[g_runs[l][0].first].bg[l];
   LayerImg *im = &g_img[slot];
-  bool wide = (s->flags & 1) != 0;
+  bool wide = (s->flags & 1) != 0, high = (s->flags & 2) != 0, fresh = false;
   PROF(uint32_t t0 = Now();)
-  if (!im->valid || im->map != s->mapadr || im->tile != s->tileadr || im->wide != (uint8_t)wide) {
+  if (!im->valid || im->map != s->mapadr || im->tile != s->tileadr || im->wide != (uint8_t)wide ||
+      im->high != (uint8_t)high) {
     memset(g_img_cw[slot], 0, sizeof(g_img_cw[slot]));
     memset(g_img_cv[slot], 0xff, sizeof(g_img_cv[slot]));
     im->map = s->mapadr;
     im->tile = s->tileadr;
     im->wide = (uint8_t)wide;
+    im->high = (uint8_t)high;
     im->nhi = 0;
+    im->maxt = 0;
     im->valid = 1;
+    fresh = true;
   }
-  int words = bpp4 ? 16 : 8, shift = bpp4 ? 4 : 3, cols = wide ? 64 : 32;
+  int words = bpp4 ? 16 : 8, shift = bpp4 ? 4 : 3, cols = wide ? 64 : 32, rows = high ? 64 : 32;
+  int stride = wide ? 512 : 256;
   const uint32_t *ver = bpp4 ? g_ver4 : g_ver2;
   uint16_t *cw = g_img_cw[slot];
   uint32_t *cv = g_img_cv[slot];
-  int nhi = im->nhi, nupd = 0;
-  for (int ty = 0; ty < 32; ty++) {
-    int rowbase = s->mapadr + ty * 32;
-    for (int tx = 0; tx < cols; tx++) {
-      int idx = ty * 64 + tx;
-      unsigned t = g_vram[(rowbase + (tx & 31) + ((tx & 32) ? 0x400 : 0)) & 0x7fff];
-      int pt = (int)((s->tileadr + (t & 0x3ff) * words) & 0x7fff) >> shift;
-      EnsureTile(bpp4, pt);  /* decodes into the atlas if needed and bumps the version when the data changed */
-      uint32_t v = ver[pt];
-      if (cw[idx] == t && cv[idx] == v)
-        continue;
-      nhi += (int)((t >> 13) & 1) - (int)((cw[idx] >> 13) & 1);
-      ImgRenderCell(slot, bpp4, tx, ty, t, s->tileadr);
-      cw[idx] = (uint16_t)t;
-      cv[idx] = v;
-      nupd++;
+  int nhi = im->nhi, nupd = 0, mx = 0;
+  bool skip = !fresh && g_img_skip_ok && !ImgPagesDirty(slot, s->mapadr, 1024 << ((wide ? 1 : 0) + (high ? 1 : 0))) &&
+              !ImgPagesDirty(slot, s->tileadr, im->maxt * words);
+#if SM_PSP_LOG
+  static unsigned skips;
+  int maxt0 = im->maxt;
+  bool check = skip && (++skips & 15) == 0;
+  if (check)
+    skip = false;
+#endif
+  if (!skip) {
+    for (int ty = 0; ty < rows; ty++) {
+      int rowbase = s->mapadr + (ty & 31) * 32 + ((ty & 32) ? 0x400 : 0);
+      for (int tx = 0; tx < cols; tx++) {
+        int idx = ty * cols + tx;
+        unsigned t = g_vram[(rowbase + (tx & 31) + ((tx & 32) ? 0x400 : 0)) & 0x7fff];
+        if ((int)(t & 0x3ff) >= mx)
+          mx = (int)(t & 0x3ff) + 1;
+        int pt = (int)((s->tileadr + (t & 0x3ff) * words) & 0x7fff) >> shift;
+        EnsureTile(bpp4, pt);  /* decodes into the atlas if needed and bumps the version when the data changed */
+        uint32_t v = ver[pt];
+        if (cw[idx] == t && cv[idx] == v)
+          continue;
+        nhi += (int)((t >> 13) & 1) - (int)((cw[idx] >> 13) & 1);
+        ImgRenderCell(slot, bpp4, tx, ty, t, s->tileadr, stride);
+        cw[idx] = (uint16_t)t;
+        cv[idx] = v;
+        nupd++;
+      }
     }
+    im->nhi = (uint16_t)nhi;
+    im->maxt = (uint16_t)mx;
+    memset(g_img_dirty[slot], 0, sizeof(g_img_dirty[slot]));  /* the image now matches the snapshot */
   }
-  im->nhi = (uint16_t)nhi;
-  ImgBuildClut(slot, bpp4);
-  (void)nupd;
-  PROF(uint32_t us = Now() - t0; g_li_n++; g_li_upd += (uint32_t)nupd; if ((uint32_t)nupd > g_li_updmax) g_li_updmax = (uint32_t)nupd;
+  ImgBuildClut(slot, bpp4);  /* CGRAM changes need no VRAM write */
+#if SM_PSP_LOG
+  if (check && (nupd || mx != maxt0)) {
+    g_img_skip_ok = false;
+    PspLog("imgskip: f=%u BG%d scan found %d changes (maxt %d -> %d), skipping disabled", (unsigned)g_frame, l + 1, nupd,
+           maxt0, mx);
+  }
+#endif
+  PROF(uint32_t us = Now() - t0; g_li_n++; g_li_skip += skip ? 1u : 0u; g_li_upd += (uint32_t)nupd; if ((uint32_t)nupd > g_li_updmax) g_li_updmax = (uint32_t)nupd;
        g_li_us += us; if (us > g_li_usmax) g_li_usmax = us;)
 }
 
-/* One strip per run and window span and priority pass. Screen row r shows image row (r + 1 + vscroll) & 255 (the SNES
+/* One strip per run and window span and priority pass. Screen row r shows image row (r + 1 + vscroll) & (height - 1) (the SNES
  * BG line is 1-based); the texture coordinates run past the image edge and GU_REPEAT wraps them (verified by the 5i-b
  * benchmark). iu/iv as in the mosaic and mode 7 quads. */
 static void ImgBuildStrips(int l) {
-  int slot = l - 1, W = g_img[slot].wide ? 512 : 256;
+  int slot = l - 1, W = g_img[slot].wide ? 512 : 256, H = g_img[slot].high ? 512 : 256;
   const float iu = 0.5f - g_uvh[0], iv = 0.5f - g_uvh[1];
   for (int pr = 0; pr < 2; pr++) {
     g_imgv[l][pr] = NULL;
@@ -1589,7 +1664,7 @@ static void ImgBuildStrips(int l) {
       const BgSnap *b = &g_lines[run->first].bg[l];
       int wa[2], we[2];
       int ns = WinSpans(b->wm, b->wl, b->wr, wa, we);
-      float vt = (float)((b->vscroll + run->r0 + 1) & (kImgH - 1)) + iv;
+      float vt = (float)((b->vscroll + run->r0 + 1) & (H - 1)) + iv;
       float vb = vt + (float)(run->r1 - run->r0);
       float ub = (float)(b->hscroll & (W - 1)) + iu;
       for (int k = 0; k < ns; k++) {
@@ -2602,15 +2677,20 @@ static void GeVerify(void) {
   }
   if (g_bright_rows)
     g_br_vn++;
-  if (g_img_frame) {  /* gate 5l: layer images */
-    g_img_vn++;
-    g_img_vbad += bad;
-    PspLog("imgaudit f=%u layers=%x hi=%u,%u bad=%u", (unsigned)g_frame,
-           (unsigned)((g_img_on[1] ? 1 : 0) | (g_img_on[2] ? 2 : 0)), (unsigned)g_img[0].nhi, (unsigned)g_img[1].nhi,
-           (unsigned)bad);
-    if ((g_img_vn >= 3 && g_img_vbad / g_img_vn > 600) || bad > 8192) {
-      g_img_ok = false;
-      PspLog("geaudit: layer-image frames differ too much, GE layer images disabled");
+  if (g_img_frame) {  /* gates 5l/5m: layer images; frames with a 32x64 map have their own audit */
+    uint32_t *vn = g_imgh_frame ? &g_imgh_vn : &g_img_vn;
+    uint32_t *vbad = g_imgh_frame ? &g_imgh_vbad : &g_img_vbad;
+    (*vn)++;
+    *vbad += bad;
+    PspLog("imgaudit f=%u layers=%x high=%d hi=%u,%u bad=%u", (unsigned)g_frame,
+           (unsigned)((g_img_on[1] ? 1 : 0) | (g_img_on[2] ? 2 : 0)), g_imgh_frame ? 1 : 0, (unsigned)g_img[0].nhi,
+           (unsigned)g_img[1].nhi, (unsigned)bad);
+    if ((*vn >= 3 && *vbad / *vn > 600) || bad > 8192) {
+      if (g_imgh_frame)
+        g_imgh_ok = false;
+      else
+        g_img_ok = false;
+      PspLog("geaudit: layer-image frames differ too much, GE layer images disabled (high=%d)", g_imgh_frame ? 1 : 0);
     }
   }
   if (g_win_rows && !g_sh_frame && !g_w2_frame) {  /* half-colour and window-2 frames have their own audits (gates 4t-d/u) */
@@ -2944,12 +3024,12 @@ static void DrawMosPass(int l, int pr) {
 static void DrawImgPass(int l, int pr) {
   if (g_imgn[l][pr] == 0)
     return;
-  int slot = l - 1;
+  int slot = l - 1, iw = g_img[slot].wide ? 512 : 256, ih = g_img[slot].high ? 512 : 256;
   PROF(g_c_clut++;)
   sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
   sceGuClutLoad(32, g_climg[slot][pr]);
   sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
-  sceGuTexImage(0, g_img[slot].wide ? 512 : 256, kImgH, kImgW, g_img_tex[slot]);
+  sceGuTexImage(0, iw, ih, iw, g_img_tex[slot]);
   sceGuTexFlush();  /* the image is updated by the CPU between frames */
   sceGuTexWrap(GU_REPEAT, GU_REPEAT);
   GeDraw(kVtTile, g_imgn[l][pr], g_imgv[l][pr]);
@@ -3320,6 +3400,7 @@ static bool DrawGe(void) {
   g_shn_frame = false;
   g_w2_frame = false;
   g_img_frame = false;
+  g_imgh_frame = false;
   g_img_nv = 0;
   memset(g_img_on, 0, sizeof(g_img_on));
   if (g_frame_reasons) {
@@ -3628,7 +3709,11 @@ static bool DrawGe(void) {
       ImgUpdate(l);  /* gate 5l: many scroll runs: draw the layer from its cached image, one strip per run */
       g_img_on[l] = true;
       g_img_frame = true;
+      if (g_img[l - 1].high)
+        g_imgh_frame = true;
       g_img_nv += n * 4 * (g_img[l - 1].nhi ? 2 : 1);
+    } else if (l >= 1 && g_img_ok && !winrows && !g_mos[l].on && n >= kImgMinRuns) {
+      NOTE_IMGNO(l);  /* log only: why a layer with many runs has no image */
     }
     for (int i = 0; i < n; i++) {
       memset(g_counts[l][i], 0, sizeof(g_counts[l][i]));
@@ -4316,7 +4401,7 @@ static bool DrawGe(void) {
     else
       g_verify_now = true;
   }
-  if (g_img_frame && g_img_vn < kImgVerify) {  /* gate 5l: the first frames with a layer image are checked */
+  if (g_img_frame && (g_imgh_frame ? g_imgh_vn : g_img_vn) < kImgVerify) {  /* gate 5l: the first frames with a layer image are checked */
     if (g_ppu_skip_draw)
       g_want_ms_verify = true;
     else
@@ -4728,9 +4813,12 @@ static bool PspRenderer_Initialize(void) {
          (unsigned)kVramNeeded, (int)g_ge_ok);
   PspLog("vtx16: %d bgvert=%u bytes", (int)SM_PSP_VTX16, (unsigned)sizeof(BgVert));
   g_img_ok = SM_PSP_LAYER_IMG && g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)kVramImgEnd;
+  g_imgh_ok = g_img_ok && SM_PSP_LAYER_IMG >= 2;
+  g_img_skip_ok = g_img_ok && SM_PSP_LAYER_IMG >= 3;
   for (int i = 0; i < kImgSlots; i++)
     g_img_tex[i] = (uint8_t *)(vram + kVramImg0 + (uintptr_t)i * kImgBytes);
-  PspLog("layer images: %d (needs %u of %u)", (int)g_img_ok, (unsigned)kVramImgEnd, (unsigned)sceGeEdramGetSize());
+  PspLog("layer images: %d high=%d skip=%d (needs %u of %u)", (int)g_img_ok, (int)g_imgh_ok, (int)g_img_skip_ok, (unsigned)kVramImgEnd,
+         (unsigned)sceGeEdramGetSize());
 
   sceGuInit();
   sceGuStart(GU_DIRECT, g_gu_list);
@@ -5033,10 +5121,10 @@ static void PspRenderer_EndDraw(void) {
            (unsigned)g_cap_n_full, (unsigned)g_cap_n_chk, (unsigned)g_cap_n_bad, (int)g_cap_reuse_ok,
            (unsigned)g_cap_n_win, (int)g_cap_win_ok);
     g_cap_n_reuse = g_cap_n_full = g_cap_n_chk = g_cap_n_bad = g_cap_n_win = 0;
-    PspLog("  layerimg: on=%d frames=%u calls=%u upd=%u/%u us=%u/%u", (int)g_img_ok, (unsigned)g_frames_img,
-           (unsigned)g_li_n, (unsigned)(g_li_n ? g_li_upd / g_li_n : 0), (unsigned)g_li_updmax,
+    PspLog("  layerimg: on=%d high=%d frames=%u calls=%u skip=%u upd=%u/%u us=%u/%u", (int)g_img_ok,
+           (int)g_imgh_ok, (unsigned)g_frames_img, (unsigned)g_li_n, (unsigned)g_li_skip, (unsigned)(g_li_n ? g_li_upd / g_li_n : 0), (unsigned)g_li_updmax,
            (unsigned)(g_li_n ? g_li_us / g_li_n : 0), (unsigned)g_li_usmax);
-    g_li_n = g_li_upd = g_li_updmax = g_li_us = g_li_usmax = 0;
+    g_li_n = g_li_upd = g_li_updmax = g_li_us = g_li_usmax = g_li_skip = 0;
     S5I_LOG();
   }
   if ((g_frame % 300) == 0) {
