@@ -1517,16 +1517,22 @@ void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val) {
     }
     case 0x18: {
       // TODO: vram access during rendering (also cgram and oam)
-      uint16_t vramAdr = ppu_getVramRemap(ppu);
-      ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0xff00) | val;
-      ppu->vramDirty[(vramAdr & 0x7fff) >> 8] = 1;
+      uint16_t vramAdr = ppu_getVramRemap(ppu) & 0x7fff;
+      uint16_t nv = (uint16_t)((ppu->vram[vramAdr] & 0xff00) | val);
+      if (nv != ppu->vram[vramAdr]) {  /* an identical rewrite leaves the page clean */
+        ppu->vram[vramAdr] = nv;
+        ppu->vramDirty[vramAdr >> 8] = 1;
+      }
       if(!ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }
     case 0x19: {
-      uint16_t vramAdr = ppu_getVramRemap(ppu);
-      ppu->vram[vramAdr & 0x7fff] = (ppu->vram[vramAdr & 0x7fff] & 0x00ff) | (val << 8);
-      ppu->vramDirty[(vramAdr & 0x7fff) >> 8] = 1;
+      uint16_t vramAdr = ppu_getVramRemap(ppu) & 0x7fff;
+      uint16_t nv = (uint16_t)((ppu->vram[vramAdr] & 0x00ff) | (val << 8));
+      if (nv != ppu->vram[vramAdr]) {
+        ppu->vram[vramAdr] = nv;
+        ppu->vramDirty[vramAdr >> 8] = 1;
+      }
       if(ppu->vramIncrementOnHigh) ppu->vramPointer += ppu->vramIncrement;
       break;
     }

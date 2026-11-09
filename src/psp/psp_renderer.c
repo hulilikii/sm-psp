@@ -1478,6 +1478,7 @@ static int g_imgn[kLayers][2], g_img_nv;
 static uint32_t g_img_vn, g_img_vbad, g_frames_img, g_imgh_vn, g_imgh_vbad;
 #if SM_PSP_LOG
 static uint32_t g_li_n, g_li_upd, g_li_updmax, g_li_us, g_li_usmax, g_li_skip, g_li_blkm, g_li_blkt;
+static uint32_t g_li_pg[kVramPages];  /* scans blocked by a dirty map page, per VRAM page */
 #endif
 
 static void ImgMarkDirty(int pg0, int pg1) {
@@ -1614,6 +1615,12 @@ static void ImgUpdate(int l) {
   bool mapd = ImgPagesDirty(slot, s->mapadr, 1024 << ((wide ? 1 : 0) + (high ? 1 : 0))), tiled = ImgTilePagesDirty(slot);
   bool skip = !fresh && g_img_skip_ok && !mapd && !tiled;
 #if SM_PSP_LOG
+  if (mapd && !fresh) {  /* log only: which map pages hold the blocking writes */
+    int pg0 = (s->mapadr >> 8) & (kVramPages - 1), np = (1024 << ((wide ? 1 : 0) + (high ? 1 : 0))) >> 8;
+    for (int i = 0; i < np; i++)
+      if (g_img_dirty[slot][(pg0 + i) & (kVramPages - 1)])
+        g_li_pg[(pg0 + i) & (kVramPages - 1)]++;
+  }
   static unsigned skips;
   int maxt0 = im->maxt;
   bool check = skip && (++skips & 15) == 0;
@@ -5136,6 +5143,17 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  layerimg: on=%d high=%d frames=%u calls=%u skip=%u blk=%u/%u upd=%u/%u us=%u/%u", (int)g_img_ok,
            (int)g_imgh_ok, (unsigned)g_frames_img, (unsigned)g_li_n, (unsigned)g_li_skip, (unsigned)g_li_blkm, (unsigned)g_li_blkt, (unsigned)(g_li_n ? g_li_upd / g_li_n : 0), (unsigned)g_li_updmax,
            (unsigned)(g_li_n ? g_li_us / g_li_n : 0), (unsigned)g_li_usmax);
+    {  /* which VRAM pages block the layer-image scans, by page number */
+      char pgbuf[160];
+      int len = 0;
+      pgbuf[0] = 0;
+      for (int a = 0; a < kVramPages && len < (int)sizeof(pgbuf) - 16; a++)
+        if (g_li_pg[a])
+          len += snprintf(pgbuf + len, sizeof(pgbuf) - (size_t)len, " %02x=%u", a, (unsigned)g_li_pg[a]);
+      if (len)
+        PspLog("  imgblk pages:%s", pgbuf);
+      memset(g_li_pg, 0, sizeof(g_li_pg));
+    }
     g_li_n = g_li_upd = g_li_updmax = g_li_us = g_li_usmax = g_li_skip = g_li_blkm = g_li_blkt = 0;
     S5I_LOG();
   }
