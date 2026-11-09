@@ -1471,12 +1471,13 @@ static bool g_img_ok = SM_PSP_LAYER_IMG;                /* cleared if the first 
 static bool g_imgh_ok = SM_PSP_LAYER_IMG >= 2;          /* gate 5m: 32x64 tilemaps; cleared if the first verified such frames differ */
 static bool g_img_skip_ok = SM_PSP_LAYER_IMG >= 3;      /* gate 5m: no written page in map or tiles since the last scan: skip it */
 static uint8_t g_img_dirty[kImgSlots][kVramPages];      /* VRAM pages written since this image's last scan (SnapshotVram) */
+static uint8_t g_img_tpg[kImgSlots][kVramPages];        /* gate 5n: VRAM pages holding tile data that a cell of the image uses (set by the scan) */
 static bool g_img_on[kLayers], g_img_frame, g_imgh_frame;
 static TileVert *g_imgv[kLayers][2];
 static int g_imgn[kLayers][2], g_img_nv;
 static uint32_t g_img_vn, g_img_vbad, g_frames_img, g_imgh_vn, g_imgh_vbad;
 #if SM_PSP_LOG
-static uint32_t g_li_n, g_li_upd, g_li_updmax, g_li_us, g_li_usmax, g_li_skip;
+static uint32_t g_li_n, g_li_upd, g_li_updmax, g_li_us, g_li_usmax, g_li_skip, g_li_blkm, g_li_blkt;
 #endif
 
 static void ImgMarkDirty(int pg0, int pg1) {
@@ -1493,6 +1494,14 @@ static bool ImgPagesDirty(int slot, int word0, int nwords) {
   int pg = (word0 >> 8) & (kVramPages - 1), n = (nwords + kVramPageWords - 1) / kVramPageWords;
   for (int i = 0; i < n; i++)
     if (g_img_dirty[slot][(pg + i) & (kVramPages - 1)])
+      return true;
+  return false;
+}
+
+/* True if a page of the tile data the image was built from was written since its last scan. */
+static bool ImgTilePagesDirty(int slot) {
+  for (int pg = 0; pg < kVramPages; pg++)
+    if (g_img_tpg[slot][pg] && g_img_dirty[slot][pg])
       return true;
   return false;
 }
@@ -1602,8 +1611,8 @@ static void ImgUpdate(int l) {
   uint16_t *cw = g_img_cw[slot];
   uint32_t *cv = g_img_cv[slot];
   int nhi = im->nhi, nupd = 0, mx = 0;
-  bool skip = !fresh && g_img_skip_ok && !ImgPagesDirty(slot, s->mapadr, 1024 << ((wide ? 1 : 0) + (high ? 1 : 0))) &&
-              !ImgPagesDirty(slot, s->tileadr, im->maxt * words);
+  bool mapd = ImgPagesDirty(slot, s->mapadr, 1024 << ((wide ? 1 : 0) + (high ? 1 : 0))), tiled = ImgTilePagesDirty(slot);
+  bool skip = !fresh && g_img_skip_ok && !mapd && !tiled;
 #if SM_PSP_LOG
   static unsigned skips;
   int maxt0 = im->maxt;
@@ -1612,6 +1621,7 @@ static void ImgUpdate(int l) {
     skip = false;
 #endif
   if (!skip) {
+    memset(g_img_tpg[slot], 0, sizeof(g_img_tpg[slot]));
     for (int ty = 0; ty < rows; ty++) {
       int rowbase = s->mapadr + (ty & 31) * 32 + ((ty & 32) ? 0x400 : 0);
       for (int tx = 0; tx < cols; tx++) {
@@ -1619,7 +1629,8 @@ static void ImgUpdate(int l) {
         unsigned t = g_vram[(rowbase + (tx & 31) + ((tx & 32) ? 0x400 : 0)) & 0x7fff];
         if ((int)(t & 0x3ff) >= mx)
           mx = (int)(t & 0x3ff) + 1;
-        int pt = (int)((s->tileadr + (t & 0x3ff) * words) & 0x7fff) >> shift;
+        int wd = (int)((s->tileadr + (t & 0x3ff) * words) & 0x7fff), pt = wd >> shift;
+        g_img_tpg[slot][wd >> 8] = 1;  /* a tile is 8 or 16 aligned words: never crosses a 256 word page */
         EnsureTile(bpp4, pt);  /* decodes into the atlas if needed and bumps the version when the data changed */
         uint32_t v = ver[pt];
         if (cw[idx] == t && cv[idx] == v)
@@ -1643,6 +1654,7 @@ static void ImgUpdate(int l) {
            maxt0, mx);
   }
 #endif
+  PROF(if (!fresh && g_img_skip_ok) { g_li_blkm += mapd ? 1u : 0u; g_li_blkt += tiled ? 1u : 0u; })
   PROF(uint32_t us = Now() - t0; g_li_n++; g_li_skip += skip ? 1u : 0u; g_li_upd += (uint32_t)nupd; if ((uint32_t)nupd > g_li_updmax) g_li_updmax = (uint32_t)nupd;
        g_li_us += us; if (us > g_li_usmax) g_li_usmax = us;)
 }
@@ -5121,10 +5133,10 @@ static void PspRenderer_EndDraw(void) {
            (unsigned)g_cap_n_full, (unsigned)g_cap_n_chk, (unsigned)g_cap_n_bad, (int)g_cap_reuse_ok,
            (unsigned)g_cap_n_win, (int)g_cap_win_ok);
     g_cap_n_reuse = g_cap_n_full = g_cap_n_chk = g_cap_n_bad = g_cap_n_win = 0;
-    PspLog("  layerimg: on=%d high=%d frames=%u calls=%u skip=%u upd=%u/%u us=%u/%u", (int)g_img_ok,
-           (int)g_imgh_ok, (unsigned)g_frames_img, (unsigned)g_li_n, (unsigned)g_li_skip, (unsigned)(g_li_n ? g_li_upd / g_li_n : 0), (unsigned)g_li_updmax,
+    PspLog("  layerimg: on=%d high=%d frames=%u calls=%u skip=%u blk=%u/%u upd=%u/%u us=%u/%u", (int)g_img_ok,
+           (int)g_imgh_ok, (unsigned)g_frames_img, (unsigned)g_li_n, (unsigned)g_li_skip, (unsigned)g_li_blkm, (unsigned)g_li_blkt, (unsigned)(g_li_n ? g_li_upd / g_li_n : 0), (unsigned)g_li_updmax,
            (unsigned)(g_li_n ? g_li_us / g_li_n : 0), (unsigned)g_li_usmax);
-    g_li_n = g_li_upd = g_li_updmax = g_li_us = g_li_usmax = g_li_skip = 0;
+    g_li_n = g_li_upd = g_li_updmax = g_li_us = g_li_usmax = g_li_skip = g_li_blkm = g_li_blkt = 0;
     S5I_LOG();
   }
   if ((g_frame % 300) == 0) {
