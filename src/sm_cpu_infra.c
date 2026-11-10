@@ -1056,6 +1056,14 @@ void RtlRunFrameCompare(uint16 input, int run_what) {
 
     g_snes->runningWhichVersion = 0xff;
     RunOneFrameOfGame();
+    
+    // Handle SoftReset before the next game-state dispatch.
+    if (game_state == 0xffff) {
+        g_snes->cpu->k = 0x80;
+        g_snes->cpu->pc = 0x8462;
+        coroutine_state_0 = 3;
+    }
+
     DrawFrameToPpu();
     g_snes->runningWhichVersion = 0;
   } else {
