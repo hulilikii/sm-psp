@@ -1476,6 +1476,20 @@ static bool g_img_on[kLayers], g_img_frame, g_imgh_frame;
 static TileVert *g_imgv[kLayers][2];
 static int g_imgn[kLayers][2], g_img_nv;
 static uint32_t g_img_vn, g_img_vbad, g_frames_img, g_imgh_vn, g_imgh_vbad;
+/* Gate 5p: a subscreen BG layer with many scroll runs (HDMA haze / ripple) is drawn from the same layer image.
+ * One audit and switch per kind of frame: 0 plain subscreen blend, 1 subscreen + fixed colour, 2 half colour. */
+#ifndef SM_PSP_SUB_IMG
+#define SM_PSP_SUB_IMG 1  /* gate 5p: 0 = subscreen layers are always drawn from tile quads */
+#endif
+enum { kSimgKinds = 3, kSimgVerify = 8 };
+static bool g_simg_ok[kSimgKinds] = {SM_PSP_SUB_IMG, SM_PSP_SUB_IMG, SM_PSP_SUB_IMG};
+static bool g_simg_on[kLayers], g_simg_frame;
+static int g_simg_kind;
+static TileVert *g_simgv[kLayers][2];
+static int g_simgn[kLayers][2];
+static uint32_t g_simg_vn[kSimgKinds], g_simg_vbad[kSimgKinds], g_frames_simg;
+static uint32_t g_climgh[kImgSlots][2][256] __attribute__((aligned(64)));  /* half-colour target: opaque = alpha 0x80 */
+static uint16_t g_climgh_stamp[kImgSlots];
 #if SM_PSP_LOG
 static uint32_t g_li_n, g_li_upd, g_li_updmax, g_li_us, g_li_usmax, g_li_skip, g_li_blkm, g_li_blkt;
 static uint32_t g_li_pg[kVramPages];  /* scans blocked by a dirty map page, per VRAM page */
@@ -1562,6 +1576,45 @@ static bool ImgEligible(int l) {
   return true;
 }
 
+/* Gate 5p: image CLUT of the half-colour subscreen target (as BuildClut2Half: every opaque pixel, even black, has alpha 0x80). */
+static void ImgBuildClutHalf(int slot, bool bpp4) {
+  if (g_climgh_stamp[slot] == g_stamp)
+    return;
+  g_climgh_stamp[slot] = g_stamp;
+  for (int pr = 0; pr < 2; pr++)
+    for (int e = 0; e < 256; e++) {
+      unsigned px = (unsigned)e & (bpp4 ? 15u : 3u);
+      uint32_t c = 0;
+      if (px && (e >> 7) == pr)
+        c = (BakeColor(g_cgram[bpp4 ? (e & 0x7f) : (e & 0x1f)], kClutBright, false) & 0x00ffffffu) | 0x80000000u;
+      g_climgh[slot][pr][e] = c;
+    }
+  sceKernelDcacheWritebackRange(g_climgh[slot], sizeof(g_climgh[slot]));
+}
+
+/* True if the image of layer l was built for this tilemap set-up (a main and a subscreen user of one image must agree). */
+static bool ImgCfgMatches(int l, const BgSnap *b) {
+  const LayerImg *im = &g_img[l - 1];
+  return im->valid && im->map == b->mapadr && im->tile == b->tileadr && im->wide == (uint8_t)(b->flags & 1) &&
+         im->high == (uint8_t)((b->flags >> 1) & 1);
+}
+
+/* Gate 5p: the n subscreen runs in g_subruns of layer l (BG2/BG3) can be drawn from its layer image: many runs, one
+ * tilemap set-up (only scroll and window differ), and the audit of this kind of frame has not failed. */
+static bool SubImgEligible(int l, int n, int kind) {
+  if (l < 1 || n < kImgMinRuns || !g_img_ok || !g_simg_ok[kind])
+    return false;
+  const BgSnap *b0 = &g_lines[g_subruns[0].first].bg[l];
+  if ((b0->flags & 3) == 3 || ((b0->flags & 2) && !g_imgh_ok))  /* 64x64: no image; 32x64 while its audit holds */
+    return false;
+  for (int i = 1; i < n; i++) {
+    const BgSnap *b = &g_lines[g_subruns[i].first].bg[l];
+    if (b->mapadr != b0->mapadr || b->tileadr != b0->tileadr || ((b->flags ^ b0->flags) & 3))
+      return false;
+  }
+  return true;
+}
+
 #if SM_PSP_LOG
 /* Why a layer with many scroll runs is not drawn from an image (first few occurrences per layer). */
 static void NoteImgNo(int l) {
@@ -1586,10 +1639,9 @@ static void NoteImgNo(int l) {
 /* Brings the image of layer l up to date: a cell is rebuilt when its tilemap word or its tile's version changed.
  * Gate 5m: if no VRAM page of the tilemap or of the tiles it uses was written since the last scan, the scan is skipped
  * (log builds scan every 16th skip anyway and disable skipping if that finds anything). */
-static void ImgUpdate(int l) {
+static void ImgUpdate(int l, const BgSnap *s) {
   int slot = l - 1;
   bool bpp4 = l < 2;
-  const BgSnap *s = &g_lines[g_runs[l][0].first].bg[l];
   LayerImg *im = &g_img[slot];
   bool wide = (s->flags & 1) != 0, high = (s->flags & 2) != 0, fresh = false;
   PROF(uint32_t t0 = Now();)
@@ -1693,6 +1745,38 @@ static void ImgBuildStrips(int l) {
     }
     g_imgv[l][pr] = v;
     g_imgn[l][pr] = (int)(w - v);
+  }
+}
+
+/* Gate 5p: strips of the layer image for the subscreen runs of layer l (same mapping as ImgBuildStrips). Window spans as in
+ * the tile path: none in fixed-colour / half-colour frames (the masks are painted over the target), else the layer's
+ * subscreen window. (ox, oy): origin of the target (the screen when blending directly, 0 for the multisub target). */
+static void SubImgBuildStrips(int l, bool full, int ox, int oy) {
+  int slot = l - 1, W = g_img[slot].wide ? 512 : 256, H = g_img[slot].high ? 512 : 256;
+  const float iu = 0.5f - g_uvh[0], iv = 0.5f - g_uvh[1];
+  for (int pr = 0; pr < 2; pr++) {
+    g_simgv[l][pr] = NULL;
+    g_simgn[l][pr] = 0;
+    if (pr && !g_img[slot].nhi)
+      continue;
+    TileVert *v = VtxAlloc(g_nbruns * 4 * sizeof(TileVert)), *w = v;
+    for (int i = 0; i < g_nbruns; i++) {
+      const BRun *br = &g_bruns[i];
+      if (br->l != l)
+        continue;
+      const BgSnap *b = &g_lines[br->first].bg[l];
+      int wa[2] = {0, 0}, we[2] = {kGameWidth, kGameWidth};
+      int ns = full ? 1 : WinSpans(b->sm, b->sl, b->sr, wa, we);
+      float vt = (float)((b->vscroll + br->r0 + 1) & (H - 1)) + iv;
+      float vb = vt + (float)(br->r1 - br->r0);
+      float ub = (float)(b->hscroll & (W - 1)) + iu;
+      for (int k = 0; k < ns; k++) {
+        *w++ = (TileVert){ub + (float)wa[k], vt, (int16_t)(ox + wa[k]), (int16_t)(oy + br->r0), (int16_t)g_zbg[l][pr]};
+        *w++ = (TileVert){ub + (float)we[k], vb, (int16_t)(ox + we[k]), (int16_t)(oy + br->r1), (int16_t)g_zbg[l][pr]};
+      }
+    }
+    g_simgv[l][pr] = v;
+    g_simgn[l][pr] = (int)(w - v);
   }
 }
 
@@ -2712,6 +2796,16 @@ static void GeVerify(void) {
       PspLog("geaudit: layer-image frames differ too much, GE layer images disabled (high=%d)", g_imgh_frame ? 1 : 0);
     }
   }
+  if (g_simg_frame) {  /* gate 5p: subscreen layer images, one audit per kind of frame */
+    int k = g_simg_kind;
+    g_simg_vn[k]++;
+    g_simg_vbad[k] += bad;
+    PspLog("simgaudit f=%u kind=%d bruns=%d bad=%u", (unsigned)g_frame, k, g_nbruns, (unsigned)bad);
+    if ((g_simg_vn[k] >= 3 && g_simg_vbad[k] / g_simg_vn[k] > 600) || bad > 8192) {
+      g_simg_ok[k] = false;
+      PspLog("geaudit: subscreen layer-image frames differ too much, kind %d disabled", k);
+    }
+  }
   if (g_win_rows && !g_sh_frame && !g_w2_frame) {  /* half-colour and window-2 frames have their own audits (gates 4t-d/u) */
     g_win_vn++;
     g_win_vbad += bad;
@@ -3091,9 +3185,30 @@ static void DrawBgPass(int l, int pr) {
   }
 }
 
+/* Gate 5p: strips of a layer image on the subscreen target (half: the alpha 0x80 CLUT of the half-colour target). */
+static void DrawSubImgPass(int l, int pr, bool half) {
+  if (g_simgn[l][pr] == 0)
+    return;
+  int slot = l - 1, iw = g_img[slot].wide ? 512 : 256, ih = g_img[slot].high ? 512 : 256;
+  PROF(g_c_clut++;)
+  sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+  sceGuClutLoad(32, half ? g_climgh[slot][pr] : g_climg[slot][pr]);
+  sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
+  sceGuTexImage(0, iw, ih, iw, g_img_tex[slot]);
+  sceGuTexFlush();  /* the image is updated by the CPU between frames */
+  sceGuTexWrap(GU_REPEAT, GU_REPEAT);
+  GeDraw(kVtTile, g_simgn[l][pr], g_simgv[l][pr]);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+}
+
 /* Same merging for the subscreen blend runs (grouped by layer; depth markers or disjoint rows decide overlaps). */
 static void DrawBlendBgs(bool half) {
   for (int l = 0; l < kLayers; l++) {
+    if (g_simg_on[l]) {  /* gate 5p: the layer comes from its image, one strip per run */
+      for (int pr = 0; pr < 2; pr++)
+        DrawSubImgPass(l, pr, half && l == 2);
+      continue;
+    }
     for (int pr = 0; pr < 2; pr++) {
       for (int p = 0; p < 8; p++) {
         for (int i = 0; i < g_nbruns;) {
@@ -3422,6 +3537,8 @@ static bool DrawGe(void) {
   g_imgh_frame = false;
   g_img_nv = 0;
   memset(g_img_on, 0, sizeof(g_img_on));
+  g_simg_frame = false;
+  memset(g_simg_on, 0, sizeof(g_simg_on));
   if (g_frame_reasons) {
     CountReasons(g_frame_reasons);
     return false;
@@ -3439,6 +3556,7 @@ static bool DrawGe(void) {
     memset(g_clut4_stamp, 0, sizeof(g_clut4_stamp));
     memset(g_clutobj_stamp, 0, sizeof(g_clutobj_stamp));
     memset(g_climg_stamp, 0, sizeof(g_climg_stamp));
+    memset(g_climgh_stamp, 0, sizeof(g_climgh_stamp));
     memset(g_rc, 0, sizeof(g_rc));
     g_stamp = 1;
   }
@@ -3557,9 +3675,13 @@ static bool DrawGe(void) {
       else
         g_subruns[n++] = (Run){(uint16_t)r, (uint16_t)(r + 1), (uint16_t)r};
     }
+    int simg_k = subhalf ? 2 : subfix ? 1 : 0;
+    bool simg = SubImgEligible(l, n, simg_k);  /* gate 5p: many scroll runs: draw from the layer image */
+    if (simg)
+      ImgUpdate(l, &g_lines[g_subruns[0].first].bg[l]);
     for (int i = 0; i < n; i++) {
-      TileList kept;
-      int rc = SubRunContributes(l, &g_lines[g_subruns[i].first], g_subruns[i].r0, g_subruns[i].r1, subfix, &kept);
+      TileList kept = {0, 0};
+      int rc = simg ? 1 : SubRunContributes(l, &g_lines[g_subruns[i].first], g_subruns[i].r0, g_subruns[i].r1, subfix, &kept);
       if (rc < 0) {
         BUDGET(1, "subpool", g_ent_top, kEntPool);
         return false;
@@ -3587,8 +3709,16 @@ static bool DrawGe(void) {
       sub_layer = l;
       sublayers |= 1 << l;
       g_bruns[g_nbruns++] = (BRun){(uint8_t)l, g_subruns[i].first, g_subruns[i].r0, g_subruns[i].r1, kept};
+      if (simg) {
+        g_simg_on[l] = true;
+        g_simg_frame = true;
+        g_simg_kind = simg_k;
+      }
     }
   }
+  for (int l = 1; l < kLayers; l++)  /* gate 5p: strip vertices of the subscreen layer images (display-list guard) */
+    if (g_simg_on[l])
+      g_img_nv += g_nbruns * 4 * (g_img[l - 1].nhi ? 2 : 1);
   if (subfix && (sublayers & (sublayers - 1))) {  /* several subscreen layers: a window mask would erase the others */
     for (int r = sf0; r < sf1; r++)
       for (int l = 0; l < kLayers; l++)
@@ -3724,8 +3854,9 @@ static bool DrawGe(void) {
       CountReasons(kReasonMosaic);
       return false;
     }
-    if (l >= 1 && g_img_ok && !winrows && !g_mos[l].on && n >= kImgMinRuns && ImgEligible(l)) {
-      ImgUpdate(l);  /* gate 5l: many scroll runs: draw the layer from its cached image, one strip per run */
+    if (l >= 1 && g_img_ok && !winrows && !g_mos[l].on && n >= kImgMinRuns && ImgEligible(l) &&
+        (!g_simg_on[l] || ImgCfgMatches(l, &g_lines[g_runs[l][0].first].bg[l]))) {
+      ImgUpdate(l, &g_lines[g_runs[l][0].first].bg[l]);  /* gate 5l: many scroll runs: draw the layer from its cached image, one strip per run */
       g_img_on[l] = true;
       g_img_frame = true;
       if (g_img[l - 1].high)
@@ -3801,6 +3932,9 @@ static bool DrawGe(void) {
   }
   if (subhalf)
     BuildClut2Half();
+  for (int l = 1; l < kLayers; l++)  /* gate 5p */
+    if (g_simg_on[l] && subhalf && l == 2)
+      ImgBuildClutHalf(l - 1, false);
   if (g_m7_rows) {
     if (!M7Prepare()) {
       BUDGET(4, "m7quads", g_m7_nq, kM7MaxQuads);
@@ -4075,6 +4209,9 @@ static bool DrawGe(void) {
       }
     }
   }
+  for (int l = 1; l < kLayers; l++)  /* gate 5p: strips of the subscreen layer images */
+    if (g_simg_on[l])
+      SubImgBuildStrips(l, subfix, multisub ? 0 : kLeft, multisub ? 0 : kTop);
 
   /* Multi-layer subscreen: black clear rectangle for the offscreen target (also clears its depth) and the
    * quad that adds the finished composite to the main image. */
@@ -4425,6 +4562,15 @@ static bool DrawGe(void) {
       g_want_ms_verify = true;
     else
       g_verify_now = true;
+  }
+  if (g_simg_frame) {  /* gate 5p: the first frames of each kind of subscreen layer image are checked */
+    g_frames_simg++;
+    if (g_simg_vn[g_simg_kind] < kSimgVerify) {
+      if (g_ppu_skip_draw)
+        g_want_ms_verify = true;
+      else
+        g_verify_now = true;
+    }
   }
   if (ovfwant && g_ppu_skip_draw && g_ovf_vn < kOvfArm && g_ovf_arms < kOvfArms) {
     g_ovf_arms++;
@@ -5155,6 +5301,8 @@ static void PspRenderer_EndDraw(void) {
       memset(g_li_pg, 0, sizeof(g_li_pg));
     }
     g_li_n = g_li_upd = g_li_updmax = g_li_us = g_li_usmax = g_li_skip = g_li_blkm = g_li_blkt = 0;
+    PspLog("  subimg: frames=%u ok=%d%d%d audited=%u,%u,%u", (unsigned)g_frames_simg, (int)g_simg_ok[0], (int)g_simg_ok[1],
+           (int)g_simg_ok[2], (unsigned)g_simg_vn[0], (unsigned)g_simg_vn[1], (unsigned)g_simg_vn[2]);
     S5I_LOG();
   }
   if ((g_frame % 300) == 0) {
