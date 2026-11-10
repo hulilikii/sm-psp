@@ -17,7 +17,7 @@
 
 #if SM_PSP_LOG
 #include <pspkernel.h>
-uint32_t g_dma_us, g_dma_bytes, g_dma_n;  /* log builds: $420B DMA cost of the current frame, read by main.c */
+uint32_t g_dma_us, g_dma_bytes, g_dma_n, g_dma_vram, g_dma_wram;  /* log builds: $420B DMA cost of the current frame, read by main.c */
 #endif
 
 extern bool g_is_turbo;
@@ -369,8 +369,15 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
 #if SM_PSP_LOG
       uint32_t t_dma = sceKernelGetSystemTimeLow();
       for (int i = 0; i < 8; i++)
-        if (val & (1 << i))
-          g_dma_bytes += snes->dma->channel[i].size ? snes->dma->channel[i].size : 0x10000;
+        if (val & (1 << i)) {
+          const DmaChannel *c = &snes->dma->channel[i];
+          uint32_t n = c->size ? c->size : 0x10000;
+          g_dma_bytes += n;
+          if (!c->fromB && c->bAdr == 0x18)
+            g_dma_vram += n;
+          if (!c->fromB && (c->aBank == 0x7e || c->aBank == 0x7f))
+            g_dma_wram += n;
+        }
 #endif
       dma_startDma(snes->dma, val, false);
       dma_runAll(snes->dma);

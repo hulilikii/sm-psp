@@ -10,6 +10,17 @@
 #if PSP_AUDIO_ME
 #include "psp/psp_audio_me.h"
 #endif
+#include "psp/psp_log.h"
+#if SM_PSP_LOG
+#include <pspthreadman.h>
+/* log builds: time of Memory Stick writes and SPC uploads on the game thread (logged when >= 1 ms) */
+#define IO_T0() uint32_t io_t0 = sceKernelGetSystemTimeLow()
+#define IO_LOG(what) do { uint32_t io_us = sceKernelGetSystemTimeLow() - io_t0; \
+  if (io_us >= 1000) PspLog("IO f=%d %s us=%u", snes_frame_counter, what, (unsigned)io_us); } while (0)
+#else
+#define IO_T0() ((void)0)
+#define IO_LOG(what) ((void)0)
+#endif
 
 struct StateRecorder;
 
@@ -660,12 +671,14 @@ static void RtlResetApuQueue(void) {
 }
 
 void RtlApuUpload(const uint8 *p) {
+  IO_T0();
   RtlApuLock();
   RtlApuQueueLock();
   RtlResetApuQueue();
   RtlApuQueueUnlock();
   SpcPlayer_Upload(g_spc_player, p);
   RtlApuUnlock();
+  IO_LOG("apu upload");
 }
 
 void RtlRestoreMusicAfterLoad_Locked(bool is_reset) {
@@ -771,6 +784,7 @@ void RtlReadSram(void) {
 }
 
 void RtlWriteSram(void) {
+  IO_T0();
   // PSP rename() cannot overwrite an existing file, so drop the old backup first.
   remove("saves/sm.srm.bak");
   rename("saves/sm.srm", "saves/sm.srm.bak");
@@ -781,4 +795,5 @@ void RtlWriteSram(void) {
   } else {
     fprintf(stderr, "Unable to write saves/sm.srm\n");
   }
+  IO_LOG("sram write");
 }
