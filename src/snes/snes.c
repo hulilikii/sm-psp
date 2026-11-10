@@ -15,6 +15,11 @@
 #include "input.h"
 #include "../tracing.h"
 
+#if SM_PSP_LOG
+#include <pspkernel.h>
+uint32_t g_dma_us, g_dma_bytes, g_dma_n;  /* log builds: $420B DMA cost of the current frame, read by main.c */
+#endif
+
 extern bool g_is_turbo;
 int snes_frame_counter;
 static const double apuCyclesPerMaster = (32040 * 32) / (1364 * 262 * 60.0);
@@ -361,8 +366,18 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
                t, snes->dma->channel[1].bAdr,
                snes->ppu->vramPointer, snes->dma->channel[1].size, data);
       }
+#if SM_PSP_LOG
+      uint32_t t_dma = sceKernelGetSystemTimeLow();
+      for (int i = 0; i < 8; i++)
+        if (val & (1 << i))
+          g_dma_bytes += snes->dma->channel[i].size ? snes->dma->channel[i].size : 0x10000;
+#endif
       dma_startDma(snes->dma, val, false);
       while (dma_cycle(snes->dma)) {}
+#if SM_PSP_LOG
+      g_dma_us += sceKernelGetSystemTimeLow() - t_dma;
+      g_dma_n++;
+#endif
       break;
     }
     case 0x420c: {

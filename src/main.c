@@ -290,18 +290,23 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 /* Game-logic hitch probe: RtlRunFrame is normally 4-9 ms when the software PPU is skipped. */
 static unsigned Ram16(unsigned a) { return g_ram[a] | (unsigned)g_ram[a + 1] << 8; }
 
+extern uint32_t g_dma_us, g_dma_bytes, g_dma_n;  /* snes.c: $420B DMA cost of this frame */
+
 static void LogLogicHitch(uint32_t us) {
   static unsigned logged;
-  if (!g_ppu_skip_draw || us < 15000 || logged >= 64)
+  if (!g_ppu_skip_draw || us < 15000 || logged >= 128)
     return;
   logged++;
-  PspLog("LOGIC f=%u us=%u gs=%04x room=%04x door=%04x area=%02x apu617=%04x mus=%04x/%04x",
-         (unsigned)g_frame_ctr, (unsigned)us, Ram16(0x998), Ram16(0x79B), Ram16(0x78D),
+  PspLog("LOGIC f=%u us=%u dma_us=%u dma_b=%u dma_n=%u gs=%04x room=%04x door=%04x area=%02x apu617=%04x mus=%04x/%04x",
+         (unsigned)g_frame_ctr, (unsigned)us, (unsigned)g_dma_us, (unsigned)g_dma_bytes, (unsigned)g_dma_n,
+         Ram16(0x998), Ram16(0x79B), Ram16(0x78D),
          (unsigned)g_ram[0x79F], Ram16(0x617), Ram16(0x7F3), Ram16(0x7F5));
 }
 #define LOG_LOGIC_HITCH(t0) LogLogicHitch(sceKernelGetSystemTimeLow() - (t0))
+#define LOG_DMA_RESET() (g_dma_us = g_dma_bytes = g_dma_n = 0)
 #else
 #define LOG_LOGIC_HITCH(t0) ((void)(t0))
+#define LOG_DMA_RESET() ((void)0)
 #endif
 
 static void DrawPpuFrame(void) {
@@ -422,6 +427,7 @@ int main(int argc, char **argv) {
     }
 
     uint16 inputs = PspInput_Read();
+    LOG_DMA_RESET();
     uint32_t t_logic = sceKernelGetSystemTimeLow();
     uint8 is_replay = RtlRunFrame(inputs);
     LOG_LOGIC_HITCH(t_logic);
