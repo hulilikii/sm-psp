@@ -286,6 +286,24 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
     memcpy(pixel_buffer + y * pitch, src + y * 256 * 4, 256 * 4);
 }
 
+#if SM_PSP_LOG
+/* Game-logic hitch probe: RtlRunFrame is normally 4-9 ms when the software PPU is skipped. */
+static unsigned Ram16(unsigned a) { return g_ram[a] | (unsigned)g_ram[a + 1] << 8; }
+
+static void LogLogicHitch(uint32_t us) {
+  static unsigned logged;
+  if (!g_ppu_skip_draw || us < 15000 || logged >= 64)
+    return;
+  logged++;
+  PspLog("LOGIC f=%u us=%u gs=%04x room=%04x door=%04x area=%02x apu617=%04x mus=%04x/%04x",
+         (unsigned)g_frame_ctr, (unsigned)us, Ram16(0x998), Ram16(0x79B), Ram16(0x78D),
+         (unsigned)g_ram[0x79F], Ram16(0x617), Ram16(0x7F3), Ram16(0x7F5));
+}
+#define LOG_LOGIC_HITCH(t0) LogLogicHitch(sceKernelGetSystemTimeLow() - (t0))
+#else
+#define LOG_LOGIC_HITCH(t0) ((void)(t0))
+#endif
+
 static void DrawPpuFrame(void) {
   uint8 *pixel_buffer;
   int pitch;
@@ -404,7 +422,9 @@ int main(int argc, char **argv) {
     }
 
     uint16 inputs = PspInput_Read();
+    uint32_t t_logic = sceKernelGetSystemTimeLow();
     uint8 is_replay = RtlRunFrame(inputs);
+    LOG_LOGIC_HITCH(t_logic);
     ++g_frame_ctr;
 
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
