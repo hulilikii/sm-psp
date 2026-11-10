@@ -273,6 +273,10 @@ static bool g_m7q_ok = true;  /* cleared if the first verified tile-quad mode 7 
 static bool g_m7i_ok = true;  /* the same for the image path */
 static int g_frame_mode = -1;        /* BG mode of this frame (first line that is not forced blank) */
 static bool g_m7_ok = true;          /* cleared if the texture-coordinate self test fails */
+/* Gate 5q: small-field mode 7 (the plane wraps) drawn as tile quads; own audit, falls back to the image path. */
+static bool g_m7w_ok = true, g_m7w_frame;
+static uint32_t g_m7w_vn, g_m7w_vbad, g_frames_m7w;
+enum { kM7WVerify = 8 };
 #ifndef SM_PSP_GE_WIN
 #define SM_PSP_GE_WIN 1  /* 1: window-1 masks on BG1-3 / OBJ are drawn by the GE, 0: those frames stay in software */
 #endif
@@ -2610,8 +2614,10 @@ static bool M7Prepare(void) {
   if (g_m7_rows == 0)
     return true;
   const int16_t *m = g_m7c.m;
-  if (!(g_m7_same && g_m7q_ok && g_m7c.fl == 1 && !m[1] && !m[2] && m[0] > 0 && m[3] > 0)) {
-    M7PrepareImg();  /* rotation, per-line matrix, flips, charfill, mosaic, small field */
+  /* fl 1: large field (outside the plane is transparent), fl 0: small field (the plane wraps, gate 5q) */
+  const bool wrap = g_m7c.fl == 0;
+  if (!(g_m7_same && g_m7q_ok && (g_m7c.fl == 1 || (wrap && g_m7w_ok)) && !m[1] && !m[2] && m[0] > 0 && m[3] > 0)) {
+    M7PrepareImg();  /* rotation, per-line matrix, flips, charfill, mosaic */
     return true;
   }
   int a = m[0], d = m[3];
@@ -2629,9 +2635,9 @@ static bool M7Prepare(void) {
   int ncs = 0;
   for (int x = 0; x < kGameWidth; x++) {
     uint32_t X = X0 + (uint32_t)a * (uint32_t)x;
-    if (X > 0x3ffff)
+    if (!wrap && X > 0x3ffff)
       continue;
-    int tx = (int)(X >> 11);
+    int tx = (int)((X >> 11) & 0x7f);
     if (ncs && cs[ncs - 1].xb == x && cs[ncs - 1].tx == tx) {
       cs[ncs - 1].xb = x + 1;
     } else {
@@ -2643,7 +2649,7 @@ static bool M7Prepare(void) {
       cs[ncs].xa = x;
       cs[ncs].xb = x + 1;
       cs[ncs].tx = tx;
-      cs[ncs].u = (float)(X - ((uint32_t)tx << 11)) / 256.0f;
+      cs[ncs].u = (float)(X & 0x7ffu) / 256.0f;
       cs[ncs].m0 = cs[ncs].m1 = (int)(X & 255);
       ncs++;
     }
@@ -2661,7 +2667,7 @@ static bool M7Prepare(void) {
   int r = 0;
   while (r < g_line_count) {
     uint32_t Y = (((uint32_t)d * (uint32_t)(r + 1)) & ~63u) + Yc;
-    if (!g_lines[r].m7on || Y > 0x3ffff) {
+    if (!g_lines[r].m7on || (!wrap && Y > 0x3ffff)) {
       r++;
       continue;
     }
@@ -2669,11 +2675,11 @@ static bool M7Prepare(void) {
     int r1 = r + 1;
     while (r1 < g_line_count && g_lines[r1].m7on) {
       uint32_t Y1 = (((uint32_t)d * (uint32_t)(r1 + 1)) & ~63u) + Yc;
-      if (Y1 > 0x3ffff || (band ? Y1 >> 11 : Y1 >> 8) != key)
+      if ((!wrap && Y1 > 0x3ffff) || (band ? Y1 >> 11 : Y1 >> 8) != key)
         break;
       r1++;
     }
-    int ty = (int)(Y >> 11);
+    int ty = (int)((Y >> 11) & 0x7f);
     float v0, v1;
     if (band) {
       int m0 = (int)(Y & 255), m1 = m0;
@@ -2682,7 +2688,7 @@ static bool M7Prepare(void) {
         if (m < m0) m0 = m;
         if (m > m1) m1 = m;
       }
-      float tv = (float)(Y - ((uint32_t)ty << 11)) / 256.0f + (float)(256 - m0 - m1) / 512.0f;
+      float tv = (float)(Y & 0x7ffu) / 256.0f + (float)(256 - m0 - m1) / 512.0f;
       v0 = tv - g_uvh[1] * dv;
       v1 = v0 + (float)(r1 - r) * dv;
     } else {
@@ -2711,6 +2717,7 @@ static bool M7Prepare(void) {
     }
     r = r1;
   }
+  g_m7w_frame = wrap && g_m7_nq > 0;
   return true;
 }
 
@@ -2757,7 +2764,7 @@ static void GeVerify(void) {
       }
     }
   bool m7 = g_m7_nq > 0;
-  if (m7) {
+  if (m7 && !g_m7w_frame) {
     g_m7_vn++;
     g_m7_vbad += bad;
     g_m7_vnear += near;
@@ -2770,12 +2777,21 @@ static void GeVerify(void) {
       PspLog("m7verify: image mode 7 differs, GE image path disabled");
     }
   }
-  if (m7 && g_m7_nq > kM7BaseQuads) {
+  if (m7 && !g_m7w_frame && g_m7_nq > kM7BaseQuads) {
     g_m7_bigv++;
     g_m7_bigbad += bad;
     if (g_m7_bigv >= 3 && g_m7_bigbad / g_m7_bigv > 600) {
       g_m7big_ok = false;
       PspLog("m7verify: large mode 7 frames differ, quad cap back to %d", (int)kM7BaseQuads);
+    }
+  }
+  if (g_m7w_frame) {  /* gate 5q: small-field mode 7 quads have their own audit */
+    g_m7w_vn++;
+    g_m7w_vbad += bad;
+    PspLog("m7wrap f=%u quads=%d bad=%u", (unsigned)g_frame, g_m7_nq, (unsigned)bad);
+    if (g_m7w_vn >= 3 && g_m7w_vbad / g_m7w_vn > 600) {
+      g_m7w_ok = false;
+      PspLog("m7verify: small-field mode 7 quads differ, wrap path disabled (image path takes over)");
     }
   }
   if (g_bright_rows)
@@ -3515,6 +3531,7 @@ static bool DrawGe(void) {
   g_ent_top = 0;
   g_rows_top = 0;
   g_m7_nq = 0;
+  g_m7w_frame = false;
   g_m7_img = false;
   g_m7_nrng = 0;
   g_ovf_rows = 0;
@@ -4527,7 +4544,7 @@ static bool DrawGe(void) {
     sceGuEnable(GU_TEXTURE_2D);
     sceGuEnable(GU_ALPHA_TEST);
   }
-  bool m7big = g_m7_nq > kM7BaseQuads && g_m7_bigv < kM7BigVerify;
+  bool m7big = g_m7_nq > kM7BaseQuads && !g_m7w_frame && g_m7_bigv < kM7BigVerify;
   bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
   bool winwant = g_win_rows != 0 && !g_sh_frame && !g_w2_frame && g_win_vn < kWinVerify;
   bool ovfwant = g_ovf_rows != 0 && g_ovf_vn < kOvfVerify;
@@ -4536,8 +4553,9 @@ static bool DrawGe(void) {
   bool bandwant = g_nbband > 1 && g_bnd_vn < kBandVerify;
   bool prevwant = g_prev_rows != 0 && g_prev_vn < kPrevVerify;
   bool cwwant = g_cw_rows != 0 && g_cw_vn < kCwVerify;
-  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && g_m7_vn < kM7Verify) || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || cwwant || g_audit_now);
-  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || brwant || winwant || moswant || bandwant || prevwant || cwwant) && g_ppu_skip_draw)
+  bool m7wwant = g_m7w_frame && g_m7w_vn < kM7WVerify;
+  g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && !g_m7w_frame && g_m7_vn < kM7Verify) || m7wwant || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || cwwant || g_audit_now);
+  if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || m7wwant || brwant || winwant || moswant || bandwant || prevwant || cwwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   if (g_sf_frame && (g_sfo_frame ? g_sfo_vn : g_sf_zero ? g_sf0_vn : g_sf_vn) < kSfVerify) {  /* gates 4t-c/5b/5e: first frames of each class are checked */
     if (g_ppu_skip_draw)
@@ -4600,6 +4618,8 @@ static bool DrawGe(void) {
     g_frames_w2++;
   if (g_m7_img)
     g_frames_m7i++;
+  if (g_m7w_frame)
+    g_frames_m7w++;
   g_audit_now = false;
   Present();
   return true;
@@ -5303,6 +5323,7 @@ static void PspRenderer_EndDraw(void) {
     g_li_n = g_li_upd = g_li_updmax = g_li_us = g_li_usmax = g_li_skip = g_li_blkm = g_li_blkt = 0;
     PspLog("  subimg: frames=%u ok=%d%d%d audited=%u,%u,%u", (unsigned)g_frames_simg, (int)g_simg_ok[0], (int)g_simg_ok[1],
            (int)g_simg_ok[2], (unsigned)g_simg_vn[0], (unsigned)g_simg_vn[1], (unsigned)g_simg_vn[2]);
+    PspLog("  m7wrap: frames=%u ok=%d audited=%u", (unsigned)g_frames_m7w, (int)g_m7w_ok, (unsigned)g_m7w_vn);
     S5I_LOG();
   }
   if ((g_frame % 300) == 0) {
