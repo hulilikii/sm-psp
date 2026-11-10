@@ -4986,6 +4986,264 @@ static void Bench5ib(void) {
 }
 #endif
 
+#if SM_PSP_BENCH_M7_ON
+/* Gate 5r-a (log only, nothing here is used by the game): boot-time audit of GE-native Mode 7 rotation.
+ * The 1024x1024 plane is built once from the Mode 7 VRAM layout as an 8 bit image (stride 1024) in RAM. Every screen
+ * row is cut into segments of segw pixels; a segment is one triangle strip whose texture window (512x512, stride
+ * 1024) starts at the segment's integer plane position (x rounded down to 16 bytes, so every base address is
+ * 16-byte aligned like the 1024x1024 reference demo) and whose UVs are relative to that window. This keeps the UV
+ * magnitudes small, which is what the GE's interpolation precision needs. Rows use the ppu.c start-position maths
+ * and are checked pixel by pixel against the CPU image path (M7RenderRow). Compared: CPU image + one GE quad
+ * (today's path) against strips of 256/64/32 pixel segments, with the sample point of the GE at the pixel centre
+ * or the pixel corner (the sprite self test says nothing about triangles). Then the whole run is repeated (A/B/A). */
+enum { kB7Plane = 1024, kB7PadRows = 64, kB7Win = 512, kB7Iters = 6, kB7MaxSegs = kMaxLines * 8, kB7Scen = 4 };
+typedef struct B7Seg { const uint8_t *base; float u0, v0, u1, v1; int16_t x0, x1, y; } B7Seg;
+static uint8_t g_b7_plane[kB7Plane * (kB7Plane + kB7PadRows)] __attribute__((aligned(64)));
+static uint32_t g_b7_clut[256] __attribute__((aligned(64)));
+static B7Seg g_b7_seg[kB7MaxSegs];
+static int g_b7_nseg;
+static int16_t g_b7_m[8];  /* matrix of the scenario being run: a, b, c, d, centre x, y, scroll h, v */
+static uint32_t g_b7_rng = 0x2545F491u;
+/* deg, scale %, a = d = cos * scale * 256, b = sin * scale * 256, c = -b (as the Ceres elevator sets M7A-M7D) */
+static const int16_t kB7Mat[kB7Scen][4] = {{241, 88, -88, 241}, {181, 181, -181, 181}, {272, 272, -272, 272}, {40, 148, -148, 40}};
+static const int kB7Deg[kB7Scen] = {20, 45, 45, 75};
+static const int kB7Pct[kB7Scen] = {100, 100, 150, 60};
+
+static uint32_t B7Rand(void) {
+  g_b7_rng ^= g_b7_rng << 13;
+  g_b7_rng ^= g_b7_rng >> 17;
+  g_b7_rng ^= g_b7_rng << 5;
+  return g_b7_rng;
+}
+
+/* CLUT entry i: its 565 conversion is exact and distinct for all 256 indices (R5 = i & 31, G6 = i >> 5, B5 = i * 5). */
+static uint32_t B7Color(unsigned i) {
+  return 0xff000000u | (((i * 5) & 31) << 3) << 16 | (((i >> 5) & 7) << 2) << 8 | ((i & 31) << 3);
+}
+
+static unsigned B7565(unsigned i) {
+  return (i & 31) | (((i >> 5) & 7) << 5) | (((i * 5) & 31) << 11);
+}
+
+/* The plane as the mode 7 VRAM describes it: pixel (x, y) = high byte of vram[tile * 64 + (y & 7) * 8 + (x & 7)],
+ * tile = low byte of vram[(y >> 3) * 128 + (x >> 3)]. Two 32 bit stores per tile row (4-byte aligned). */
+static void B7BuildPlane(void) {
+  for (int ty = 0; ty < 128; ty++)
+    for (int tx = 0; tx < 128; tx++) {
+      const uint16_t *src = &g_vram[(g_vram[ty * 128 + tx] & 0xff) * 64];
+      uint32_t *dst = (uint32_t *)(g_b7_plane + ty * 8 * kB7Plane + tx * 8);
+      for (int y = 0; y < 8; y++, dst += kB7Plane / 4) {
+        uint32_t w0 = 0, w1 = 0;
+        for (int x = 0; x < 4; x++) {
+          w0 |= (uint32_t)(src[y * 8 + x] >> 8) << (8 * x);
+          w1 |= (uint32_t)(src[y * 8 + 4 + x] >> 8) << (8 * x);
+        }
+        dst[0] = w0;
+        dst[1] = w1;
+      }
+    }
+}
+
+/* Start position of screen row y (1-based line) as M7RenderRow computes it (no flips, no mosaic). */
+static void B7RowStart(const int16_t *m, int y, int32_t *X0, int32_t *Y0) {
+  int xc = ((int16_t)(m[4] << 3)) >> 3, yc = ((int16_t)(m[5] << 3)) >> 3;
+  int hs = ((int16_t)(m[6] << 3)) >> 3, vs = ((int16_t)(m[7] << 3)) >> 3;
+  int ch = hs - xc, cv = vs - yc;
+  ch = (ch & 0x2000) ? (ch | ~1023) : (ch & 1023);
+  cv = (cv & 0x2000) ? (cv | ~1023) : (cv & 1023);
+  *X0 = ((m[0] * ch) & ~63) + ((m[1] * y) & ~63) + ((m[1] * cv) & ~63) + (xc << 8);
+  *Y0 = ((m[2] * ch) & ~63) + ((m[3] * y) & ~63) + ((m[3] * cv) & ~63) + (yc << 8);
+}
+
+/* Segments of every row. u/v are the texel position of the pixel (x, row) inside the segment's window plus a shift that
+ * keeps floor() on the right texel for every fractional position the segment can have (same centring as M7Prepare:
+ * the residues of the start position, in 1/256 texel, span [m0, m1]), minus uvh * step for the GE sample point.
+ * Returns false if a segment does not fit one 512x512 window or leaves the plane (wrap is not handled here). */
+static bool B7Prepare(const int16_t *m, int segw, float uvh) {
+  const int a = m[0], c = m[2];
+  const float du = (float)a / 256.0f, dv = (float)c / 256.0f;
+  g_b7_nseg = 0;
+  for (int r = 0; r < kGameHeight; r++) {
+    int32_t X0, Y0;
+    B7RowStart(m, r + 1, &X0, &Y0);
+    for (int xs = 0; xs < kGameWidth; xs += segw) {
+      const int xe = xs + segw;
+      int mu0 = 255, mu1 = 0, mv0 = 255, mv1 = 0;
+      for (int x = xs; x < xe; x++) {
+        int ru = (X0 + a * x) & 255, rv = (Y0 + c * x) & 255;
+        if (ru < mu0) mu0 = ru;
+        if (ru > mu1) mu1 = ru;
+        if (rv < mv0) mv0 = rv;
+        if (rv > mv1) mv1 = rv;
+      }
+      const int32_t Xs = X0 + a * xs, Xe = X0 + a * xe, Ys = Y0 + c * xs, Ye = Y0 + c * xe;
+      int minx = IntMin(Xs >> 8, Xe >> 8) - 1, maxx = IntMax(Xs >> 8, Xe >> 8) + 2;
+      int miny = IntMin(Ys >> 8, Ye >> 8) - 1, maxy = IntMax(Ys >> 8, Ye >> 8) + 2;
+      if (minx < 0 || miny < 0 || maxx >= kB7Plane || maxy >= kB7Plane)
+        return false;
+      int bx = minx & ~15, by = miny;
+      if (maxx - bx >= kB7Win || maxy - by >= kB7Win)
+        return false;
+      const uint8_t *base = g_b7_plane + by * kB7Plane + bx;
+      if ((uintptr_t)base & 15)
+        return false;
+      const float su = (float)(256 - mu0 - mu1) / 512.0f - uvh * du, sv = (float)(256 - mv0 - mv1) / 512.0f - uvh * dv;
+      B7Seg *s = &g_b7_seg[g_b7_nseg++];
+      s->base = base;
+      s->u0 = (float)(Xs - (bx << 8)) / 256.0f + su;
+      s->u1 = (float)(Xe - (bx << 8)) / 256.0f + su;
+      s->v0 = (float)(Ys - (by << 8)) / 256.0f + sv;
+      s->v1 = (float)(Ye - (by << 8)) / 256.0f + sv;
+      s->x0 = (int16_t)xs;
+      s->x1 = (int16_t)xe;
+      s->y = (int16_t)r;
+    }
+  }
+  return true;
+}
+
+/* One frame into draw buffer 0: strips (the segments from B7Prepare) or the image quad (g_m7img, today's path). */
+static void B7Frame(bool strips, uint32_t *build_us, uint32_t *total_us) {
+  uint32_t t0 = Now();
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuClearColor(0xff000000);
+  sceGuClear(GU_COLOR_BUFFER_BIT);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+  sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+  sceGuClutLoad(32, g_b7_clut);
+  sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
+  if (!strips) {
+    sceGuTexImage(0, 256, 256, 256, g_m7img);
+    sceGuTexFlush();
+    TileVert *v = sceGuGetMemory(2 * sizeof(TileVert));
+    const float iu = 0.5f - g_uvh[0], iv = 0.5f - g_uvh[1];
+    v[0] = (TileVert){iu, iv, (int16_t)kLeft, (int16_t)kTop, 0};
+    v[1] = (TileVert){iu + (float)kGameWidth, iv + (float)kGameHeight, (int16_t)(kLeft + kGameWidth),
+                      (int16_t)(kTop + kGameHeight), 0};
+    GeDraw(kVtTile, 2, v);
+  } else {
+    for (int i = 0; i < g_b7_nseg; i++) {
+      const B7Seg *s = &g_b7_seg[i];
+      sceGuTexImage(0, kB7Win, kB7Win, kB7Plane, s->base);  /* also flushes the texture cache */
+      TileVert *v = sceGuGetMemory(4 * sizeof(TileVert));
+      const int16_t xl = (int16_t)(kLeft + s->x0), xr = (int16_t)(kLeft + s->x1);
+      const int16_t yt = (int16_t)(kTop + s->y), yb = (int16_t)(kTop + s->y + 1);
+      v[0] = (TileVert){s->u0, s->v0, xl, yt, 0};
+      v[1] = (TileVert){s->u0, s->v0, xl, yb, 0};
+      v[2] = (TileVert){s->u1, s->v1, xr, yt, 0};
+      v[3] = (TileVert){s->u1, s->v1, xr, yb, 0};
+      sceGuDrawArray(GU_TRIANGLE_STRIP, kVtTile, 4, NULL, v);
+    }
+  }
+  uint32_t t1 = Now();
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  *build_us = t1 - t0;
+  *total_us = Now() - t0;
+}
+
+/* The GE image (draw buffer 0, 5650, stride 512, read through the uncached mirror) against the CPU image path. */
+static uint32_t B7Verify(void) {
+  const uint16_t *ge = (const uint16_t *)g_vram_u;
+  uint32_t bad = 0;
+  for (int y = 0; y < kGameHeight; y++)
+    for (int x = 0; x < kGameWidth; x++)
+      if (ge[(kTop + y) * 512 + kLeft + x] != (uint16_t)B7565(g_m7img[y * 256 + x]))
+        bad++;
+  return bad;
+}
+
+static void B7Run(const char *tag, int sc, int segw, float uvh) {
+  const bool strips = segw > 0;
+  uint32_t prep = 0, sb = 0, st = 0, mt = 0;
+  if (strips) {
+    uint32_t t = Now();
+    bool ok = B7Prepare(g_b7_m, segw, uvh);
+    prep = Now() - t;
+    if (!ok) {
+      PspLog("b7%s: %d deg %d%% seg=%d unfit (a segment does not fit one 512 window / leaves the plane)", tag, kB7Deg[sc],
+             kB7Pct[sc], segw);
+      return;
+    }
+  }
+  for (int i = 0; i <= kB7Iters; i++) {
+    uint32_t b, t;
+    B7Frame(strips, &b, &t);
+    if (i == 0)
+      continue;  /* first frame is cold */
+    sb += b;
+    st += t;
+    if (t > mt)
+      mt = t;
+  }
+  PspLog("b7%s: %d deg %d%% %s seg=%d uvh=%s segs=%d prep=%u build=%u total=%u max=%u us bad=%u", tag, kB7Deg[sc], kB7Pct[sc],
+         strips ? "strips" : "image ", segw, uvh > 0.25f ? "centre" : "corner", strips ? g_b7_nseg : 1, (unsigned)prep,
+         (unsigned)(sb / kB7Iters), (unsigned)(st / kB7Iters), (unsigned)mt, (unsigned)B7Verify());
+}
+
+static void B7Scenario(const char *tag, int sc) {
+  static const int kSeg[3] = {256, 64, 32};
+  LineSnap ls;
+  memset(&ls, 0, sizeof(ls));
+  memcpy(g_b7_m, kB7Mat[sc], 4 * sizeof(int16_t));
+  g_b7_m[4] = g_b7_m[5] = 512;  /* centre; scroll 384/392 puts the screen centre (128, 120) on plane (512, 512) */
+  g_b7_m[6] = 384;
+  g_b7_m[7] = 392;
+  memcpy(ls.m7m, g_b7_m, sizeof(ls.m7m));
+  ls.m7fl = 1;
+  ls.mossize = 1;
+  memset(g_m7img, 0, sizeof(g_m7img));
+  uint32_t t0 = Now();
+  for (int r = 0; r < kGameHeight; r++)
+    M7RenderRow(&ls, r + 1, g_m7img + r * 256);
+  uint32_t cpu = Now() - t0;
+  t0 = Now();
+  sceKernelDcacheWritebackRange(g_m7img, sizeof(g_m7img));
+  PspLog("b7%s: %d deg %d%% CPU image %u us, writeback %u us", tag, kB7Deg[sc], kB7Pct[sc], (unsigned)cpu,
+         (unsigned)(Now() - t0));
+  B7Run(tag, sc, 0, 0.5f);
+  for (int k = 0; k < 3; k++) {
+    B7Run(tag, sc, kSeg[k], 0.5f);
+    B7Run(tag, sc, kSeg[k], 0.0f);
+  }
+}
+
+static void Bench5r(void) {
+  for (int i = 0; i < 0x8000; i++)
+    g_vram[i] = (uint16_t)(B7Rand() >> 8);  /* random tile map and random pixels: any wrong texel shows */
+  for (int i = 0; i < 256; i++)
+    g_b7_clut[i] = B7Color((unsigned)i);
+  sceKernelDcacheWritebackRange(g_b7_clut, sizeof(g_b7_clut));
+  uint32_t t0 = Now();
+  B7BuildPlane();
+  uint32_t build = Now() - t0;
+  t0 = Now();
+  sceKernelDcacheWritebackRange(g_b7_plane, sizeof(g_b7_plane));
+  PspLog("b7: plane build %u us (16384 cells), writeback of %u KB %u us, uv x=%.1f y=%.1f", (unsigned)build,
+         (unsigned)(sizeof(g_b7_plane) >> 10), (unsigned)(Now() - t0), (double)g_uvh[0], (double)g_uvh[1]);
+  for (int sc = 0; sc < kB7Scen; sc++)
+    B7Scenario("", sc);
+  B7Scenario("-again", 0);  /* A/B/A: the first scenario once more */
+  memset(g_vram, 0, sizeof(g_vram));  /* back to the state before the first frame (the first snapshot copies every page) */
+  memset(g_m7img, 0, sizeof(g_m7img));
+  sceGuStart(GU_DIRECT, g_gu_list);  /* leave the draw buffer black */
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuClearColor(0xff000000);
+  sceGuClear(GU_COLOR_BUFFER_BIT);
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+}
+#endif
+
 static bool PspRenderer_Initialize(void) {
   uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
   g_atlas2 = (uint8_t *)(vram + kVramAtlas2);
@@ -5049,6 +5307,9 @@ static bool PspRenderer_Initialize(void) {
     UvSelfTest();
 #if SM_PSP_BENCH_ON
     Bench5ib();
+#endif
+#if SM_PSP_BENCH_M7_ON
+    Bench5r();
 #endif
   }
   g_ppu_line_hook = PspRenderer_CaptureLine;

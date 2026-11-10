@@ -37,6 +37,8 @@ PSP_STATS ?= 1
 PSP_CAP_WIN ?= 1
 # PSP_BENCH=1: Gate 5i-b boot-time micro-benchmark of layer-image strips, about 1 s at boot (log builds only). Done: off by default.
 PSP_BENCH ?= 0
+# PSP_BENCH_M7=1: Gate 5r-a boot-time benchmark of GE-native mode 7 rotation (row strips from a 1024x1024 plane), about 3 s at boot (log builds only). Off by default.
+PSP_BENCH_M7 ?= 0
 # PSP_LAYER_IMG: BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run).
 # 0: tile quads. 1: Gate 5l (32x32 / 64x32 maps). 2: also 32x64 maps (Gate 5m). 3: also skip the image scan when no VRAM page of the map or tiles was written (Gate 5m).
 PSP_LAYER_IMG ?= 3
@@ -79,6 +81,7 @@ CFLAGS += -DSM_PSP_CAP_REUSE=$(PSP_CAP_REUSE)
 CFLAGS += -DSM_PSP_VTX16=$(PSP_VTX16)
 CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
+CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
 
@@ -127,6 +130,14 @@ $(BUILD_STAMP):
 	@rm -f build/flags_*.stamp
 	@touch $@
 $(filter-out build/embedded_rom.o,$(OBJS)): $(BUILD_STAMP)
+
+# Its own stamp (not flags_*, which the main stamp rule deletes): toggling PSP_BENCH_M7 rebuilds the renderer.
+BENCH_M7_STAMP := build/bench_m7_$(PSP_BENCH_M7).stamp
+$(BENCH_M7_STAMP):
+	@mkdir -p build
+	@rm -f build/bench_m7_*.stamp
+	@touch $@
+src/psp/psp_renderer.o: $(BENCH_M7_STAMP)
 
 include $(PSPSDK)/lib/build.mak
 
