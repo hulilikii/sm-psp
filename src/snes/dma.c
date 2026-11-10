@@ -258,6 +258,34 @@ void dma_initHdma(Dma* dma) {
   if(hdmaHappened) dma->hdmaTimer += 16; // 18 cycles overhead, -2 for this cycle
 }
 
+/* Runs every channel enabled by dma_startDma(..., false) to completion, in the order, with the address, size and
+ * offset-index updates of dma_doDma(). $420B DMA is synchronous (nothing else runs while the cycle timers count
+ * down), so only their end state matters: the timers and dmaBusy end at 0 / false, as when dma_cycle() is looped. */
+void dma_runAll(Dma* dma) {
+  for(int i = 0; i < 8; i++) {
+    DmaChannel* ch = &dma->channel[i];
+    while(ch->dmaActive) {
+      if(!g_fail && !ch->fromB && (ch->aBank & 0x80) && !(ch->aAdr & 0x8000)) {
+        printf("Warning! DMA from addr 0x%x\n", ch->aBank << 16 | ch->aAdr);
+        g_fail = true;
+      }
+      dma_transferByte(dma, ch->aAdr, ch->aBank, ch->bAdr + bAdrOffsets[ch->mode][ch->offIndex++], ch->fromB);
+      ch->offIndex &= 3;
+      if(!ch->fixed) {
+        ch->aAdr += ch->decrement ? -1 : 1;
+      }
+      ch->size--;
+      if(ch->size == 0) {
+        ch->offIndex = 0;
+        ch->dmaActive = false;
+      }
+    }
+  }
+  dma->hdmaTimer = 0;
+  dma->dmaTimer = 0;
+  dma->dmaBusy = false;
+}
+
 void dma_doHdma(Dma* dma) {
   dma->hdmaTimer = 0;
   bool hdmaHappened = false;

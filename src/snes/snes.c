@@ -373,7 +373,7 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
           g_dma_bytes += snes->dma->channel[i].size ? snes->dma->channel[i].size : 0x10000;
 #endif
       dma_startDma(snes->dma, val, false);
-      while (dma_cycle(snes->dma)) {}
+      dma_runAll(snes->dma);
 #if SM_PSP_LOG
       g_dma_us += sceKernelGetSystemTimeLow() - t_dma;
       g_dma_n++;

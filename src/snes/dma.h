@@ -52,6 +52,7 @@ void dma_doDma(Dma* dma);
 void dma_initHdma(Dma* dma);
 void dma_doHdma(Dma* dma);
 bool dma_cycle(Dma* dma);
+void dma_runAll(Dma* dma); // $420B: run all enabled channels to completion
 void dma_startDma(Dma* dma, uint8_t val, bool hdma);
 void dma_saveload(Dma *dma, SaveLoadFunc *func, void *ctx);
 
