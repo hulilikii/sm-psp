@@ -102,6 +102,7 @@ CoroutineRet InitAndLoadGameData_Async(void) {  // 0x828000
     LoadInitialPalette();
     Samus_Initialize();
     LoadFromLoadStation();
+    Samus_ResetRunButtonMode();
   }
   COROUTINE_AWAIT(1, StartGameplay_Async());
   InitializeHud();

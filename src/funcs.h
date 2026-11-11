@@ -1497,6 +1497,7 @@ uint8 Samus_StandOrUnmorphTrans(void);
 uint8 Samus_IsRunButtonActive(void);
 uint8 Samus_IsXrayButtonActive(void);
 void Samus_UpdateRunButtonMode(void);
+void Samus_ResetRunButtonMode(void);
 uint8 SomeMotherBrainScripts_0(void);
 uint8 SomeMotherBrainScripts_1(void);
 uint8 SomeMotherBrainScripts_2(void);

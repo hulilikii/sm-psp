@@ -50,6 +50,12 @@ static void Samus_SetRunButtonMode(uint8 mode) {
   }
 }
 
+void Samus_ResetRunButtonMode(void) {
+  Samus_SetRunButtonMode(kRunButtonMode_Off);
+  run_button_mode_latched =
+      (button_config_run_b & joypad1_lastkeys) != 0;
+}
+
 void Samus_UpdateRunButtonMode(void) {
   if ((demo_enable & 0x8000) != 0) {
     Samus_SetRunButtonMode(kRunButtonMode_Off);
