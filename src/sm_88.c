@@ -128,10 +128,16 @@ uint16 LayerBlendFunc_26(uint16 j) {  // 0x88810D
   return j;
 }
 
+static bool IsCrystalFlashActive(void) {
+  return (power_bomb_explosion_status & 0x8000) != 0
+      && power_bomb_flag == 0;
+}
+
 uint16 LayerBlendFunc_28(uint16 j) {  // 0x888112
   next_gameplay_CGWSEL = 0;
   next_gameplay_CGADSUB = -77;
-  if ((fx_layer_blending_config_c & 0x8000) == 0) {
+  if ((fx_layer_blending_config_c & 0x8000) == 0
+      && !IsCrystalFlashActive()) {
     reg_COLDATA[0] = 37;
     reg_COLDATA[1] = 64;
     reg_COLDATA[2] = 0x80;
@@ -142,7 +148,8 @@ uint16 LayerBlendFunc_28(uint16 j) {  // 0x888112
 uint16 LayerBlendFunc_2A(uint16 j) {  // 0x88812A
   next_gameplay_CGWSEL = 0;
   next_gameplay_CGADSUB = -77;
-  if ((fx_layer_blending_config_c & 0x8000) == 0) {
+  if ((fx_layer_blending_config_c & 0x8000) == 0
+      && !IsCrystalFlashActive()) {
     reg_COLDATA[0] = 38;
     reg_COLDATA[1] = 66;
     reg_COLDATA[2] = 0x80;
@@ -1790,9 +1797,11 @@ void HdmaobjPreInstr_FirefleaBG3XScroll(uint16 k) {  // 0x88B0BC
     }
     v2 = (uint16)(kFirefleaDarknessShades[fireflea_darkness_level >> 1]
                   + kFirefleaFlashingShades[fireflea_flashing_index]) >> 8;
-    reg_COLDATA[1] = v2 | 0x80;
-    reg_COLDATA[2] = v2 | 0x40;
-    reg_COLDATA[0] = v2 | 0x20;
+    if (!IsCrystalFlashActive()) {
+      reg_COLDATA[1] = v2 | 0x80;
+      reg_COLDATA[2] = v2 | 0x40;
+      reg_COLDATA[0] = v2 | 0x20;
+    }
   }
 }
 
