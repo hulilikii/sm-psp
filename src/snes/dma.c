@@ -275,7 +275,7 @@ static bool dma_fastVram(Dma* dma, DmaChannel* ch) {
   Ppu* ppu = snes->ppu;
   uint32_t n = ch->size ? ch->size : 0x10000;
   if(ch->fromB || ch->bAdr != 0x18 || ch->mode != 1 || ch->fixed || ch->decrement || ch->offIndex != 0 ||
-     (n & 1) || !ppu->vramIncrementOnHigh || ppu->vramRemapMode != 0 || (uint32_t)ch->aAdr  n > 0x10000)
+     (n & 1) || !ppu->vramIncrementOnHigh || ppu->vramRemapMode != 0 || (uint32_t)ch->aAdr + n > 0x10000)
     return false;
   uint8_t bank = ch->aBank;
   const uint8_t* src;
