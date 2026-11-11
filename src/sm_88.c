@@ -656,7 +656,7 @@ uint8 RaiseOrLowerFx(void) {  // 0x88868C
 }
 
 void HdmaobjPreInstr_XrayFunc0_NoBeam(uint16 k) {  // 0x888732
-  if (Samus_IsRunButtonActive()) {
+  if (Samus_IsXrayButtonActive()) {
     CalculateXrayHdmaTable();
     ++demo_input_pre_instr;
   } else {
@@ -665,7 +665,7 @@ void HdmaobjPreInstr_XrayFunc0_NoBeam(uint16 k) {  // 0x888732
 }
 
 void HdmaobjPreInstr_XrayFunc1_BeamWidening(uint16 k) {  // 0x888754
-  if (Samus_IsRunButtonActive()) {
+  if (Samus_IsXrayButtonActive()) {
     AddToHiLo(&demo_input_instr_timer, &demo_input_instr_ptr, 2048);
     AddToHiLo(&demo_input, &demo_input_new, __PAIR32__(demo_input_instr_timer, demo_input_instr_ptr));
     if (!sign16(demo_input - 11)) {
@@ -680,7 +680,7 @@ void HdmaobjPreInstr_XrayFunc1_BeamWidening(uint16 k) {  // 0x888754
 }
 
 void HdmaobjPreInstr_XrayFunc2_FullBeam(uint16 k) {  // 0x8887AB
-  if (Samus_IsRunButtonActive()) {
+  if (Samus_IsXrayButtonActive()) {
     HandleMovingXrayUpDown();
     CalculateXrayHdmaTable();
   } else {
@@ -856,7 +856,7 @@ void HdmaobjPreInstr_XrayFunc5_DeactivateBeam(uint16 k) {  // 0x888A08
     }
     for (int i = 510/2; i >= 0; i--)
       hdma_table_1[i] = 0xff;
-    if (samus_auto_cancel_hud_item_index) {
+    if ((demo_enable & 0x8000) != 0 && samus_auto_cancel_hud_item_index) {
       hud_item_index = 0;
       samus_auto_cancel_hud_item_index = 0;
     }

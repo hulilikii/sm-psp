@@ -4048,6 +4048,7 @@ void HandleSwitchingHudSelection(void) {
   uint16 v0;
   uint16 r22 = 0;
   uint16 r18 = hud_item_index;
+  uint16 item_count = (demo_enable & 0x8000) != 0 ? 6 : 5;
   if ((button_config_itemcancel_y & joypad1_newkeys) != 0) {
     samus_auto_cancel_hud_item_index = 0;
 LABEL_5:
@@ -4058,14 +4059,14 @@ LABEL_5:
   if ((button_config_itemswitch & joypad1_newkeys) == 0)
     goto LABEL_13;
   v0 = hud_item_index + 1;
-  if (!sign16(hud_item_index - 5))
+  if (hud_item_index >= item_count - 1)
     goto LABEL_5;
 LABEL_6:
   hud_item_index = v0;
   while (kRunSwitchedToHudHandler[v0]() & 1) {
     v0 = hud_item_index + 1;
     hud_item_index = v0;
-    if (!sign16(v0 - 6)) {
+    if (v0 >= item_count) {
       v0 = 0;
       hud_item_index = 0;
     }
@@ -5284,6 +5285,15 @@ void HudSelectionHandler_Normal(void) {  // 0x90DD3D
   HudSelectionHandler_TurningAround,
   };
   uint16 v0;
+  
+  if ((demo_enable & 0x8000) == 0 &&
+      !time_is_frozen_flag &&
+      Samus_IsXrayButtonActive()) {
+    XrayRunHandler();
+    if (time_is_frozen_flag)
+      return;
+  }
+
   if (grapple_beam_function == FUNC16(GrappleBeamFunc_Inactive)) {
     if (time_is_frozen_flag)
       v0 = 10;
@@ -5332,7 +5342,7 @@ void HudSelectionHandler_JumpEtc(void) {  // 0x90DDB6
 }
 
 void HudSelectionHandler_Xray(void) {  // 0x90DDC8
-  if (Samus_IsRunButtonActive())
+  if (Samus_IsXrayButtonActive())
     XrayRunHandler();
   else
     HudSelectionHandler_NothingOrPowerBombs();

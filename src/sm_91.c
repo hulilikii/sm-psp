@@ -30,28 +30,56 @@
 #define kSamusTurnPose_Falling ((uint8*)RomFixedPtr(0x91f9e0))
 #define kSamusTurnPose_Moonwalk ((uint8*)RomFixedPtr(0x91f9ea))
 
-static uint8 run_button_toggle_enabled;
-static uint8 run_button_toggle_latched;
+enum {
+  kRunButtonMode_Off,
+  kRunButtonMode_Run,
+  kRunButtonMode_Xray,
+};
 
-static void Samus_UpdateRunButtonToggle(void) {
+static uint8 run_button_mode;
+static uint8 run_button_mode_latched;
+
+static void Samus_UpdateRunButtonMode(void) {
   if ((demo_enable & 0x8000) != 0) {
-    run_button_toggle_latched = 0;
+    run_button_mode = kRunButtonMode_Off;
+    run_button_mode_latched = 0;
+    return;
+  }
+
+  if (game_state != 8) {
+    run_button_mode = kRunButtonMode_Off;
+    run_button_mode_latched = 0;
     return;
   }
 
   if ((button_config_run_b & joypad1_lastkeys) == 0) {
-    run_button_toggle_latched = 0;
-  } else if (!run_button_toggle_latched &&
+    run_button_mode_latched = 0;
+  } else if (!run_button_mode_latched &&
              (button_config_run_b & joypad1_newkeys) != 0) {
-    run_button_toggle_enabled ^= 1;
-    run_button_toggle_latched = 1;
+    if (run_button_mode == kRunButtonMode_Off) {
+      run_button_mode = kRunButtonMode_Run;
+    } else if (run_button_mode == kRunButtonMode_Run) {
+      if (SwitchToHudHandler_Xray() & 1)
+        run_button_mode = kRunButtonMode_Off;
+      else
+        run_button_mode = kRunButtonMode_Xray;
+    } else {
+      run_button_mode = kRunButtonMode_Off;
+    }
+    run_button_mode_latched = 1;
   }
 }
 
 uint8 Samus_IsRunButtonActive(void) {
   if ((demo_enable & 0x8000) != 0)
     return (button_config_run_b & joypad1_lastkeys) != 0;
-  return run_button_toggle_enabled;
+  return run_button_mode == kRunButtonMode_Run;
+}
+
+uint8 Samus_IsXrayButtonActive(void) {
+  if ((demo_enable & 0x8000) != 0)
+    return (button_config_run_b & joypad1_lastkeys) != 0;
+  return run_button_mode == kRunButtonMode_Xray;
 }
 
 static void Xray_Func12(uint16 dst_r22, const uint8 *jp);
@@ -98,7 +126,7 @@ static Func_V *const kSamusInputHandlers[28] = {
   Samus_Input_1B_ShinesparkEtc,
 };
 void Samus_InputHandler(void) {  // 0x918000
-  Samus_UpdateRunButtonToggle();
+  Samus_UpdateRunButtonMode();
   kSamusInputHandlers[samus_movement_type]();
 }
 
@@ -259,7 +287,7 @@ Pair_R18_R20 TranslateCustomControllerBindingsToDefault(void) {  // 0x9181F4
     r18 |= kButton_X;
   if ((button_config_jump_a & v0) != 0)
     r18 |= kButton_A;
-  if ((button_config_run_b & v0) != 0)
+  if ((button_config_run_b & v0) != 0 && Samus_IsRunButtonActive())
     r18 |= kButton_B;
   if ((button_config_itemcancel_y & v0) != 0)
     r18 |= kButton_Y;
@@ -315,11 +343,15 @@ LABEL_2:
 }
 
 void EnableDemoInput(void) {  // 0x91834E
+  run_button_mode = kRunButtonMode_Off;
+  run_button_mode_latched = 0;
   samus_input_handler = FUNC16(Samus_InputHandler_E91D);
   demo_enable |= 0x8000;
 }
 
 void DisableDemoInput(void) {  // 0x91835F
+  run_button_mode = kRunButtonMode_Off;
+  run_button_mode_latched = 0;
   samus_input_handler = FUNC16(Samus_InputHandler_E913);
   demo_enable &= ~0x8000;
 }
@@ -872,7 +904,7 @@ void CalculateXrayHdmaTableInner(uint16 k, uint16 j, uint16 r18, uint16 r20, boo
 }
 
 void XrayRunHandler(void) {  // 0x91CAD6
-  if (!time_is_frozen_flag && Samus_IsRunButtonActive()) {
+  if (!time_is_frozen_flag && Samus_IsXrayButtonActive()) {
     if (Xray_Initialize() & 1)
       SpawnHdmaObject(0x91, &unk_91CAF2);
   }
