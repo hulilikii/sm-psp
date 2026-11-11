@@ -1089,7 +1089,10 @@ void Roach_Func_33(uint16 k) {  // 0xA3A648
 void Mochtroid_Init(void) {  // 0xA3A77D
   Enemy_Mochtroid *E = Get_Mochtroid(cur_enemy_index);
   E->base.layer = 2;
-  Mochtroid_Func_4(cur_enemy_index, addr_kMochtroid_Ilist_A745);
+  E->mochtr_var_01 = addr_kMochtroid_Ilist_A745;
+  E->base.current_instruction = addr_kMochtroid_Ilist_A745;
+  E->base.instruction_timer = 1;
+  E->base.timer = 0;
   E->mochtr_var_F = 0;
 }
 static Func_V *const off_A3A7A4[3] = { Mochtroid_Func_1, Mochtroid_Func_3, Mochtroid_Func_2 };
