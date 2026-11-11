@@ -33,6 +33,10 @@
 #define SM_PSP_GE_STRIPS 0
 #endif
 
+#ifndef SM_PSP_MOS_GE
+#define SM_PSP_MOS_GE 1  /* Gate 5s: 1 = mosaic source image rendered by the GE, 0 = previous CPU-built image (MosBuild) */
+#endif
+
 #define PSP_VBLANK_GATE 1  /* wait for vblank only when running ahead of the panel */
 
 enum {
@@ -337,10 +341,15 @@ static bool g_obj_dry;           /* EmitQuad8 only counts (ObjCountQuads) */
 static int g_obj_dry_n;
 /* Gate 4q: mosaic on BG1-3 (mode 1, main screen). The layer is sampled on the CPU at the block origins into a
  * 128x128 8888 image per tile priority; the GE stretches it (nearest) over each run. */
-enum { kMosDim = 128, kMosVerify = 8 };
+enum { kMosDim = 128, kMosVerify = 16, kMosImgBytes = kMosDim * kMosDim * 4 };
 typedef struct MosLayer { bool on, any[2]; int size, start; TileVert *v; } MosLayer;
 static MosLayer g_mos[kLayers];
+#if SM_PSP_MOS_GE
+CASSERT(kLayers * kMosImgBytes <= kSubBytes);  /* one source image per layer fits the subscreen target's VRAM */
+static const uint8_t kMosTag[2] = {0x40, 0xc0};  /* stencil (= alpha) tag of tile priority 0 / 1 in a source image */
+#else
 static uint32_t g_mosd[kLayers][2][kMosDim * kMosDim] __attribute__((aligned(64)));  /* 384 KB */
+#endif
 static bool g_mos_ok = true;  /* cleared if the first verified mosaic frames differ from software */
 static bool g_mos_frame;      /* this frame has a mosaic layer on the GE */
 static int g_mos_size;
@@ -2134,6 +2143,7 @@ static int SubAddRows(int rlo, int rhi, TileVert *out) {
   return nv;
 }
 
+#if !SM_PSP_MOS_GE
 /* Gate 4q: samples layer l at the mosaic block origins into g_mosd[l][tile priority], as ppu.c does: column
 + * x - x % size, line y - (y - start) % size (1-based lines), then the scroll of the layer. */
 static void MosBuild(int l, const BgSnap *s, int size, int start) {
@@ -2177,6 +2187,113 @@ static void MosBuild(int l, const BgSnap *s, int size, int start) {
   sceKernelDcacheWritebackRange(img0, (unsigned)nrows * kMosDim * 4);
   sceKernelDcacheWritebackRange(img1, (unsigned)nrows * kMosDim * 4);
 }
+#endif
+
+#if SM_PSP_MOS_GE
+/* Gate 5s: GE-native mosaic. ppu.c shows, for screen column x and line y, the layer pixel at BG column
+ * hscroll + x - x % size, BG line start + k * size + vscroll (k = (y - start) / size). Those samples form a small
+ * image S[i][j] (ncols x nrows, 8888, 128 texels wide). The GE renders S: every non-empty tile is one sprite covering
+ * the S cells whose sample point lies in the tile, with a texture step of `size` texels per S cell, so nearest
+ * sampling at the cell centre lands exactly on the sampled texel. The stencil value written with each pixel (the
+ * alpha of the 8888 target) tags the tile priority; DrawMosPass stretches S with an alpha test on that tag.
+ * S lives in the subscreen target's VRAM (kVramSub): frames that use that target are not drawn this way. */
+typedef struct MosSrc {
+  int ncols, nrows, nq;
+  TileList lst;
+  int cnt[2][8];  /* quads per tile priority and palette */
+  TileVert *sv[2][8];
+  ColorVert *clr;
+} MosSrc;
+static MosSrc g_msrc[kLayers];
+
+/* S cells [ja,jb) x [ia,ib) whose sample point lies inside tile e (e->x: screen x of the tile, e->y: screen row
+ * of its top, so line e->y + 1 is its first row). False if there is none. */
+static bool MosSpan(const MosLayer *m, const MosSrc *s, const TileEnt *e, int *ja, int *jb, int *ia, int *ib) {
+  const int size = m->size, x0 = e->x, y0 = e->y + 1 - m->start;
+  int a = x0 > 0 ? (x0 + size - 1) / size : 0;
+  int b = x0 + 8 > 0 ? (x0 + 8 + size - 1) / size : 0;
+  int c = y0 > 0 ? (y0 + size - 1) / size : 0;
+  int d = y0 + 8 > 0 ? (y0 + 8 + size - 1) / size : 0;
+  if (b > s->ncols)
+    b = s->ncols;
+  if (d > s->nrows)
+    d = s->nrows;
+  if (a >= b || c >= d)
+    return false;
+  *ja = a;
+  *jb = b;
+  *ia = c;
+  *ib = d;
+  return true;
+}
+
+/* One sprite (two vertices) of tile e over S cells [ja,jb) x [ia,ib). u/v are placed so that the sample of cell
+ * (j, i) is the centre of texel (j * size - e->x, start + i * size - e->y - 1) of the tile (mirrored when flipped);
+ * g_uvh says where in a pixel the GE samples. */
+static void MosQuad(TileVert *w, int l, const TileEnt *e, int size, int start, int ja, int jb, int ia, int ib) {
+  const int cols = l < 2 ? 32 : 64;
+  const int u0 = (e->pt & (cols - 1)) * 8, v0 = (e->pt >> (cols == 32 ? 5 : 6)) * 8;
+  const bool hf = (e->fl & 2) != 0, vf = (e->fl & 4) != 0;
+  const int tc = ja * size - e->x, tr = start + ia * size - (e->y + 1);
+  const float su = hf ? (float)-size : (float)size, sv = vf ? (float)-size : (float)size;
+  const float uc = (float)(u0 + (hf ? 7 - tc : tc)) + 0.5f, vc = (float)(v0 + (vf ? 7 - tr : tr)) + 0.5f;
+  const float ul = uc - g_uvh[0] * su, vt = vc - g_uvh[1] * sv;
+  w[0] = (TileVert){ul, vt, (int16_t)ja, (int16_t)ia, 0};
+  w[1] = (TileVert){ul + (float)(jb - ja) * su, vt + (float)(ib - ia) * sv, (int16_t)jb, (int16_t)ib, 0};
+}
+
+/* Pass A (before the list is opened): tile list of the lines the mosaic samples, decoded into the atlas, and the
+ * quad counts per priority and palette. False if the tile pool is full. */
+static bool MosPrepGe(int l, const LineSnap *first) {
+  MosLayer *m = &g_mos[l];
+  MosSrc *s = &g_msrc[l];
+  s->ncols = (kGameWidth + m->size - 1) / m->size;
+  s->nrows = (kGameHeight - m->start) / m->size + 1;
+  s->nq = 0;
+  memset(s->cnt, 0, sizeof(s->cnt));
+  m->any[0] = m->any[1] = false;
+  if (l < 2)
+    BuildClut4(kClutBright);
+  else
+    BuildClut2(kClutBright);
+  if (!BuildTileList(l, first, -1, m->start + (s->nrows - 1) * m->size, &s->lst))
+    return false;
+  for (int k = 0; k < s->lst.n; k++) {
+    const TileEnt *e = &g_ents[s->lst.first + k];
+    int ja, jb, ia, ib;
+    if (!MosSpan(m, s, e, &ja, &jb, &ia, &ib))
+      continue;
+    s->cnt[e->fl & 1][e->pal]++;
+    s->nq++;
+    m->any[e->fl & 1] = true;
+  }
+  return true;
+}
+
+/* Pass B (list open): vertices of the source sprites and the clear rectangle of S. */
+static void MosBuildSrc(int l) {
+  const MosLayer *m = &g_mos[l];
+  MosSrc *s = &g_msrc[l];
+  TileVert *w[2][8];
+  for (int pr = 0; pr < 2; pr++)
+    for (int p = 0; p < 8; p++) {
+      s->sv[pr][p] = s->cnt[pr][p] ? sceGuGetMemory(s->cnt[pr][p] * 2 * sizeof(TileVert)) : NULL;
+      w[pr][p] = s->sv[pr][p];
+    }
+  for (int k = 0; k < s->lst.n; k++) {
+    const TileEnt *e = &g_ents[s->lst.first + k];
+    int ja, jb, ia, ib;
+    if (!MosSpan(m, s, e, &ja, &jb, &ia, &ib))
+      continue;
+    TileVert **dst = &w[e->fl & 1][e->pal];
+    MosQuad(*dst, l, e, m->size, m->start, ja, jb, ia, ib);
+    *dst += 2;
+  }
+  s->clr = sceGuGetMemory(2 * sizeof(ColorVert));
+  s->clr[0] = (ColorVert){0, 0, 0, 0};
+  s->clr[1] = (ColorVert){0, (int16_t)s->ncols, (int16_t)s->nrows, 0};
+}
+#endif
 
 /* 0: layer l has no mosaic this frame, 1: image built (g_mos[l].on), -1: a setup the GE path cannot draw
  * (geometry or mosaic changing inside the frame, mosaic on part of the rows, or the audit failed). */
@@ -2204,7 +2321,12 @@ static int MosPrepare(int l) {
     return -1;
   m->size = first->mossize;
   m->start = first->mosstart;
+#if SM_PSP_MOS_GE
+  if (!MosPrepGe(l, first))
+    return -1;
+#else
   MosBuild(l, &first->bg[l], m->size, m->start);
+#endif
   m->on = true;
   g_mos_frame = true;
   g_mos_size = m->size;
@@ -3132,14 +3254,63 @@ static void BindBgHalf(int p) {
   sceGuTexImage(0, 512, 512, 512, g_atlas2);
 }
 
+#if SM_PSP_MOS_GE
+/* Gate 5s: renders the source image S of every mosaic layer into its slot of the subscreen target's VRAM. Depth is
+ * not written (mask), the stencil value of each pixel (alpha of the 8888 target) is the priority tag kMosTag. */
+static void DrawMosSrc(void) {
+  bool any = false;
+  for (int l = 0; l < kLayers; l++)
+    any |= g_mos[l].on;
+  if (!any)
+    return;
+  sceGuEnable(GU_DEPTH_TEST);
+  sceGuDepthMask(GU_TRUE);
+  sceGuDepthFunc(GU_ALWAYS);
+  sceGuEnable(GU_STENCIL_TEST);
+  for (int l = 0; l < kLayers; l++) {
+    const MosSrc *s = &g_msrc[l];
+    if (!g_mos[l].on)
+      continue;
+    sceGuDrawBufferList(GU_PSM_8888, (void *)(uintptr_t)(kVramSub + (uint32_t)l * kMosImgBytes), kMosDim);
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
+    sceGuStencilFunc(GU_ALWAYS, 0, 0xff);
+    sceGuStencilOp(GU_REPLACE, GU_REPLACE, GU_REPLACE);
+    GeDraw(kVtColor, 2, s->clr);  /* transparent: tag 0 */
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuEnable(GU_ALPHA_TEST);
+    sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
+    for (int pr = 0; pr < 2; pr++) {
+      sceGuStencilFunc(GU_ALWAYS, kMosTag[pr], 0xff);
+      for (int p = 0; p < 8; p++)
+        if (s->cnt[pr][p]) {
+          BindBg(l, kClutBright, p);
+          GeDraw(kVtTile, s->cnt[pr][p] * 2, s->sv[pr][p]);
+        }
+    }
+  }
+  sceGuDisable(GU_STENCIL_TEST);  /* the 5650 main target has no stencil bits */
+  sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+  sceGuDepthMask(GU_FALSE);
+  sceGuDepthFunc(GU_GEQUAL);
+}
+#endif
+
 /* Mosaic layer: the stretched image of this priority, one nearest-sampled quad per run and window span. */
 static void DrawMosPass(int l, int pr) {
   const MosLayer *m = &g_mos[l];
   if (!m->any[pr])
     return;
   sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+#if SM_PSP_MOS_GE
+  sceGuTexImage(0, kMosDim, kMosDim, kMosDim, g_vram_u + kVramSub + (uint32_t)l * kMosImgBytes);
+  sceGuTexFlush();  /* the image was just rendered by the GE */
+  sceGuTexSync();
+  sceGuAlphaFunc(GU_EQUAL, kMosTag[pr], 0xff);  /* this priority's pixels only */
+#else
   sceGuTexImage(0, kMosDim, kMosDim, kMosDim, g_mosd[l][pr]);
   sceGuTexFlush();
+#endif
   for (int i = 0; i < g_nruns[l]; i++) {
     const BgSnap *wb = &g_lines[g_runs[l][i].first].bg[l];
     int wa[2], we[2];
@@ -3147,6 +3318,9 @@ static void DrawMosPass(int l, int pr) {
     for (int k = 0; k < ns; k++)
       GeDraw(kVtTile, 2, m->v + ((i * 2 + k) * 2 + pr) * 2);
   }
+#if SM_PSP_MOS_GE
+  sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
+#endif
 }
 
 /* Gate 5l: strips of a layer image for one tile priority (the CLUT hides the other priority's pixels). */
@@ -3346,6 +3520,10 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
       continue;
     geom += (uint32_t)g_nruns[l] * 8 * sizeof(TileVert);
     mos_draws += (uint32_t)g_nruns[l] * 4;
+#if SM_PSP_MOS_GE
+    geom += (uint32_t)g_msrc[l].nq * 2 * sizeof(TileVert) + 2 * sizeof(ColorVert);  /* source sprites + clear */
+    mos_draws += 24;  /* source draws: clear + up to 16 priority/palette draws (also counted per pass: an upper bound) */
+#endif
   }
 #if SM_PSP_VTX_POOL
   *vtx = big + kVtxPadBytes;  /* built in the cached pool, not in the list */
@@ -3867,7 +4045,7 @@ static bool DrawGe(void) {
       CountReasons(kReasonMosaic);
       return false;
     }
-    if (winrows && g_mos[l].on) {  /* mosaic together with per-row windows: not drawn */
+    if ((winrows || (SM_PSP_MOS_GE && multisub)) && g_mos[l].on) {  /* mosaic with per-row windows (or, GE source images, the subscreen target): not drawn */
       CountReasons(kReasonMosaic);
       return false;
     }
@@ -4189,6 +4367,11 @@ static bool DrawGe(void) {
       }
     }
   }
+#if SM_PSP_MOS_GE
+  for (int l = 0; l < kLayers; l++)  /* gate 5s: source sprites of the mosaic layers */
+    if (g_mos[l].on)
+      MosBuildSrc(l);
+#endif
   for (int l = 1; l < kLayers; l++)  /* gate 5l: layer image strips */
     if (g_img_on[l])
       ImgBuildStrips(l);
@@ -4396,6 +4579,9 @@ static bool DrawGe(void) {
   sceGuTexScale(1.0f, 1.0f);
   sceGuTexOffset(0.0f, 0.0f);
 
+#if SM_PSP_MOS_GE
+  DrawMosSrc();  /* gate 5s: mosaic source images, rendered by the GE (restores depth state and draw buffer) */
+#endif
   /* Sprites: depth ALWAYS, the markers they leave decide the layering against the BGs below. */
   sceGuDepthFunc(GU_ALWAYS);
   DrawObjSegs(g_objseg, g_nobjseg, g_objbase, obj_bright, false, bmath);

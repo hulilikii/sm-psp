@@ -39,6 +39,8 @@ PSP_CAP_WIN ?= 1
 PSP_BENCH ?= 0
 # PSP_BENCH_M7=1: Gate 5r-a boot-time benchmark of GE-native mode 7 rotation (row strips from a 1024x1024 plane), about 3 s at boot (log builds only). Off by default.
 PSP_BENCH_M7 ?= 0
+# PSP_MOS_GE=1: Gate 5s: the mosaic source image is rendered by the GE (no CPU pixels). 0: previous CPU-built image (MosBuild).
+PSP_MOS_GE ?= 1
 # PSP_LAYER_IMG: BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run).
 # 0: tile quads. 1: Gate 5l (32x32 / 64x32 maps). 2: also 32x64 maps (Gate 5m). 3: also skip the image scan when no VRAM page of the map or tiles was written (Gate 5m).
 PSP_LAYER_IMG ?= 3
@@ -82,6 +84,7 @@ CFLAGS += -DSM_PSP_VTX16=$(PSP_VTX16)
 CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
 CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7)
+CFLAGS += -DSM_PSP_MOS_GE=$(PSP_MOS_GE)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
 
@@ -140,6 +143,14 @@ $(BENCH_M7_STAMP):
 src/psp/psp_renderer.o: $(BENCH_M7_STAMP)
 
 include $(PSPSDK)/lib/build.mak
+
+# Its own stamp (like BENCH_M7_STAMP): toggling PSP_MOS_GE rebuilds the renderer.
+MOS_GE_STAMP := build/mos_ge_$(PSP_MOS_GE).stamp
+$(MOS_GE_STAMP):
+	@mkdir -p build
+	@rm -f build/mos_ge_*.stamp
+	@touch $@
+src/psp/psp_renderer.o: $(MOS_GE_STAMP)
 
 # Rebuild the EBOOT when an asset changes.
 EBOOT.PBP: $(PSP_ASSET_FILES)
