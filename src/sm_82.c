@@ -4856,9 +4856,9 @@ void GameOptionsMenu_7_ControllerSettings(void) {
 
 void OptionsMenuControllerFunc_8(void) {  // 0x82F224
   if ((joypad1_newkeys & (kButton_Start | kButton_A)) != 0) {
-    button_config_shoot_x = 64;
+    button_config_shoot_x = kButton_B;
     button_config_jump_a = 128;
-    button_config_run_b = 0x8000;
+    button_config_run_b = kButton_X;
     button_config_itemcancel_y = 0x4000;
     button_config_itemswitch = 0x2000;
     button_config_aim_up_R = 16;
