@@ -39,15 +39,26 @@ enum {
 static uint8 run_button_mode = kRunButtonMode_Off;
 static uint8 run_button_mode_latched = 0;
 
+static void Samus_SetRunButtonMode(uint8 mode) {
+  if (run_button_mode == mode)
+    return;
+  run_button_mode = mode;
+  if (game_state == 8) {
+    uint16 highlight = mode == kRunButtonMode_Xray && (equipped_items & 0x8000)
+        ? 0x1000 : 0x1400;
+    ToggleHudItemHighlight(5, highlight);
+  }
+}
+
 void Samus_UpdateRunButtonMode(void) {
   if ((demo_enable & 0x8000) != 0) {
-    run_button_mode = kRunButtonMode_Off;
+    Samus_SetRunButtonMode(kRunButtonMode_Off);
     run_button_mode_latched = 0;
     return;
   }
 
   if (game_state != 8) {
-    run_button_mode = kRunButtonMode_Off;
+    Samus_SetRunButtonMode(kRunButtonMode_Off);
     run_button_mode_latched = 0;
     return;
   }
@@ -57,14 +68,12 @@ void Samus_UpdateRunButtonMode(void) {
   } else if (!run_button_mode_latched &&
              (button_config_run_b & joypad1_newkeys) != 0) {
     if (run_button_mode == kRunButtonMode_Off) {
-      run_button_mode = kRunButtonMode_Run;
+      Samus_SetRunButtonMode(kRunButtonMode_Run);
     } else if (run_button_mode == kRunButtonMode_Run) {
-      if (SwitchToHudHandler_Xray() & 1)
-        run_button_mode = kRunButtonMode_Off;
-      else
-        run_button_mode = kRunButtonMode_Xray;
+      SwitchToHudHandler_Xray();
+      Samus_SetRunButtonMode(kRunButtonMode_Xray);
     } else {
-      run_button_mode = kRunButtonMode_Off;
+      Samus_SetRunButtonMode(kRunButtonMode_Off);
     }
     run_button_mode_latched = 1;
   }
@@ -342,14 +351,14 @@ LABEL_2:
 }
 
 void EnableDemoInput(void) {  // 0x91834E
-  run_button_mode = kRunButtonMode_Off;
+  Samus_SetRunButtonMode(kRunButtonMode_Off);
   run_button_mode_latched = 0;
   samus_input_handler = FUNC16(Samus_InputHandler_E91D);
   demo_enable |= 0x8000;
 }
 
 void DisableDemoInput(void) {  // 0x91835F
-  run_button_mode = kRunButtonMode_Off;
+  Samus_SetRunButtonMode(kRunButtonMode_Off);
   run_button_mode_latched = 0;
   samus_input_handler = FUNC16(Samus_InputHandler_E913);
   demo_enable &= ~0x8000;
@@ -903,7 +912,8 @@ void CalculateXrayHdmaTableInner(uint16 k, uint16 j, uint16 r18, uint16 r20, boo
 }
 
 void XrayRunHandler(void) {  // 0x91CAD6
-  if (!time_is_frozen_flag && Samus_IsXrayButtonActive()) {
+  if ((equipped_items & 0x8000) != 0 &&
+      !time_is_frozen_flag && Samus_IsXrayButtonActive()) {
     if (Xray_Initialize() & 1)
       SpawnHdmaObject(0x91, &unk_91CAF2);
   }
