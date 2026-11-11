@@ -36,10 +36,10 @@ enum {
   kRunButtonMode_Xray,
 };
 
-static uint8 run_button_mode;
-static uint8 run_button_mode_latched;
+static uint8 run_button_mode = kRunButtonMode_Off;
+static uint8 run_button_mode_latched = 0;
 
-static void Samus_UpdateRunButtonMode(void) {
+void Samus_UpdateRunButtonMode(void) {
   if ((demo_enable & 0x8000) != 0) {
     run_button_mode = kRunButtonMode_Off;
     run_button_mode_latched = 0;
@@ -126,7 +126,6 @@ static Func_V *const kSamusInputHandlers[28] = {
   Samus_Input_1B_ShinesparkEtc,
 };
 void Samus_InputHandler(void) {  // 0x918000
-  Samus_UpdateRunButtonMode();
   kSamusInputHandlers[samus_movement_type]();
 }
 
@@ -1873,6 +1872,8 @@ void Samus_RestorePowerBombs(uint16 a) {  // 0x91DFF0
 }
 
 void Samus_Initialize(void) {  // 0x91E00D
+  run_button_mode = kRunButtonMode_Off;
+  run_button_mode_latched = 0;
   static const uint16 word_909EAF = 0;
   static const uint16 word_909EAD = 1;
   static const uint16 word_909EB3 = 0;

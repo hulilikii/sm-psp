@@ -5957,6 +5957,7 @@ void Samus_FrameHandlerAlfa_Func11(void) {  // 0x90E695
   samus_special_transgfx_index = 0;
   samus_hurt_switch_index = 0;
   Samus_SetRadius();
+  Samus_UpdateRunButtonMode();
   Samus_CallInputHandler();
   Samus_UpdateSuitPaletteIndex();
   Samus_DetermineAccel_Y();
