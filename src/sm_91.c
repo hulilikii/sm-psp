@@ -38,6 +38,7 @@ enum {
 
 static uint8 run_button_mode = kRunButtonMode_Off;
 static uint8 run_button_mode_latched = 0;
+static uint8 run_button_mode_armed = 0;
 
 static void Samus_SetRunButtonMode(uint8 mode) {
   if (run_button_mode == mode)
@@ -52,20 +53,33 @@ static void Samus_SetRunButtonMode(uint8 mode) {
 
 void Samus_ResetRunButtonMode(void) {
   Samus_SetRunButtonMode(kRunButtonMode_Off);
-  run_button_mode_latched =
-      (button_config_run_b & joypad1_lastkeys) != 0;
+  run_button_mode_latched = 0;
+  run_button_mode_armed = 0;
 }
 
 void Samus_UpdateRunButtonMode(void) {
   if ((demo_enable & 0x8000) != 0) {
     Samus_SetRunButtonMode(kRunButtonMode_Off);
     run_button_mode_latched = 0;
+    run_button_mode_armed = 0;
     return;
   }
 
   if (game_state != 8) {
     Samus_SetRunButtonMode(kRunButtonMode_Off);
     run_button_mode_latched = 0;
+    run_button_mode_armed = 0;
+    return;
+  }
+
+  // Do not accept a startup-held button as the first toggle press.
+  if (!run_button_mode_armed) {
+    if ((button_config_run_b & joypad1_lastkeys) == 0) {
+      run_button_mode_armed = 1;
+      run_button_mode_latched = 0;
+    } else {
+      run_button_mode_latched = 1;
+    }
     return;
   }
 
@@ -359,6 +373,7 @@ LABEL_2:
 void EnableDemoInput(void) {  // 0x91834E
   Samus_SetRunButtonMode(kRunButtonMode_Off);
   run_button_mode_latched = 0;
+  run_button_mode_armed = 0;
   samus_input_handler = FUNC16(Samus_InputHandler_E91D);
   demo_enable |= 0x8000;
 }
@@ -366,6 +381,7 @@ void EnableDemoInput(void) {  // 0x91834E
 void DisableDemoInput(void) {  // 0x91835F
   Samus_SetRunButtonMode(kRunButtonMode_Off);
   run_button_mode_latched = 0;
+  run_button_mode_armed = 0;
   samus_input_handler = FUNC16(Samus_InputHandler_E913);
   demo_enable &= ~0x8000;
 }
@@ -1890,6 +1906,7 @@ void Samus_RestorePowerBombs(uint16 a) {  // 0x91DFF0
 void Samus_Initialize(void) {  // 0x91E00D
   run_button_mode = kRunButtonMode_Off;
   run_button_mode_latched = 0;
+  run_button_mode_armed = 0;
   static const uint16 word_909EAF = 0;
   static const uint16 word_909EAD = 1;
   static const uint16 word_909EB3 = 0;
