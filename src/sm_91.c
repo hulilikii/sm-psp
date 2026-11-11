@@ -90,8 +90,10 @@ void Samus_UpdateRunButtonMode(void) {
     if (run_button_mode == kRunButtonMode_Off) {
       Samus_SetRunButtonMode(kRunButtonMode_Run);
     } else if (run_button_mode == kRunButtonMode_Run) {
-      SwitchToHudHandler_Xray();
-      Samus_SetRunButtonMode(kRunButtonMode_Xray);
+      if (SwitchToHudHandler_Xray() == 0)
+        Samus_SetRunButtonMode(kRunButtonMode_Xray);
+      else
+        Samus_SetRunButtonMode(kRunButtonMode_Off);
     } else {
       Samus_SetRunButtonMode(kRunButtonMode_Off);
     }
