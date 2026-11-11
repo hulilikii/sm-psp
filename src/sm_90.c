@@ -334,7 +334,7 @@ static Func_AnimDelay *const kAnimDelayFuncs[16] = {  // 0x9082DC
 #define kDefaultAnimFramePtr ((unaligned_uint16*)RomFixedPtr(0x91B5D1))
 
 static uint8 Samus_HandleSpeedBoosterAnimDelay(const uint8 *jp) {  // 0x90852C
-  if (!samus_has_momentum_flag || Samus_IsRunButtonActive() || samus_movement_type != 1)
+  if (!samus_has_momentum_flag || !Samus_IsRunButtonActive() || samus_movement_type != 1)
     return jp[0];
   if ((equipped_items & 0x2000) == 0) {
     samus_anim_frame = 0;
@@ -1403,7 +1403,7 @@ LABEL_24:
       goto LABEL_24;
     }
   }
-  if (samus_movement_type != 1 || Samus_IsRunButtonActive())
+  if (samus_movement_type != 1 || !Samus_IsRunButtonActive())
     goto LABEL_24;
   if ((equipped_items & 0x2000) != 0) {
     if (!samus_has_momentum_flag) {
