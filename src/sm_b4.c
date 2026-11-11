@@ -114,5 +114,5 @@ void ClearSpriteObjects(void) {  // 0xB4BD97
   do {
     sprite_instr_list_ptrs[v0 >> 1] = 0;
     v0 -= 2;
-  } while (v0);
+  } while (v0 >= 0);
 }
