@@ -30,6 +30,30 @@
 #define kSamusTurnPose_Falling ((uint8*)RomFixedPtr(0x91f9e0))
 #define kSamusTurnPose_Moonwalk ((uint8*)RomFixedPtr(0x91f9ea))
 
+static uint8 run_button_toggle_enabled;
+static uint8 run_button_toggle_latched;
+
+static void Samus_UpdateRunButtonToggle(void) {
+  if ((demo_enable & 0x8000) != 0) {
+    run_button_toggle_latched = 0;
+    return;
+  }
+
+  if ((button_config_run_b & joypad1_lastkeys) == 0) {
+    run_button_toggle_latched = 0;
+  } else if (!run_button_toggle_latched &&
+             (button_config_run_b & joypad1_newkeys) != 0) {
+    run_button_toggle_enabled ^= 1;
+    run_button_toggle_latched = 1;
+  }
+}
+
+uint8 Samus_IsRunButtonActive(void) {
+  if ((demo_enable & 0x8000) != 0)
+    return (button_config_run_b & joypad1_lastkeys) != 0;
+  return run_button_toggle_enabled;
+}
+
 static void Xray_Func12(uint16 dst_r22, const uint8 *jp);
 static void Xray_Func13(uint16 dst_r22, uint16 j);
 static void Xray_Func14(uint16 dst_r22, const uint8 *jp);
@@ -74,6 +98,7 @@ static Func_V *const kSamusInputHandlers[28] = {
   Samus_Input_1B_ShinesparkEtc,
 };
 void Samus_InputHandler(void) {  // 0x918000
+  Samus_UpdateRunButtonToggle();
   kSamusInputHandlers[samus_movement_type]();
 }
 
@@ -249,7 +274,7 @@ Pair_R18_R20 TranslateCustomControllerBindingsToDefault(void) {  // 0x9181F4
     r20 |= kButton_X;
   if ((button_config_jump_a & v1) != 0)
     r20 |= kButton_A;
-  if ((button_config_run_b & v1) != 0)
+  if (Samus_IsRunButtonActive())
     r20 |= kButton_B;
   if ((button_config_itemcancel_y & v1) != 0)
     r20 |= kButton_Y;
@@ -847,7 +872,7 @@ void CalculateXrayHdmaTableInner(uint16 k, uint16 j, uint16 r18, uint16 r20, boo
 }
 
 void XrayRunHandler(void) {  // 0x91CAD6
-  if (!time_is_frozen_flag && (button_config_run_b & joypad1_lastkeys) != 0) {
+  if (!time_is_frozen_flag && Samus_IsRunButtonActive()) {
     if (Xray_Initialize() & 1)
       SpawnHdmaObject(0x91, &unk_91CAF2);
   }

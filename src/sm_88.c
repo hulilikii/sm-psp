@@ -656,7 +656,7 @@ uint8 RaiseOrLowerFx(void) {  // 0x88868C
 }
 
 void HdmaobjPreInstr_XrayFunc0_NoBeam(uint16 k) {  // 0x888732
-  if ((button_config_run_b & joypad1_lastkeys) != 0) {
+  if (Samus_IsRunButtonActive()) {
     CalculateXrayHdmaTable();
     ++demo_input_pre_instr;
   } else {
@@ -665,7 +665,7 @@ void HdmaobjPreInstr_XrayFunc0_NoBeam(uint16 k) {  // 0x888732
 }
 
 void HdmaobjPreInstr_XrayFunc1_BeamWidening(uint16 k) {  // 0x888754
-  if ((button_config_run_b & joypad1_lastkeys) != 0) {
+  if (Samus_IsRunButtonActive()) {
     AddToHiLo(&demo_input_instr_timer, &demo_input_instr_ptr, 2048);
     AddToHiLo(&demo_input, &demo_input_new, __PAIR32__(demo_input_instr_timer, demo_input_instr_ptr));
     if (!sign16(demo_input - 11)) {
@@ -680,7 +680,7 @@ void HdmaobjPreInstr_XrayFunc1_BeamWidening(uint16 k) {  // 0x888754
 }
 
 void HdmaobjPreInstr_XrayFunc2_FullBeam(uint16 k) {  // 0x8887AB
-  if ((button_config_run_b & joypad1_lastkeys) != 0) {
+  if (Samus_IsRunButtonActive()) {
     HandleMovingXrayUpDown();
     CalculateXrayHdmaTable();
   } else {
