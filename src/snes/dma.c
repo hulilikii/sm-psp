@@ -9,6 +9,9 @@
 
 #include "dma.h"
 #include "snes.h"
+#include "../psp/psp_log.h"
+
+extern const uint8_t *g_rom;  /* sm_rtl.c: the 4 MB LoROM image the game code reads through RomPtr() */
 
 static const int bAdrOffsets[8][4] = {
   {0, 0, 0, 0},
@@ -258,12 +261,68 @@ void dma_initHdma(Dma* dma) {
   if(hdmaHappened) dma->hdmaTimer += 16; // 18 cycles overhead, -2 for this cycle
 }
 
+/* Gate 5s: A-bus -> VRAM fast path ($2118/$2119, mode 1) for one channel of dma_runAll(). Same end state as the byte loop:
+ * VRAM words, dirty pages, VMADD, channel address / size / offset index. Taken only when the loop would not branch
+ * differently: forward, not fixed, even length, VMAIN increments on the high byte with no address remap, the source is
+ * WRAM ($7E/$7F) or LoROM ($00-$5F, address >= $8000) and does not wrap inside its bank (so the "DMA from addr" warning
+ * of the byte loop cannot fire). Returns false (nothing touched) otherwise. Source bytes are read one at a time:
+ * the source may be odd-aligned and Allegrex faults on unaligned halfword loads. */
+static bool g_dma_rom_ok = true;
+static unsigned g_dma_rom_checks;
+
+static bool dma_fastVram(Dma* dma, DmaChannel* ch) {
+  Snes* snes = dma->snes;
+  Ppu* ppu = snes->ppu;
+  uint32_t n = ch->size ? ch->size : 0x10000;
+  if(ch->fromB || ch->bAdr != 0x18 || ch->mode != 1 || ch->fixed || ch->decrement || ch->offIndex != 0 ||
+     (n & 1) || !ppu->vramIncrementOnHigh || ppu->vramRemapMode != 0 || (uint32_t)ch->aAdr  n > 0x10000)
+    return false;
+  uint8_t bank = ch->aBank;
+  const uint8_t* src;
+  if(bank == 0x7e || bank == 0x7f) {
+    src = snes->ram + (((bank & 1) << 16) | ch->aAdr);
+  } else if((bank & 0x7f) <= 0x5f && ch->aAdr >= 0x8000 && g_dma_rom_ok && g_rom != NULL) {
+    src = g_rom + (((uint32_t)(bank & 0x7f) << 15) | (ch->aAdr & 0x7fff));
+    if(g_dma_rom_checks < 32) {  /* the ROM mapping lives in cart.c: compare the first transfers with snes_read() */
+      uint32_t a = (uint32_t)bank << 16 | ch->aAdr;
+      g_dma_rom_checks++;
+      if(src[0] != snes_read(snes, a) || src[n / 2] != snes_read(snes, a + n / 2) ||
+         src[n - 1] != snes_read(snes, a + n - 1)) {
+        g_dma_rom_ok = false;
+        PspLog("dma: ROM fast path disabled (bank %02x addr %04x differs from cart_read)", bank, ch->aAdr);
+        return false;
+      }
+    }
+  } else {
+    return false;
+  }
+  uint16_t* vram = ppu->vram;
+  uint8_t* dirty = ppu->vramDirty;
+  uint16_t ptr = ppu->vramPointer, inc = ppu->vramIncrement;
+  for(uint32_t k = 0; k < n; k += 2, src += 2, ptr += inc) {
+    uint16_t a = ptr & 0x7fff;
+    uint16_t nv = (uint16_t)(src[0] | src[1] << 8);
+    if(nv != vram[a]) {  /* as ppu_write: an identical rewrite leaves the page clean */
+      vram[a] = nv;
+      dirty[a >> 8] = 1;
+    }
+  }
+  ppu->vramPointer = ptr;
+  ch->aAdr = (uint16_t)(ch->aAdr + n);
+  ch->size = 0;
+  ch->offIndex = 0;
+  ch->dmaActive = false;
+  return true;
+}
+
 /* Runs every channel enabled by dma_startDma(..., false) to completion, in the order, with the address, size and
  * offset-index updates of dma_doDma(). $420B DMA is synchronous (nothing else runs while the cycle timers count
  * down), so only their end state matters: the timers and dmaBusy end at 0 / false, as when dma_cycle() is looped. */
 void dma_runAll(Dma* dma) {
   for(int i = 0; i < 8; i++) {
     DmaChannel* ch = &dma->channel[i];
+    if(ch->dmaActive && dma_fastVram(dma, ch))
+      continue;
     while(ch->dmaActive) {
       if(!g_fail && !ch->fromB && (ch->aBank & 0x80) && !(ch->aAdr & 0x8000)) {
         printf("Warning! DMA from addr 0x%x\n", ch->aBank << 16 | ch->aAdr);
