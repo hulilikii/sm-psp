@@ -341,7 +341,8 @@ static bool g_obj_dry;           /* EmitQuad8 only counts (ObjCountQuads) */
 static int g_obj_dry_n;
 /* Gate 4q: mosaic on BG1-3 (mode 1, main screen). The layer is sampled on the CPU at the block origins into a
  * 128x128 8888 image per tile priority; the GE stretches it (nearest) over each run. */
-enum { kMosDim = 128, kMosVerify = 16, kMosMinBright = 6, kMosImgBytes = kMosDim * kMosDim * 4 };
+enum { kMosDim = 128, kMosVerify = 16, kMosMinBright = 6, kMosHiBright = 12, kMosHiVerify = 8,
+       kMosImgBytes = kMosDim * kMosDim * 4 };
 typedef struct MosLayer { bool on, any[2]; int size, start; TileVert *v; } MosLayer;
 static MosLayer g_mos[kLayers];
 #if SM_PSP_MOS_GE
@@ -353,7 +354,7 @@ static uint32_t g_mosd[kLayers][2][kMosDim * kMosDim] __attribute__((aligned(64)
 static bool g_mos_ok = true;  /* cleared if the first verified mosaic frames differ from software */
 static bool g_mos_frame;      /* this frame has a mosaic layer on the GE */
 static int g_mos_size;
-static uint32_t g_mos_vn, g_mos_vbad, g_frames_mos;
+static uint32_t g_mos_vn, g_mos_vnhi, g_mos_vbad, g_frames_mos;
 /* Brightness of the middle row. A fade frame close to black cannot tell a wrong source image from a right one. */
 static inline int MosAuditBright(void) {
   return g_line_count ? g_lines[g_line_count / 2].brightness : 0;
@@ -3030,12 +3031,16 @@ static void GeVerify(void) {
   }
   if (g_mos_frame) {
     int mb = MosAuditBright();
-    if (mb >= kMosMinBright)  /* only bright frames use up the audit budget */
-      g_mos_vn++;
-    g_mos_vbad += bad;
-    if (g_mos_vn >= 3 && g_mos_vbad / g_mos_vn > 600) {
-      g_mos_ok = false;
     PspLog("mosaudit f=%u size=%d bright=%d bad=%u", (unsigned)g_frame, g_mos_size, mb, (unsigned)bad);
+    if (mb >= kMosMinBright) {  /* dim frames cannot tell a wrong source image from a right one: neither count nor judge them */
+      g_mos_vn++;
+      if (mb >= kMosHiBright)
+        g_mos_vnhi++;
+      g_mos_vbad += bad;
+      if (g_mos_vn >= 3 && g_mos_vbad / g_mos_vn > 600) {
+        g_mos_ok = false;
+        PspLog("geaudit: mosaic frames differ too much, GE mosaic disabled");
+      }
     }
   }
   if (g_nbband > 1) {
@@ -4740,7 +4745,8 @@ static bool DrawGe(void) {
   bool brwant = g_bright_rows != 0 && g_br_vn < kBrightVerify;
   bool winwant = g_win_rows != 0 && !g_sh_frame && !g_w2_frame && g_win_vn < kWinVerify;
   bool ovfwant = g_ovf_rows != 0 && g_ovf_vn < kOvfVerify;
-  bool moswant = g_mos_frame && g_mos_vn < kMosVerify && MosAuditBright() >= kMosMinBright;
+  bool moswant = g_mos_frame && ((g_mos_vn < kMosVerify && MosAuditBright() >= kMosMinBright) ||
+                                 (g_mos_vnhi < kMosHiVerify && MosAuditBright() >= kMosHiBright));
   bool m7iwant = g_m7_img && g_m7i_vn < kM7IVerify;
   bool bandwant = g_nbband > 1 && g_bnd_vn < kBandVerify;
   bool prevwant = g_prev_rows != 0 && g_prev_vn < kPrevVerify;
