@@ -261,12 +261,14 @@ void dma_initHdma(Dma* dma) {
   if(hdmaHappened) dma->hdmaTimer += 16; // 18 cycles overhead, -2 for this cycle
 }
 
-/* Gate 5s: A-bus -> VRAM fast path ($2118/$2119, mode 1) for one channel of dma_runAll(). Same end state as the byte loop:
- * VRAM words, dirty pages, VMADD, channel address / size / offset index. Taken only when the loop would not branch
- * differently: forward, not fixed, even length, VMAIN increments on the high byte with no address remap, the source is
- * WRAM ($7E/$7F) or LoROM ($00-$5F, address >= $8000) and does not wrap inside its bank (so the "DMA from addr" warning
- * of the byte loop cannot fire). Returns false (nothing touched) otherwise. Source bytes are read one at a time:
- * the source may be odd-aligned and Allegrex faults on unaligned halfword loads. */
+/* Gate 5s/5t: A-bus -> VRAM fast path for one channel of dma_runAll(). Same end state as the byte loop:
+ * VRAM words, dirty pages, VMADD, channel address / size / offset index. Handles mode 1 word pairs to $2118/$2119
+ * (even length, VMAIN increments on the high byte) and, Gate 5t, mode 0 to $2118 (VMAIN increments after the low
+ * byte) or to $2119 (after the high byte), as the Mode 7 map / tile uploads do. Taken only when the loop would not
+ * branch differently: forward, not fixed, no address remap, the source is WRAM ($7E/$7F) or LoROM ($00-$5F, address
+ * >= $8000) and does not wrap inside its bank (so the "DMA from addr" warning of the byte loop cannot fire).
+ * Returns false (nothing touched) otherwise. Source bytes are read one at a time:
+ * the source may be odd-aligned and Allegrex faults on unaligned halfword loads. */ * the source may be odd-aligned and Allegrex faults on unaligned halfword loads. */
 static bool g_dma_rom_ok = true;
 static unsigned g_dma_rom_checks;
 
@@ -274,8 +276,19 @@ static bool dma_fastVram(Dma* dma, DmaChannel* ch) {
   Snes* snes = dma->snes;
   Ppu* ppu = snes->ppu;
   uint32_t n = ch->size ? ch->size : 0x10000;
-  if(ch->fromB || ch->bAdr != 0x18 || ch->mode != 1 || ch->fixed || ch->decrement || ch->offIndex != 0 ||
-     (n & 1) || !ppu->vramIncrementOnHigh || ppu->vramRemapMode != 0 || (uint32_t)ch->aAdr + n > 0x10000)
+  if(ch->fromB || ch->fixed || ch->decrement || ch->offIndex != 0 || ppu->vramRemapMode != 0 ||
+     (uint32_t)ch->aAdr + n > 0x10000)
+    return false;
+  /* kind 0: mode 1 word pairs; 1: mode 0 to $2118; 2: mode 0 to $2119. Any other combination (e.g. a byte written
+   * to a register that does not advance the address, so every byte lands on one word) stays in the byte loop. */
+  int kind;
+  if(ch->mode == 1 && ch->bAdr == 0x18 && !(n & 1) && ppu->vramIncrementOnHigh)
+    kind = 0;
+  else if(ch->mode == 0 && ch->bAdr == 0x18 && !ppu->vramIncrementOnHigh)
+    kind = 1;
+  else if(ch->mode == 0 && ch->bAdr == 0x19 && ppu->vramIncrementOnHigh)
+    kind = 2;
+  else
     return false;
   uint8_t bank = ch->aBank;
   const uint8_t* src;
@@ -299,12 +312,25 @@ static bool dma_fastVram(Dma* dma, DmaChannel* ch) {
   uint16_t* vram = ppu->vram;
   uint8_t* dirty = ppu->vramDirty;
   uint16_t ptr = ppu->vramPointer, inc = ppu->vramIncrement;
-  for(uint32_t k = 0; k < n; k += 2, src += 2, ptr += inc) {
-    uint16_t a = ptr & 0x7fff;
-    uint16_t nv = (uint16_t)(src[0] | src[1] << 8);
-    if(nv != vram[a]) {  /* as ppu_write: an identical rewrite leaves the page clean */
-      vram[a] = nv;
-      dirty[a >> 8] = 1;
+  if(kind == 0) {
+    for(uint32_t k = 0; k < n; k += 2, src += 2, ptr += inc) {
+      uint16_t a = ptr & 0x7fff;
+      uint16_t nv = (uint16_t)(src[0] | src[1] << 8);
+      if(nv != vram[a]) {  /* as ppu_write: an identical rewrite leaves the page clean */
+        vram[a] = nv;
+        dirty[a >> 8] = 1;
+      }
+    }
+  } else {  /* one byte per word: low byte ($2118) or high byte ($2119), the other byte is kept */
+    const unsigned keep = kind == 1 ? 0xff00u : 0x00ffu, sh = kind == 1 ? 0u : 8u;
+    for(uint32_t k = 0; k < n; k++, src++, ptr += inc) {
+      uint16_t a = ptr & 0x7fff;
+      uint16_t old = vram[a];
+      uint16_t nv = (uint16_t)((old & keep) | ((unsigned)src[0] << sh));
+      if(nv != old) {
+        vram[a] = nv;
+        dirty[a >> 8] = 1;
+      }
     }
   }
   ppu->vramPointer = ptr;
