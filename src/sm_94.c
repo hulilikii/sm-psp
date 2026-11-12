@@ -2052,16 +2052,16 @@ static uint8 BlockReactGrapple_SpikeBlock(CollInfo *ci) {  // 0x94A7FD
 }
 
 uint8 BlockCollGrappleBeam(void) {  // 0x94A85B
-  int32 grapple_vel_x = (int16)grapple_beam_extension_x_velocity << 6;
-  int32 grapple_vel_y = (int16)grapple_beam_extension_y_velocity << 6;
+  int32 grapple_vel_x = (int32)(int16)grapple_beam_extension_x_velocity * 64;
+  int32 grapple_vel_y = (int32)(int16)grapple_beam_extension_y_velocity * 64;
   uint8 result = 0;
   for(int i = 0; i < 4; i++) {
     AddToHiLo(&grapple_beam_end_x_offset, &grapple_beam_end_x_suboffset, grapple_vel_x);
     AddToHiLo(&grapple_beam_end_y_offset, &grapple_beam_end_y_suboffset, grapple_vel_y);
     SetHiLo(&grapple_beam_end_x_pos, &grapple_beam_end_x_subpos,
-        __PAIR32__(grapple_beam_end_x_offset, grapple_beam_end_x_suboffset) + __PAIR32__(samus_x_pos, samus_x_subpos) + (grapple_beam_origin_x_offset << 16));
+        __PAIR32__(grapple_beam_end_x_offset, grapple_beam_end_x_suboffset) + __PAIR32__(samus_x_pos, samus_x_subpos) + ((uint32)grapple_beam_origin_x_offset << 16));
     SetHiLo(&grapple_beam_end_y_pos, &grapple_beam_end_y_subpos,
-        __PAIR32__(grapple_beam_end_y_offset, grapple_beam_end_y_suboffset) + __PAIR32__(samus_y_pos, samus_y_subpos) + (grapple_beam_origin_y_offset << 16));
+        __PAIR32__(grapple_beam_end_y_offset, grapple_beam_end_y_suboffset) + __PAIR32__(samus_y_pos, samus_y_subpos) + ((uint32)grapple_beam_origin_y_offset << 16));
     result = BlockReactGrapple();
     if ((result & 0x40) != 0 && (result & 1) != 0) {
       grapple_beam_end_x_pos = grapple_beam_end_x_pos & 0xFFF0 | 8;
@@ -2509,15 +2509,15 @@ void HandleGrappleBeamGfx(void) {  // 0x94AFBA
   int v1 = CalculateAngleFromXY(grapple_beam_end_x_pos - x_pos_of_start_of_grapple_beam_prevframe, 
                                 grapple_beam_end_y_pos - y_pos_of_start_of_grapple_beam_prevframe);
 
-  uint32 r28_r26 = (int16)kSinCosTable8bit_Sext[v1 + 64] << 11;
-  uint32 r32_r30 = (int16)kSinCosTable8bit_Sext[v1] << 11;
+  uint32 r28_r26 = (uint32)((int32)kSinCosTable8bit_Sext[v1 + 64] * 2048);
+  uint32 r32_r30 = (uint32)((int32)kSinCosTable8bit_Sext[v1] * 2048);
 
   uint16 chr = (grapple_beam_end_angle_hi & 0x80) >> 1;
   chr |= 2 * ((grapple_beam_end_angle_hi ^ chr) & 0x40 ^ 0x40);
   chr <<= 8;
 
-  uint32 r20_r18 = (x_pos_of_start_of_grapple_beam_prevframe - layer1_x_pos - 4) << 16;
-  uint32 r24_r22 = (y_pos_of_start_of_grapple_beam_prevframe - layer1_y_pos - 4) << 16;
+  uint32 r20_r18 = (uint32)(x_pos_of_start_of_grapple_beam_prevframe - layer1_x_pos - 4) << 16;
+  uint32 r24_r22 = (uint32)(y_pos_of_start_of_grapple_beam_prevframe - layer1_y_pos - 4) << 16;
   if ((grapple_beam_length & 0x8000) != 0)
     return;
   int n = ((grapple_beam_length / 8) & 0xF) - 1;
