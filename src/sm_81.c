@@ -2455,8 +2455,8 @@ void NewSaveFile(void) {  // 0x81B2CB
   button_config_left = kButton_Left;
   button_config_right = kButton_Right;
   button_config_jump_a = kButton_A;
-  button_config_run_b = kButton_B;
-  button_config_shoot_x = kButton_X;
+  button_config_run_b = kButton_X;
+  button_config_shoot_x = kButton_B;
   button_config_itemcancel_y = kButton_Y;
   button_config_itemswitch = kButton_Select;
   button_config_aim_up_R = kButton_R;
