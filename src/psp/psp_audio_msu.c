@@ -236,6 +236,7 @@ static int ReaderThread(SceSize args, void *argp) {
   uint32_t seen_generation = 0;
   bool repeat = false;
   bool eof = false;
+  uint8_t track = 0;
   int loop_offset = 8;
 
   int16_t block[MSU_SAMPLES];
@@ -252,7 +253,7 @@ static int ReaderThread(SceSize args, void *argp) {
       seen_generation = generation;
 
       __sync_synchronize();
-      uint8_t track = g_request_track;
+      track = g_request_track;
       repeat = g_request_loop;
 
       if (track) {
