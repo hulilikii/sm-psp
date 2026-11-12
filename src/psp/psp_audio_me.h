@@ -50,18 +50,25 @@ typedef enum {
   PSPME_INIT_MIST,          // meMistInit() < 0: no CFW kernel loader, unsupported ME core (BL/SD/unknown), ...
   PSPME_INIT_UNSUPPORTED,   // mapper table lacks an entry the task needs
   PSPME_INIT_PING,          // the injected task did not report completion
+  PSPME_INIT_UNRESOLVED,    // Resume: the pre-sleep suspend did not hand the state back; ME audio stays off
 } PspAudioMeInit;
 
 typedef enum {
-  PSPME_SUSPEND_NOT_ENGAGED,
+  PSPME_SUSPEND_NOT_ENGAGED, // the ME never owned the stream (or a refusal streak already gave it back)
   PSPME_SUSPEND_OK,          // producer parked, no task in flight, CPU owns state and resampler history
-  PSPME_SUSPEND_UNRESOLVED,  // a task could not be confirmed finished: ME audio stays off after resume
+  PSPME_SUSPEND_UNRESOLVED,  // a task could not be confirmed finished: the ME keeps the stream (silent)
+  PSPME_SUSPEND_ALREADY,     // a previous call returned OK and no Init has re-engaged since (duplicate power callback)
 } PspAudioMeSuspend;
 
 typedef enum {
   PSPME_SHUTDOWN_NOT_STARTED,
-  PSPME_SHUTDOWN_CLEAN,      // producer joined, no task in flight (marker evidence), syscall entry restore attempted
-  PSPME_SHUTDOWN_UNSAFE,     // an ME task may still run or reference this PRX: the module must not be unloaded
+  // Producer joined and the last task was confirmed finished by its marker. NOT proven: that the ME stopped
+  // executing this PRX (meMistFinish() text), that the injected syscall entry was restored (it is left in
+  // place unless SM_PSP_ME_RESTORE_SYSCALL=1, and even then the original is unverified).
+  PSPME_SHUTDOWN_QUIESCENT,
+  // An ME task may still run, or the producer did not stop: the module's memory must stay mapped and the
+  // caller must not exit (see SM_PSP_ME_PARK_ON_UNSAFE in main.c).
+  PSPME_SHUTDOWN_UNSAFE,
 } PspAudioMeShutdown;
 
 typedef enum {
@@ -72,10 +79,11 @@ typedef enum {
 
 // Boot and every resume. Not with the APU lock held. On any failure the CPU keeps the audio path.
 PspAudioMeInit PspAudioMe_Init(struct SpcPlayer *player);
-// Power callback, before sleep. Parks the producer and returns the stream to the CPU if (and only if) no
-// task is unresolved. Blocks up to ~2 s.
+// Power callback, before sleep. Parks the producer and returns the stream to the CPU if (and only if) no task is unresolved. Blocks up to ~2 s.
 PspAudioMeSuspend PspAudioMe_Suspend(void);
-// Exit paths (also Die). Idempotent. Blocks up to ~3 s.
+// After a sleep (main thread, not with the APU lock held). Re-runs Suspend first if the stream is still ME-owned (duplicate/missed/unresolved suspend), and only calls Init when the state is back with the CPU. A sleep reset of the ME is not accepted as proof that a task stopped.
+PspAudioMeInit PspAudioMe_Resume(struct SpcPlayer *player);
+// Exit paths (also Die). Idempotent. Blocks up to ~3 s. Never reports a "clean" ME: see PspAudioMeShutdown.
 PspAudioMeShutdown PspAudioMe_Shutdown(void);
 
 // True while the stream belongs to the ME (also when it is dead: the CPU must then stay away).
@@ -85,8 +93,7 @@ PspAudioMeState PspAudioMe_GetState(void);
 // Audio callback side. Never blocks, never waits for the ME. frames must be PSP_ME_BLOCK_FRAMES.
 PspAudioMePop PspAudioMe_PopBlock(int16_t *out, int frames);
 
-// Called with the APU state lock held. LockState returns false when the SPC/DSP state must NOT be
-// touched (ME ownership unresolved or ME state untrusted); the caller must skip its state access.
+// Called with the APU state lock held. LockState returns false when the SPC/DSP state must NOT be touched (ME ownership unresolved or ME state untrusted); the caller must skip its state access.
 // Otherwise it drops stale CPU lines. UnlockState writes CPU changes back for the ME.
 bool PspAudioMe_LockState(void);
 void PspAudioMe_UnlockState(void);

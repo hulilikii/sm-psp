@@ -58,6 +58,19 @@ static char g_app_dir[256];
 static bool g_psp_audio_started;
 #endif
 
+/* ME quiescence could not be proven (an ME task may still run, or the producer did not stop). Exiting would
+ * unmap code and buffers the ME may still use, so the module stays resident: nothing is freed, the log is
+ * flushed, and the console must be power-cycled. SM_PSP_ME_PARK_ON_UNSAFE=0 exits anyway. */
+#ifndef SM_PSP_ME_PARK_ON_UNSAFE
+#define SM_PSP_ME_PARK_ON_UNSAFE 1
+#endif
+#if PSP_AUDIO_ME
+static void NORETURN ParkUnsafe(const char *where) {
+  PspLog("ME audio %s: shutdown UNSAFE, module stays resident; power off the console", where);
+  PspLog_Flush();
+  for (;;) sceKernelDelayThread(1000000);
+}
+#endif
 
 /* HOME is owned by the firmware in user mode: without an exit callback the
  * button shows the exit dialog and then hangs the app */
@@ -100,6 +113,8 @@ void NORETURN Die(const char *error) {
 #endif
 #if PSP_AUDIO_ME
   PspAudioMeShutdown me_sd = PspAudioMe_Shutdown();
+  if (me_sd == PSPME_SHUTDOWN_UNSAFE && SM_PSP_ME_PARK_ON_UNSAFE)
+    ParkUnsafe("Die");
   if (me_sd != PSPME_SHUTDOWN_UNSAFE)
     PspMsu_Shutdown();
 #elif PSP_AUDIO_ENABLED
@@ -225,9 +240,14 @@ static void Audio_Shutdown(void) {
   g_psp_audio_started = false;
 #if PSP_AUDIO_ME
   PspAudioMeShutdown me_sd = PspAudioMe_Shutdown();
-  PspLog("audio: ME shutdown %s", me_sd == PSPME_SHUTDOWN_UNSAFE ? "UNSAFE (an ME task may still reference this module)" : "clean");
-  if (me_sd == PSPME_SHUTDOWN_UNSAFE)
+  PspLog("audio: ME shutdown %s", me_sd == PSPME_SHUTDOWN_UNSAFE
+             ? "UNSAFE (an ME task may still reference this module)"
+             : "quiescent (last task confirmed by marker; ME not stopped, injected syscall entry not restored)");
+  if (me_sd == PSPME_SHUTDOWN_UNSAFE) {
+    if (SM_PSP_ME_PARK_ON_UNSAFE)
+      ParkUnsafe("exit");
     return;  /* the producer may still use the semaphores: leave everything allocated */
+  }
 #endif
 
 #if PSP_AUDIO_ENABLED
@@ -260,19 +280,21 @@ static void Audio_PowerSuspend(void) {
 #if PSP_AUDIO_ME
   /* Parks the producer and gives the stream back to the CPU only if no ME task is unresolved (bounded wait).
    * If it is unresolved the ME stays "owner" (silent) and is not restarted on resume. */
-  g_me_suspend_result = (int)PspAudioMe_Suspend();
+  PspAudioMeSuspend r = PspAudioMe_Suspend();
+  if (r != PSPME_SUSPEND_ALREADY)  /* the firmware may notify twice; a repeat must not overwrite the real result */
+    g_me_suspend_result = (int)r;
 #endif
 }
 
-/* Main thread, after resume: the sleep reset the ME, so start it again (Init takes the locks itself).
- * On failure CPU audio stays; after an unresolved suspend ME audio stays off for the session. */
+/* Main thread, after resume: the sleep reset the ME, so start it again. PspAudioMe_Resume first re-runs the
+ * suspend if the stream is still ME-owned and restarts only when the state is back with the CPU (it takes the
+ * locks itself). On failure CPU audio stays, or silence if the ME still owns the state. */
 static void Audio_PowerResume(void) {
 #if PSP_AUDIO_ME && SM_PSP_ME_RESTART
-  if (PspAudioMe_IsActive())
-    return;
-  PspAudioMeInit r = PspAudioMe_Init(g_spc_player);
+  PspAudioMeInit r = PspAudioMe_Resume(g_spc_player);
   PspLog("resume: ME audio init=%d (suspend=%d) %s", (int)r, g_me_suspend_result,
-         r == PSPME_INIT_OK ? "restarted" : "unavailable, CPU audio");
+         r == PSPME_INIT_OK ? "restarted" : r == PSPME_INIT_UNRESOLVED ? "state still ME-owned, silent" : "unavailable, CPU audio");
+  g_me_suspend_result = -1;
 #endif
 }
 

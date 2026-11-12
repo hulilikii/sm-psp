@@ -63,7 +63,8 @@
 #define SM_PSP_ME_PRIVATE_STACK 1     // run the SPC/DSP code on our own stack: the firmware's size is unknown
 #endif
 #ifndef SM_PSP_ME_RESTORE_SYSCALL
-#define SM_PSP_ME_RESTORE_SYSCALL 1   // write the mapper's original address back into the injected entry at exit
+#define SM_PSP_ME_RESTORE_SYSCALL 0   // 1: write the mapper's address back into the injected entry at exit. Off: it is
+                                      // unverified that meCoreSystemTable[] holds the firmware's original entry.
 #endif
 #define ME_STACK_BYTES 8192
 #define ME_STACK_CANARY_BYTES 256
@@ -148,6 +149,7 @@ static volatile bool g_unknown;    // RECOVERY_REQUIRED: ME ownership of the sta
 static volatile bool g_fatal;      // the ME finished a job but its output/state cannot be trusted (stack canary)
 static volatile bool g_pending;    // a rendered block waits in g_me_output for ring space
 static bool g_disabled;            // ME audio is off for the session (unresolved ping)
+static volatile bool g_suspended;  // Suspend returned OK and no Init has engaged since (changed under the APU lock)
 static bool g_injected;
 static SceUID g_thread = -1;
 static uint32_t g_seq, g_outstanding;
@@ -194,7 +196,8 @@ static void MeCallOnStack(void (*fn)(MeJob *), MeJob *arg) {
       ".set noreorder\n\t"
       "move $s0, $sp\n\t"
       "move $sp, %2\n\t"
-      "jalr %0\n\t"
+      "move $t9, %0\n\t"  /* O32 PIC callees derive $gp from $t9; harmless for non-PIC ones */
+      "jalr $t9\n\t"
       "move $a0, %1\n\t"
       "move $sp, $s0\n\t"
       ".set pop\n\t"
@@ -263,6 +266,7 @@ static int MeAudioTask(int index, void *param) {
   if (param != (void *)&g_job)  // not our trigger: touch nothing, write no marker
     return meMistFinish();
   MeInvalidate(&g_job, sizeof(g_job));
+  MeInvalidate(&g_result, sizeof(g_result));  // the CPU repaints it at Init; the ME only ever wrote it back (clean)
   const uint32_t seq = g_job.v.seq, cmd = g_job.v.cmd;
   // A job whose sequence this task already completed is never run twice (spurious second dispatch).
   if (seq != 0 && seq != g_result.v.done_seq && (cmd == kJobPing || cmd == kJobRender)) {
@@ -590,7 +594,7 @@ PspAudioMeInit PspAudioMe_Init(SpcPlayer *player) {
   if (RunJob(kJobPing, ME_PING_DEADLINE_US) != kOutOk) {
     if (g_state == PSPME_RECOVERY_REQUIRED) {
       g_disabled = true;  // job/result/stack stay reserved: never reused while the ME might still write them
-      RestoreSyscallEntry();
+      // The entry is NOT restored here: the triggered task may not have read it yet.
     } else {
       g_state = PSPME_IDLE;
     }
@@ -608,6 +612,7 @@ PspAudioMeInit PspAudioMe_Init(SpcPlayer *player) {
   CpuWritebackInvalidate(g_me_player, ME_PLAYER_BYTES);
   CpuWritebackInvalidate(g_me_player->dsp, ME_DSP_BYTES);
   g_refusals = 0;
+  g_suspended = false;
   g_engaged = true;
   g_accepting = true;
   RtlApuUnlockRaw();
@@ -618,9 +623,10 @@ PspAudioMeInit PspAudioMe_Init(SpcPlayer *player) {
   return PSPME_INIT_OK;
 }
 
+// the firmware can deliver the suspend notification more than once per sleep. A repeat after a successful suspend returns ALREADY (the first result is the one that matters), it never reports a stale "not engaged" for a stream that was engaged until the first call.
 PspAudioMeSuspend PspAudioMe_Suspend(void) {
   if (!g_engaged)
-    return PSPME_SUSPEND_NOT_ENGAGED;
+    return g_suspended ? PSPME_SUSPEND_ALREADY : PSPME_SUSPEND_NOT_ENGAGED;
   g_accepting = false;  // no job starts after the one in flight (the producer re-checks under the lock)
   const uint32_t t0 = sceKernelGetSystemTimeLow();
   // A block that is rendered but not yet queued still belongs to the stream: wait for the callback to make room.
@@ -640,12 +646,23 @@ PspAudioMeSuspend PspAudioMe_Suspend(void) {
     g_state = PSPME_IDLE;
   }
   Disengage_Locked();
+  g_suspended = true;
   RtlApuUnlockRaw();
   return PSPME_SUSPEND_OK;
 }
 
+PspAudioMeInit PspAudioMe_Resume(SpcPlayer *player) {
+  if (g_engaged) {
+    // Still ME-owned: the suspend before this sleep was unresolved or never ran. Hand the state back through the checked path (bounded) or leave it with the ME; never restart over a task that may not have finished.
+    if (PspAudioMe_Suspend() != PSPME_SUSPEND_OK)
+      return PSPME_INIT_UNRESOLVED;
+  }
+  return PspAudioMe_Init(player);
+}
+
 PspAudioMeShutdown PspAudioMe_Shutdown(void) {
-  if (g_thread < 0 && !g_injected)
+  // Never started, or already shut down with the producer gone (a second call must not re-evaluate).
+  if (g_thread < 0 && (!g_injected || g_shutdown_result != PSPME_SHUTDOWN_NOT_STARTED))
     return g_shutdown_result;
   g_accepting = false;
   g_stop = true;
@@ -659,13 +676,13 @@ PspAudioMeShutdown PspAudioMe_Shutdown(void) {
       g_thread = -1;
     }
   }
-  // Clean = the producer is gone and no task is unresolved. A FAILED/fatal task has also left the ME.
-  const bool clean = joined && !g_unknown && !g_disabled;
-  if (joined)
-    RestoreSyscallEntry();  // best effort, unverifiable; also done when unresolved, it cannot make that worse
-  if (clean) {
+  // Quiescent = the producer is gone and no task is unresolved (the last one ended with a marker). A FAILED or fatal task has also left the ME. This is the strongest statement the MIST API allows: it is not "clean".
+  const bool quiescent = joined && !g_unknown && !g_disabled &&
+                         (g_state == PSPME_IDLE || g_state == PSPME_COMPLETED || g_state == PSPME_FAILED);
+  if (quiescent) {
+    RestoreSyscallEntry();  // only after quiescence, and only if enabled; never while a task may still run
     g_engaged = false;
-    g_shutdown_result = PSPME_SHUTDOWN_CLEAN;
+    g_shutdown_result = PSPME_SHUTDOWN_QUIESCENT;
   } else {
     g_shutdown_result = PSPME_SHUTDOWN_UNSAFE;
   }
