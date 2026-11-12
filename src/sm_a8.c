@@ -679,7 +679,7 @@ void WreckedShipGhost_Func_2(uint16 k) {  // 0xA89BAD
     E->wsgt_var_07 = v2;
     E->wsgt_var_08 = v2;
     E->wsgt_var_09 = 12;
-    uint16 v3 = *(unaligned_uint16 *)((uint8 *)&samus_y_pos + cur_enemy_index);
+    uint16 v3 = samus_y_pos;
     E->wsgt_var_0A = v3;
     E->wsgt_var_0B = v3;
     E->wsgt_var_0C = v3;
@@ -764,7 +764,7 @@ void WreckedShipGhost_Func_7(uint16 k) {  // 0xA89D36
   Enemy_WreckedShipGhost *E = Get_WreckedShipGhost(k);
   if ((int16)(samus_x_pos - E->wsgt_var_07) < 0
       || (int16)(samus_x_pos - E->wsgt_var_08) >= 0
-      || (v2 = *(unaligned_uint16 *)((uint8 *)&samus_y_pos + k), (int16)(v2 - E->wsgt_var_0B) < 0)
+      || (v2 = samus_y_pos, (int16)(v2 - E->wsgt_var_0B) < 0)
       || (int16)(v2 - E->wsgt_var_0C) >= 0) {
     E->wsgt_var_0D = g_word_A89A9E;
     v4 = 0;
@@ -802,8 +802,8 @@ LABEL_13:
       E->wsgt_var_0D = g_word_A89A9E;
       E->wsgt_var_0E = g_word_A89A9C;
       int v6 = (uint16)(E->wsgt_var_09 + E->wsgt_var_05) >> 1;
-      E->base.x_pos = g_word_A89AA8[v6] + *(unaligned_uint16 *)((uint8 *)&samus_x_pos + k);
-      E->base.y_pos = g_word_A89AA8[v6 + 1] + *(unaligned_uint16 *)((uint8 *)&samus_y_pos + k);
+      E->base.x_pos = g_word_A89AA8[v6] + samus_x_pos;
+      E->base.y_pos = g_word_A89AA8[v6 + 1] + samus_y_pos;
       return;
     }
   }

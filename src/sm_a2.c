@@ -495,8 +495,10 @@ void MaridiaBeybladeTurtle_Func8(uint16 k) {  // 0xA28FEB
   MaridiaBeybladeTurtle_Func4();
   Enemy_MaridiaTurtle *E = Get_MaridiaTurtle(k);
   if (Enemy_MoveRight_IgnoreSlopes(k, __PAIR32__(E->mte_var_E, E->mte_var_03))) {
-    SetHiLo(&E->mte_var_E, &E->mte_var_03, -IPAIR32(E->mte_var_E, E->mte_var_03));
-    SetHiLo(&E->mte_var_02, &E->mte_var_01, -IPAIR32(E->mte_var_02, E->mte_var_01));
+    uint32 neg_velocity = 0u - __PAIR32__(E->mte_var_E, E->mte_var_03);
+    uint32 neg_acceleration = 0u - __PAIR32__(E->mte_var_02, E->mte_var_01);
+    SetHiLo(&E->mte_var_E, &E->mte_var_03, neg_velocity);
+    SetHiLo(&E->mte_var_02, &E->mte_var_01, neg_acceleration);
     earthquake_type = 0;
     earthquake_timer = 16;
     QueueSfx2_Max6(0x1B);
