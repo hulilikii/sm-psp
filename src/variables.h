@@ -3,6 +3,7 @@
 #include "types.h"
 
 extern uint8 g_ram[0x20000];
+extern uint16 samus_hud_items_enabled;
 
 #define INT16_SHL8(x) ((int16)(x) << 8)
 #define INT16_SHL16(x) ((int16)(x) << 16)

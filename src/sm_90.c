@@ -5,6 +5,14 @@
 #include "sm_rtl.h"
 #include "funcs.h"
 
+// Bits 1..5 correspond to Missiles, Super Missiles, Power Bombs,
+// Grapple Beam, and the demo X-ray item. Slot 0 is always enabled.
+uint16 samus_hud_items_enabled = 0x003E;
+
+static bool Samus_IsHudItemEnabled(uint16 item_index) {
+  return (samus_hud_items_enabled & (uint16)(1u << item_index)) != 0;
+}
+
 #define kSamusFramesForUnderwaterSfx ((uint8*)RomFixedPtr(0x90a514))
 #define kPauseMenuMapData ((unaligned_uint16*)RomFixedPtr(0x829717))
 #define kPauseMenuMapTilemaps ((LongPtr*)RomFixedPtr(0x82964a))
@@ -3900,7 +3908,7 @@ void Missile_Func2(void) {  // 0x90BF46
 
 void HudSelectionHandler_MorphBall(void) {  // 0x90BF9D
   if ((button_config_shoot_x & joypad1_lastkeys) != 0) {
-    if (hud_item_index == 3) {
+    if (hud_item_index == 3 && Samus_IsHudItemEnabled(3)) {
       if ((power_bomb_flag & 0x8000) == 0) {
         if (HudSelectionHandler_MorphBall_Helper2() & 1) {
           if (samus_power_bombs) {
@@ -4046,36 +4054,38 @@ static Func_U8 *const kRunSwitchedToHudHandler[6] = {  // 0x90C4B5
 };
 void HandleSwitchingHudSelection(void) {
   uint16 v0;
-  uint16 r22 = 0;
   uint16 r18 = hud_item_index;
   uint16 item_count = (demo_enable & 0x8000) != 0 ? 6 : 5;
+  
   if ((button_config_itemcancel_y & joypad1_newkeys) != 0) {
-    samus_auto_cancel_hud_item_index = 0;
-LABEL_5:
-    v0 = 0;
-    goto LABEL_6;
-  }
-  r22 = (button_config_itemcancel_y & joypad1_lastkeys) != 0;
-  if ((button_config_itemswitch & joypad1_newkeys) == 0)
-    goto LABEL_13;
-  v0 = hud_item_index + 1;
-  if (hud_item_index >= item_count - 1)
-    goto LABEL_5;
-LABEL_6:
-  hud_item_index = v0;
-  while (kRunSwitchedToHudHandler[v0]() & 1) {
-    v0 = hud_item_index + 1;
-    hud_item_index = v0;
-    if (v0 >= item_count) {
-      v0 = 0;
-      hud_item_index = 0;
+    if (hud_item_index != 0) {
+      uint16 item_bit = (uint16)(1u << hud_item_index);
+      samus_hud_items_enabled ^= item_bit;
+
+      // Let the existing Grapple cancellation handler unwind movement
+      // and restore the normal Samus state.
+      if ((samus_hud_items_enabled & item_bit) == 0
+          && hud_item_index == 4
+          && grapple_beam_function != FUNC16(GrappleBeamFunc_Inactive)) {
+        grapple_beam_function = FUNC16(GrappleBeamFunc_Cancel);
+      }
     }
   }
-  if (r22)
-    samus_auto_cancel_hud_item_index = hud_item_index;
-  else
-    samus_auto_cancel_hud_item_index = 0;
-LABEL_13:
+
+  if ((button_config_itemswitch & joypad1_newkeys) != 0) {
+    v0 = hud_item_index + 1;
+    if (v0 >= item_count)
+      v0 = 0;
+    hud_item_index = v0;
+
+    while (kRunSwitchedToHudHandler[v0]() & 1) {
+      v0 = hud_item_index + 1;
+      if (v0 >= item_count)
+        v0 = 0;
+      hud_item_index = v0;
+    }
+  }
+ 
   if (hud_item_index == r18) {
     uint16 v1 = hud_item_changed_this_frame + 1;
     if (!sign16(hud_item_changed_this_frame - 2))
@@ -4283,7 +4293,7 @@ static Func_V_A *const kFireSbaFuncs[12] = {
 uint8 FireSba(void) {
   int16 v2;
 
-  if (hud_item_index != 3)
+  if (hud_item_index != 3 || !Samus_IsHudItemEnabled(3))
     return 0;
   uint16 v1 = 2 * (equipped_beams & 0xF);
   v2 = samus_power_bombs - kCostOfSbaInPowerBombs[v1 >> 1];
@@ -5297,6 +5307,8 @@ void HudSelectionHandler_Normal(void) {  // 0x90DD3D
   if (grapple_beam_function == FUNC16(GrappleBeamFunc_Inactive)) {
     if (time_is_frozen_flag)
       v0 = 10;
+    else if (hud_item_index != 0 && !Samus_IsHudItemEnabled(hud_item_index))
+      v0 = 0;
     else
       v0 = 2 * hud_item_index;
   } else {
@@ -5306,6 +5318,11 @@ void HudSelectionHandler_Normal(void) {  // 0x90DD3D
 }
 
 void HudSelectionHandler_Grappling(void) {  // 0x90DD6F
+  if (hud_item_index == 4 && !Samus_IsHudItemEnabled(4)) {
+    if (grapple_beam_function == FUNC16(GrappleBeamFunc_Inactive))
+      return;
+    grapple_beam_function = FUNC16(GrappleBeamFunc_Cancel);
+  }
   GrappleBeamHandler();
 }
 
