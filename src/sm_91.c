@@ -1980,7 +1980,7 @@ void Samus_Initialize(void) {  // 0x91E00D
   *(unaligned_uint16 *)&samus_last_different_pose_x_dir = 0;
   enemy_index_to_shake = -1;
   hud_item_index = 0;
-  samus_hud_items_enabled = 0x003E;
+  samus_hud_items_enabled = 1;
   samus_auto_cancel_hud_item_index = 0;
   samus_invincibility_timer = 0;
   samus_knockback_timer = 0;

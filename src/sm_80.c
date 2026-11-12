@@ -1409,10 +1409,11 @@ void HandleHudTilemap(void) {  // 0x809B44
   // Restore the normal selected/unselected palette for every icon.
   // Disabled icons use the original alternating highlight palettes.
   for (uint16 i = 1; i < 6; ++i) {
-    uint16 palette = (i == hud_item_index) ? 0x1000 : 0x1400;
+    bool selected = i == hud_item_index
+        || (i == 5 && Samus_IsXrayButtonActive());
+    uint16 palette = selected ? 0x1000 : 0x1400;
 
-    if (i == hud_item_index
-        && (samus_hud_items_enabled & (uint16)(1u << i)) == 0)
+    if (i < 5 && i == hud_item_index && !samus_hud_items_enabled)
       palette = v4;
 
     ToggleHudItemHighlight(i, palette);

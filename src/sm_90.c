@@ -5,12 +5,12 @@
 #include "sm_rtl.h"
 #include "funcs.h"
 
-// Bits 1..5 correspond to Missiles, Super Missiles, Power Bombs,
-// Grapple Beam, and the demo X-ray item. Slot 0 is always enabled.
-uint16 samus_hud_items_enabled = 0x003E;
+// Shared enable state for Missiles, Super Missiles, Power Bombs and Grapple.
+// X-ray is controlled separately by the run-button mode.
+uint16 samus_hud_items_enabled = 1;
 
 static bool Samus_IsHudItemEnabled(uint16 item_index) {
-  return (samus_hud_items_enabled & (uint16)(1u << item_index)) != 0;
+  return item_index == 0 || item_index == 5 || samus_hud_items_enabled != 0;
 }
 
 #define kSamusFramesForUnderwaterSfx ((uint8*)RomFixedPtr(0x90a514))
@@ -4062,15 +4062,13 @@ void HandleSwitchingHudSelection(void) {
   bool hud_item_toggled = false;
   
   if ((button_config_itemcancel_y & joypad1_newkeys) != 0) {
-    if (hud_item_index != 0) {
-      uint16 item_bit = (uint16)(1u << hud_item_index);
-      samus_hud_items_enabled ^= item_bit;
+    if (hud_item_index >= 1 && hud_item_index <= 4) {
+      samus_hud_items_enabled ^= 1;
       hud_item_toggled = true;
 
       // Let the existing Grapple cancellation handler unwind movement
       // and restore the normal Samus state.
-      if ((samus_hud_items_enabled & item_bit) == 0
-          && hud_item_index == 4
+      if (!samus_hud_items_enabled && hud_item_index == 4
           && grapple_beam_function != FUNC16(GrappleBeamFunc_Inactive)) {
         grapple_beam_function = FUNC16(GrappleBeamFunc_Cancel);
       }
@@ -4078,8 +4076,6 @@ void HandleSwitchingHudSelection(void) {
   }
 
   if ((button_config_itemswitch & joypad1_newkeys) != 0) {
-    bool carry_disabled = hud_item_index != 0
-        && !Samus_IsHudItemEnabled(hud_item_index);
 
     v0 = hud_item_index + 1;
     if (v0 >= item_count)
@@ -4091,12 +4087,6 @@ void HandleSwitchingHudSelection(void) {
       if (v0 >= item_count)
         v0 = 0;
       hud_item_index = v0;
-    }
-
-    // Keep the disabled state when moving to the next item.
-    if (carry_disabled && hud_item_index != 0) {
-      uint16 item_bit = (uint16)(1u << hud_item_index);
-      samus_hud_items_enabled &= (uint16)~item_bit;
     }
   }
  
