@@ -53,6 +53,7 @@ static int g_ppu_render_flags;
 static int g_snes_width = 256;
 static int g_snes_height = 240;
 static uint32_t g_frame_ctr;
+static char g_app_dir[256];
 #if PSP_AUDIO_ENABLED
 static bool g_psp_audio_started;
 #endif
@@ -197,7 +198,7 @@ static void Audio_Init(void) {
     
 #if PSP_AUDIO_ENABLED
   PspLog("audio: MSU PCM %s",
-         PspMsu_Init() ? "enabled" : "not enabled; using SPC");
+         PspMsu_Init(g_app_dir) ? "enabled" : "not enabled; using SPC");
 #endif
 
 #if PSP_AUDIO_ME
@@ -398,28 +399,41 @@ static void HandleCommand(uint32 j, bool pressed) {
 }
 
 static void SetupFilesystem(const char *argv0) {
-  char app_dir[256];
   const char *last_slash = argv0 ? strrchr(argv0, '/') : NULL;
 
   if (last_slash != NULL && last_slash != argv0) {
     size_t app_dir_len = (size_t)(last_slash - argv0);
-    if (app_dir_len >= sizeof(app_dir))
+    if (app_dir_len >= sizeof(g_app_dir))
       Die("Application path is too long");
-    memcpy(app_dir, argv0, app_dir_len);
-    app_dir[app_dir_len] = '\0';
+    memcpy(g_app_dir, argv0, app_dir_len);
+    g_app_dir[app_dir_len] = '\0';
   } else {
-    /* Fallback for launchers that do not provide a full argv[0] path. */
-    strcpy(app_dir, "ms0:/PSP/GAME/SMPSP");
+    /* PSP launchers normally start the application in its EBOOT directory.
+     * Keep that working directory; do not assume ms0: or a fixed folder name. */
+    strcpy(g_app_dir, ".");
   }
 
-  int chdir_result = sceIoChdir(app_dir);
-  if (chdir_result < 0) {
-    fprintf(stderr, "sceIoChdir(%s) failed: 0x%08X\n", app_dir, chdir_result);
-    Die("Unable to access the application directory");
+  if (strcmp(g_app_dir, ".") != 0) {
+    int chdir_result = sceIoChdir(g_app_dir);
+    if (chdir_result < 0) {
+      fprintf(stderr, "sceIoChdir(%s) failed: 0x%08X\n",
+              g_app_dir, chdir_result);
+      Die("Unable to access the application directory");
+    }
   }
 
   scePowerSetClockFrequency(333, 333, 166);
-  mkdir("saves", 0777);
+  SceIoStat st;
+  if (sceIoGetstat("saves", &st) < 0) {
+    int result = sceIoMkdir("saves", 0777);
+    if (result < 0 && sceIoGetstat("saves", &st) < 0) {
+      fprintf(stderr, "Unable to create saves directory: 0x%08X\n",
+              result);
+      Die("Unable to create saves directory");
+    }
+  }
+  if (sceIoGetstat("saves", &st) < 0 || !FIO_S_ISDIR(st.st_mode))
+    Die("The saves path exists but is not a directory");
 }
 
 int main(int argc, char **argv) {

@@ -40,6 +40,7 @@ static volatile uint32_t g_failed_generation;
 static volatile int g_stop;
 static bool g_enabled;
 static SceUID g_thread = -1;
+static char g_audio_dir[320];
 
 static uint8_t g_request_track;
 static uint8_t g_request_game_track;
@@ -143,14 +144,17 @@ static bool OpenTrack(uint8_t track, bool repeat,
                       SceUID *out_fd, int *loop_offset,
                       char *out_path, size_t out_path_size) {
   static const char *const patterns[] = {
-    "audio/supermetroid_msu1-%u.pcm",
-    "audio/%u.pcm",
+    "%ssupermetroid_msu1-%u.pcm",
+    "%s%u.pcm",
   };
 
-  char path[64];
+  char path[320];
 
   for (unsigned i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
-    snprintf(path, sizeof(path), patterns[i], (unsigned)track);
+    int path_len = snprintf(path, sizeof(path), patterns[i],
+                            g_audio_dir, (unsigned)track);
+    if (path_len < 0 || path_len >= (int)sizeof(path))
+      continue;
 
     SceUID fd = sceIoOpen(path, O_RDONLY, 0);
     if (fd < 0)
@@ -355,11 +359,22 @@ static int ReaderThread(SceSize args, void *argp) {
   return 0;
 }
 
-bool PspMsu_Init(void) {
+bool PspMsu_Init(const char *app_dir) {
   if (g_enabled)
     return true;
 
-  SceUID dir = sceIoDopen("audio");
+  if (app_dir == NULL || app_dir[0] == '\0')
+    return false;
+
+  size_t app_dir_len = strlen(app_dir);
+  bool has_separator = app_dir[app_dir_len - 1] == '/';
+  int audio_dir_len = snprintf(g_audio_dir, sizeof(g_audio_dir),
+                               "%s%saudio/", app_dir,
+                               has_separator ? "" : "/");
+  if (audio_dir_len < 0 || audio_dir_len >= (int)sizeof(g_audio_dir))
+    return false;
+
+  SceUID dir = sceIoDopen(g_audio_dir);
   if (dir < 0)
     return false;
   sceIoDclose(dir);

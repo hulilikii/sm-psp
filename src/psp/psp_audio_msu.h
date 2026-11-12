@@ -7,7 +7,7 @@
 #define PSP_MSU_BLOCK_FRAMES 735
 
 #if PSP_AUDIO_ENABLED
-bool PspMsu_Init(void);
+bool PspMsu_Init(const char *app_dir);
 bool PspMsu_Shutdown(void);
 void PspMsu_PollDiagnostics(void);
 bool PspMsu_HandleMusic(uint8_t requested, uint8_t current, uint8_t bank);

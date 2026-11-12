@@ -845,9 +845,14 @@ void RtlCheat(char c) {
 void RtlReadSram(void) {
   FILE *f = fopen("saves/sm.srm", "rb");
   if (f) {
-    if (fread(g_sram, 1, 8192, f) != 8192)
-      fprintf(stderr, "Error reading saves/sm.srm\n");
-    fclose(f);
+    uint8_t data[8192];
+    size_t bytes_read = fread(data, 1, sizeof(data), f);
+    int close_result = fclose(f);
+    if (bytes_read != sizeof(data) || close_result != 0) {
+      fprintf(stderr, "Incomplete or failed read of saves/sm.srm\n");
+      return;
+    }
+    memcpy(g_sram, data, sizeof(data));
     RtlSynchronizeWholeState();
     ByteArray_Resize(&state_recorder.base_snapshot, 8192);
     memcpy(state_recorder.base_snapshot.data, g_sram, 8192);
@@ -861,8 +866,10 @@ void RtlWriteSram(void) {
   rename("saves/sm.srm", "saves/sm.srm.bak");
   FILE *f = fopen("saves/sm.srm", "wb");
   if (f) {
-    fwrite(g_sram, 1, 8192, f);
-    fclose(f);
+    size_t bytes_written = fwrite(g_sram, 1, 8192, f);
+    int close_result = fclose(f);
+    if (bytes_written != 8192 || close_result != 0)
+      fprintf(stderr, "Incomplete or failed write of saves/sm.srm\n");
   } else {
     fprintf(stderr, "Unable to write saves/sm.srm\n");
   }
