@@ -1147,12 +1147,28 @@ void YappingMaw_Func_10(void) {  // 0xA8A665
   EnemyFunc_B7A1();
 }
 
+static void YappingMaw_RestoreSamusInput(void) {
+  switch (samus_movement_handler) {
+  case FUNC16(Samus_MoveHandlerShinesparkWindup):
+  case FUNC16(Samus_MoveHandlerVerticalShinespark):
+  case FUNC16(Samus_MoveHandler_Shinespark_Diag):
+  case FUNC16(Samus_MoveHandler_Shinespark_Horiz):
+  case FUNC16(Samus_MoveHandler_ShinesparkCrash):
+  case FUNC16(Samus_MoveHandler_ShinesparkCrashEchoCircle):
+  case FUNC16(Samus_MoveHandler_ShinesparkCrashFinish):
+    return;
+  default:
+    samus_input_handler = FUNC16(Samus_InputHandler_E913);
+    return;
+  }
+}
+
 void YappingMaw_Func_11(void) {  // 0xA8A68A
   Enemy_YappingMaw *E = Get_YappingMaw(cur_enemy_index);
   if (E->ymw_var_30)
     YappingMaw_Func_10();
   if ((--E->ymw_var_E & 0x8000) != 0 && samus_input_handler != FUNC16(Samus_InputHandler_E91D)) {
-    samus_input_handler = FUNC16(Samus_InputHandler_E913);
+    YappingMaw_RestoreSamusInput();
     E->ymw_var_30 = 0;
     E->ymw_var_35 = 48;
     E->ymw_var_E = 64;
@@ -1227,7 +1243,7 @@ void YappingMaw_Shot(void) {  // 0xA8A7BD
   if (E->base.health) {
     if (E->base.frozen_timer) {
       if (samus_input_handler != FUNC16(Samus_InputHandler_E91D))
-        samus_input_handler = FUNC16(Samus_InputHandler_E913);
+        YappingMaw_RestoreSamusInput();
       E->ymw_var_30 = 0;
     }
   } else {
@@ -1237,7 +1253,7 @@ void YappingMaw_Shot(void) {  // 0xA8A7BD
     *(unaligned_uint16 *)((uint8 *)eproj_id + E->ymw_var_43) = 0;
     sprite_instr_list_ptrs[E->ymw_var_46 >> 1] = 0;
     if (samus_input_handler != FUNC16(Samus_InputHandler_E91D))
-      samus_input_handler = FUNC16(Samus_InputHandler_E913);
+      YappingMaw_RestoreSamusInput();
     Get_YappingMaw(cur_enemy_index)->ymw_var_30 = 0;
   }
 }
