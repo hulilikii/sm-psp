@@ -18,6 +18,7 @@
 #if SM_PSP_LOG
 #include <pspkernel.h>
 uint32_t g_dma_us, g_dma_bytes, g_dma_n, g_dma_vram, g_dma_wram;  /* log builds: $420B DMA cost of the current frame, read by main.c */
+uint32_t g_dma_h, g_cpu_rd, g_ppu_wr;  /* log builds: bytes to $2119, interpreter reads, CPU-driven PPU register writes this frame */
 #endif
 
 extern bool g_is_turbo;
@@ -208,6 +209,9 @@ uint8_t snes_readBBus(Snes* snes, uint8_t adr) {
 
 void snes_writeBBus(Snes* snes, uint8_t adr, uint8_t val) {
   if(adr < 0x40) {
+#if SM_PSP_LOG
+    g_ppu_wr++;
+#endif
     ppu_write(snes->ppu, adr, val);
     return;
   }
@@ -375,6 +379,8 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
           g_dma_bytes += n;
           if (!c->fromB && c->bAdr == 0x18)
             g_dma_vram += n;
+          if (!c->fromB && c->bAdr == 0x19)
+            g_dma_h += n;
           if (!c->fromB && (c->aBank == 0x7e || c->aBank == 0x7f))
             g_dma_wram += n;
         }
@@ -470,6 +476,9 @@ void snes_write(Snes* snes, uint32_t adr, uint8_t val) {
 
 
 uint8_t snes_cpuRead(Snes* snes, uint32_t adr) {
+#if SM_PSP_LOG
+  g_cpu_rd++;
+#endif
   snes->cpuMemOps++;
   snes->cpuCyclesLeft += 8;
   return snes_read(snes, adr);

@@ -347,20 +347,21 @@ void RtlDrawPpuFrame(uint8 *pixel_buffer, size_t pitch, uint32 render_flags) {
 static unsigned Ram16(unsigned a) { return g_ram[a] | (unsigned)g_ram[a + 1] << 8; }
 
 extern uint32_t g_dma_us, g_dma_bytes, g_dma_n, g_dma_vram, g_dma_wram;  /* snes.c: $420B DMA cost of this frame */
+extern uint32_t g_dma_h, g_cpu_rd, g_ppu_wr;  /* snes.c */
 
 static void LogLogicHitch(uint32_t us) {
   static unsigned logged;
   if (!g_ppu_skip_draw || us < 15000 || logged >= 128)
     return;
   logged++;
-  PspLog("LOGIC f=%u us=%u dma_us=%u dma_b=%u dma_n=%u dma_v=%u dma_w=%u gs=%04x room=%04x door=%04x area=%02x apu617=%04x mus=%04x/%04x",
+  PspLog("LOGIC f=%u us=%u dma_us=%u dma_b=%u dma_n=%u dma_v=%u dma_h=%u dma_w=%u cpurd=%u ppuw=%u gs=%04x room=%04x door=%04x area=%02x apu617=%04x mus=%04x/%04x",
          (unsigned)g_frame_ctr, (unsigned)us, (unsigned)g_dma_us, (unsigned)g_dma_bytes, (unsigned)g_dma_n,
-         (unsigned)g_dma_vram, (unsigned)g_dma_wram,
+         (unsigned)g_dma_vram, (unsigned)g_dma_h, (unsigned)g_dma_wram, (unsigned)g_cpu_rd, (unsigned)g_ppu_wr,
          Ram16(0x998), Ram16(0x79B), Ram16(0x78D),
          (unsigned)g_ram[0x79F], Ram16(0x617), Ram16(0x7F3), Ram16(0x7F5));
 }
 #define LOG_LOGIC_HITCH(t0) LogLogicHitch(sceKernelGetSystemTimeLow() - (t0))
-#define LOG_DMA_RESET() (g_dma_us = g_dma_bytes = g_dma_n = g_dma_vram = g_dma_wram = 0)
+#define LOG_DMA_RESET() (g_dma_us = g_dma_bytes = g_dma_n = g_dma_vram = g_dma_wram = g_dma_h = g_cpu_rd = g_ppu_wr = 0)
 #else
 #define LOG_LOGIC_HITCH(t0) ((void)(t0))
 #define LOG_DMA_RESET() ((void)0)
