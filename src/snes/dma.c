@@ -268,7 +268,7 @@ void dma_initHdma(Dma* dma) {
  * branch differently: forward, not fixed, no address remap, the source is WRAM ($7E/$7F) or LoROM ($00-$5F, address
  * >= $8000) and does not wrap inside its bank (so the "DMA from addr" warning of the byte loop cannot fire).
  * Returns false (nothing touched) otherwise. Source bytes are read one at a time:
- * the source may be odd-aligned and Allegrex faults on unaligned halfword loads. */ * the source may be odd-aligned and Allegrex faults on unaligned halfword loads. */
+ * the source may be odd-aligned and Allegrex faults on unaligned halfword loads. */ 
 static bool g_dma_rom_ok = true;
 static unsigned g_dma_rom_checks;
 
