@@ -1,6 +1,8 @@
 #include "psp_audio_me.h"
 
 #include "../spc_player.h"
+#include "../sm_rtl.h"
+#include "psp_audio_msu.h"
 
 #include <psptypes.h>
 #include <me-core-mapper/me-core-mapper.h>  // meCoreDcache* (ME core functions), meCoreSystemTable
@@ -112,6 +114,8 @@ typedef struct MeJob {
   uint32_t cmd, seq;
   SpcPlayer *player;
   Dsp *dsp;
+  const int16_t *pcm;
+  uint32_t pcm_volume;
 } MeJob;
 // Result: written by the ME (marker last), written back by the ME; the CPU invalidates before every read and
 // never writes it while a task may run.
@@ -125,6 +129,8 @@ static MeResultLine g_result __attribute__((aligned(ME_CACHE_LINE)));
 // PCM of the ME: written by the ME only, invalidated by the CPU before it reads. Padded to whole lines.
 #define ME_OUT_PAD_SAMPLES ((int)(ME_PAD(ME_OUT_BYTES) / sizeof(int16_t)))
 static int16_t g_me_output[ME_OUT_PAD_SAMPLES] __attribute__((aligned(ME_CACHE_LINE)));
+
+static int16_t g_me_pcm[ME_OUT_PAD_SAMPLES]    __attribute__((aligned(ME_CACHE_LINE)));
 // Resampler workspace: the first DSP_RS_HISTORY_SAMPLES are the history carried between blocks. The ME
 // invalidates the whole buffer first and writes it back last, so RAM always holds the history.
 #define ME_RS_PAD ((DSP_RS_WORK_SAMPLES + 31) & ~31)  // int16 count, multiple of 32 = 64 bytes
@@ -231,6 +237,19 @@ static void MeRenderWork(MeJob *job) {
 
   SpcPlayer_GenerateSamples(player);
   dsp_getSamplesHQ(dsp, g_me_output, ME_FRAMES, g_me_rs_work);
+  
+  if (job->pcm && job->pcm_volume) {
+    MeInvalidate(job->pcm, sizeof(g_me_pcm));
+
+    for (int i = 0; i < ME_FRAMES * ME_CHANNELS; i++) {
+      int32_t mixed = (int32_t)g_me_output[i] +
+          ((int32_t)job->pcm[i] * (int32_t)job->pcm_volume) / 100;
+
+      if (mixed > 32767) mixed = 32767;
+      if (mixed < -32768) mixed = -32768;
+      g_me_output[i] = (int16_t)mixed;
+    }
+  }
 
   // Publish everything the job wrote (whole padded allocations).
   MeWriteback(g_me_output, sizeof(g_me_output));
@@ -420,6 +439,20 @@ static void ProduceOne(void) {
     return;
   }
   RtlApuPopPortsToState();  // CPU writes the SPC state: the ports are part of it from here on
+
+  bool stop_spc = false;
+  g_job.v.pcm = NULL;
+  g_job.v.pcm_volume = 0;
+
+  if (PspMsu_PopBlock(g_me_pcm, ME_FRAMES, &stop_spc)) {
+    if (stop_spc)
+      RtlApuStopMusic_Locked();
+
+    CpuWritebackInvalidate(g_me_pcm, sizeof(g_me_pcm));
+    g_job.v.pcm = g_me_pcm;
+    g_job.v.pcm_volume = (uint32_t)PspMsu_GetVolume();
+  }
+
   CpuWritebackInvalidate(g_me_player, ME_PLAYER_BYTES);
   CpuWritebackInvalidate(g_me_player->dsp, ME_DSP_BYTES);
   const JobOutcome o = RunJob(kJobRender, ME_JOB_DEADLINE_US);

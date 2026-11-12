@@ -7,6 +7,9 @@
 #include "spc_player.h"
 #include "util.h"
 #include "config.h"
+#if PSP_AUDIO_ENABLED
+#include "psp/psp_audio_msu.h"
+#endif
 #if PSP_AUDIO_ME
 #include "psp/psp_audio_me.h"
 #endif
@@ -602,7 +605,9 @@ void RtlApuWrite(uint32 adr, uint8 val) {
   }
 
   if (g_snes->runningWhichVersion != 2) {
+    RtlApuQueueLock();
     g_apu_write.ports[adr & 0x3] = val;
+    RtlApuQueueUnlock();
   }
 }
 
@@ -666,6 +671,30 @@ void RtlApuPopPortsToState(void) {
   RtlApuQueueUnlock();
 }
 
+/* APU state lock must already be held.
+ * Equivalent to the MSU patch's STZ SPC_COMM_0.
+ * Preserve ports 1-3, including pending SFX commands.
+ */
+void RtlApuStopMusic_Locked(void) {
+  uint8 *input_ports =
+      g_use_my_apu_code ? g_spc_player->input_ports : g_snes->apu->inPorts;
+
+  RtlApuQueueLock();
+
+  /* Suppress any already-queued port-0 command. */
+  for (unsigned i = 0; i < g_apu_queue_size; i++) {
+    ApuWriteEnt *w =
+        &g_apu_write_ents[(g_apu_write_ent_pos - 1 - i) &
+                          (kApuMaxQueueSize - 1)];
+    w->ports[0] = 255;
+  }
+  g_apu_write.ports[0] = 255;
+
+  input_ports[0] = 0;
+
+  RtlApuQueueUnlock();
+}
+
 static void RtlResetApuQueue(void) {
   g_apu_write_ent_pos = g_apu_time_since_empty = g_apu_queue_size = 0;
   memset(&g_apu_write, 0xff, sizeof(g_apu_write));
@@ -721,6 +750,11 @@ void RtlSaveMusicStateToRam_Locked(void) {
 // Resampler history for the CPU path (the ME path keeps its own, inside psp_audio_me.c).
 static int16 g_cpu_rs_work[DSP_RS_WORK_SAMPLES];
 
+#if PSP_AUDIO_ENABLED
+static int16 g_cpu_msu_block[PSP_MSU_BLOCK_FRAMES * 2]
+    __attribute__((aligned(64)));
+#endif
+
 // Hand-over of the resampler history between the CPU path and the ME (APU lock held).
 void RtlGetCpuRsHistory(int16 *hist) {
   memcpy(hist, g_cpu_rs_work, DSP_RS_HISTORY_SAMPLES * sizeof(int16));
@@ -756,6 +790,15 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
   RtlPopApuState_Locked();
   RtlApuQueueUnlock();
 
+#if PSP_AUDIO_ENABLED
+  bool msu_stop_spc = false;
+  bool have_msu =
+      PspMsu_PopBlock(g_cpu_msu_block, samples, &msu_stop_spc);
+
+  if (have_msu && msu_stop_spc)
+    RtlApuStopMusic_Locked();
+#endif
+
   if (!g_use_my_apu_code) {
     if (!is_uploading_apu) {
       while (g_snes->apu->dsp->sampleOffset < 534)
@@ -766,6 +809,19 @@ void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
     SpcPlayer_GenerateSamples(g_spc_player);
     dsp_getSamplesHQ(g_spc_player->dsp, audio_buffer, samples, g_cpu_rs_work);
   }
+
+#if PSP_AUDIO_ENABLED
+  if (have_msu) {
+    int volume = PspMsu_GetVolume();
+    for (int i = 0; i < samples * 2; i++) {
+      int32_t mixed = (int32_t)audio_buffer[i] +
+          ((int32_t)g_cpu_msu_block[i] * volume) / 100;
+      if (mixed > 32767) mixed = 32767;
+      if (mixed < -32768) mixed = -32768;
+      audio_buffer[i] = (int16)mixed;
+    }
+  }
+#endif
 
   RtlApuUnlock();
 }

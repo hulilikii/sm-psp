@@ -23,6 +23,9 @@
 #include "psp/psp_renderer.h"
 #include "psp/psp_input.h"
 #include "psp/psp_log.h"
+#if PSP_AUDIO_ENABLED
+#include "psp/psp_audio_msu.h"
+#endif
 #if PSP_AUDIO_ME
 #include "psp/psp_audio_me.h"
 #endif
@@ -84,8 +87,19 @@ void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
   PspLog("DIE: %s", error);
   PspLog_Flush();
+#if PSP_AUDIO_ENABLED
+  if (g_psp_audio_started) {
+    pspAudioSetChannelCallback(0, NULL, NULL);
+    pspAudioEnd();
+    g_psp_audio_started = false;
+  }
+#endif
 #if PSP_AUDIO_ME
-  PspAudioMe_Shutdown();  /* an injected ME syscall must not outlive this module; idempotent and bounded (~3 s) */
+  PspAudioMeShutdown me_sd = PspAudioMe_Shutdown();
+  if (me_sd != PSPME_SHUTDOWN_UNSAFE)
+    PspMsu_Shutdown();
+#elif PSP_AUDIO_ENABLED
+  PspMsu_Shutdown();
 #endif
   sceKernelExitGame();
   for (;;) sceKernelDelayThread(1000000);
@@ -177,6 +191,11 @@ static void Audio_Init(void) {
   g_apu_queue_sema = sceKernelCreateSema("sm-psp-apuq", 0, 1, 1, NULL);
   if (g_audio_sema < 0 || g_apu_queue_sema < 0)
     Die("sceKernelCreateSema failed");
+    
+#if PSP_AUDIO_ENABLED
+  PspLog("audio: MSU PCM %s",
+         PspMsu_Init() ? "enabled" : "not enabled; using SPC");
+#endif
 
 #if PSP_AUDIO_ME
   // Before pspAudioInit so no audio callback can race the ME start-up.
@@ -204,6 +223,12 @@ static void Audio_Shutdown(void) {
   if (me_sd == PSPME_SHUTDOWN_UNSAFE)
     return;  /* the producer may still use the semaphores: leave everything allocated */
 #endif
+
+#if PSP_AUDIO_ENABLED
+  if (!PspMsu_Shutdown())
+    PspLog("audio: MSU reader did not stop; leaving resources allocated");
+#endif
+
   if (g_audio_sema >= 0) {
     sceKernelDeleteSema(g_audio_sema);
     g_audio_sema = -1;

@@ -5,6 +5,7 @@
 
 extern uint8 g_ram[0x20000];
 extern void RtlApuWrite(uint32 adr, uint8 val);
+void RtlApuStopMusic_Locked(void);
 extern int snes_frame_counter;
 
 extern uint8 *g_sram;

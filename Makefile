@@ -58,6 +58,10 @@ override PSP_AUDIO := 1
 SRCS += src/psp/psp_audio_me.c
 endif
 
+ifeq ($(PSP_AUDIO),1)
+SRCS += src/psp/psp_audio_msu.c
+endif
+
 # ME audio statistics in the log. Only takes effect with PSP_LOG=1 and PSP_AUDIO_ME=1.
 PSP_ME_LOG ?= 1
 ifeq ($(PSP_LOG)$(PSP_AUDIO_ME)$(PSP_ME_LOG),111)
