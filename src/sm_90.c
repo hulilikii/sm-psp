@@ -4078,6 +4078,9 @@ void HandleSwitchingHudSelection(void) {
   }
 
   if ((button_config_itemswitch & joypad1_newkeys) != 0) {
+    bool carry_disabled = hud_item_index != 0
+        && !Samus_IsHudItemEnabled(hud_item_index);
+
     v0 = hud_item_index + 1;
     if (v0 >= item_count)
       v0 = 0;
@@ -4088,6 +4091,12 @@ void HandleSwitchingHudSelection(void) {
       if (v0 >= item_count)
         v0 = 0;
       hud_item_index = v0;
+    }
+
+    // Keep the disabled state when moving to the next item.
+    if (carry_disabled && hud_item_index != 0) {
+      uint16 item_bit = (uint16)(1u << hud_item_index);
+      samus_hud_items_enabled &= (uint16)~item_bit;
     }
   }
  

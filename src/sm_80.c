@@ -1411,7 +1411,8 @@ void HandleHudTilemap(void) {  // 0x809B44
   for (uint16 i = 1; i < 6; ++i) {
     uint16 palette = (i == hud_item_index) ? 0x1000 : 0x1400;
 
-    if ((samus_hud_items_enabled & (uint16)(1u << i)) == 0)
+    if (i == hud_item_index
+        && (samus_hud_items_enabled & (uint16)(1u << i)) == 0)
       palette = v4;
 
     ToggleHudItemHighlight(i, palette);
