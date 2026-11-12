@@ -491,6 +491,10 @@ int main(int argc, char **argv) {
     LOG_LOGIC_HITCH(t_logic);
     ++g_frame_ctr;
 
+#if PSP_AUDIO_ENABLED
+    PspMsu_PollDiagnostics();
+#endif
+
     g_snes->disableRender = (g_turbo ^ (is_replay & g_replay_turbo)) &&
                              (g_frame_ctr & (g_turbo ? 0xf : 0x7f)) != 0;
     if (!g_snes->disableRender)

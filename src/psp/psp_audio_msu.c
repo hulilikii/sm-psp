@@ -1,6 +1,7 @@
 #include "psp_audio_msu.h"
 
 #include "../config.h"
+#include "psp_log.h"
 
 #include <pspkernel.h>
 #include <pspiofilemgr.h>
@@ -34,14 +35,73 @@ static volatile uint32_t g_ring_r;
 static volatile uint32_t g_generation;
 static volatile uint32_t g_ready_generation;
 static volatile uint32_t g_stopped_generation;
+static volatile uint32_t g_failed_generation;
 
 static volatile int g_stop;
 static bool g_enabled;
 static SceUID g_thread = -1;
 
 static uint8_t g_request_track;
+static uint8_t g_request_game_track;
 static bool g_request_loop;
 static int g_volume = 100;
+
+typedef struct MsuDiagEvent {
+  volatile uint32_t sequence;
+  uint32_t generation;
+  uint8_t game_track;
+  uint8_t track;
+  uint8_t bank;
+  uint8_t status;
+  char path[64];
+} MsuDiagEvent;
+
+static MsuDiagEvent g_diag_request;
+static MsuDiagEvent g_diag_open;
+static MsuDiagEvent g_diag_ready;
+static MsuDiagEvent g_diag_consumed;
+
+static uint32_t AtomicLoad32(volatile uint32_t *p);
+
+static void PublishDiag(MsuDiagEvent *event, uint32_t generation,
+                        uint8_t game_track, uint8_t track,
+                        uint8_t bank, uint8_t status,
+                        const char *path) {
+  event->generation = generation;
+  event->game_track = game_track;
+  event->track = track;
+  event->bank = bank;
+  event->status = status;
+  if (path)
+    snprintf(event->path, sizeof(event->path), "%s", path);
+  else
+    event->path[0] = 0;
+  __sync_synchronize();
+  __sync_add_and_fetch(&event->sequence, 1);
+}
+
+static bool ReadDiag(MsuDiagEvent *event, uint32_t *seen,
+                     MsuDiagEvent *snapshot) {
+  uint32_t before = AtomicLoad32(&event->sequence);
+  if (before == *seen)
+    return false;
+
+  __sync_synchronize();
+  snapshot->generation = event->generation;
+  snapshot->game_track = event->game_track;
+  snapshot->track = event->track;
+  snapshot->bank = event->bank;
+  snapshot->status = event->status;
+  memcpy(snapshot->path, event->path, sizeof(snapshot->path));
+  __sync_synchronize();
+
+  uint32_t after = AtomicLoad32(&event->sequence);
+  if (before != after)
+    return false;
+
+  *seen = after;
+  return true;
+}
 
 static uint32_t AtomicLoad32(volatile uint32_t *p) {
   return __sync_fetch_and_add(p, 0);
@@ -80,7 +140,8 @@ static bool ReadExact(SceUID fd, void *dst, unsigned bytes) {
  * Followed by signed 16-bit interleaved stereo PCM at 44100 Hz.
  */
 static bool OpenTrack(uint8_t track, bool repeat,
-                      SceUID *out_fd, int *loop_offset) {
+                      SceUID *out_fd, int *loop_offset,
+                      char *out_path, size_t out_path_size) {
   static const char *const patterns[] = {
     "audio/supermetroid_msu1-%u.pcm",
     "audio/%u.pcm",
@@ -122,6 +183,8 @@ static bool OpenTrack(uint8_t track, bool repeat,
 
     *loop_offset = repeat ? (int)offset : 8;
     *out_fd = fd;
+    if (out_path && out_path_size)
+      snprintf(out_path, out_path_size, "%s", path);
     return true;
   }
 
@@ -192,13 +255,29 @@ static int ReaderThread(SceSize args, void *argp) {
       uint8_t track = g_request_track;
       repeat = g_request_loop;
 
-      if (track)
-        OpenTrack(track, repeat, &fd, &loop_offset);
+      if (track) {
+        char path[64] = { 0 };
+        bool opened = OpenTrack(track, repeat, &fd, &loop_offset,
+                                path, sizeof(path));
+
+        if (generation != AtomicLoad32(&g_generation)) {
+          if (fd >= 0)
+            sceIoClose(fd);
+          fd = -1;
+          continue;
+        }
+
+        PublishDiag(&g_diag_open, generation, g_request_game_track,
+                    track, 0, opened ? 1 : 0, path);
+
+        if (!opened)
+          __sync_lock_test_and_set(&g_failed_generation, generation);
+      }
 
       continue;
     }
 
-    if (!fd || fd < 0 || eof) {
+    if (fd < 0 || eof) {
       sceKernelDelayThread(1000);
       continue;
     }
@@ -218,6 +297,10 @@ static int ReaderThread(SceSize args, void *argp) {
       continue;
 
     if (result < 0) {
+      /* A read error before prebuffer completion must not start MSU
+       * playback with a partial buffer. SPC remains the fallback. */
+      if (AtomicLoad32(&g_ready_generation) != generation)
+        __sync_lock_test_and_set(&g_failed_generation, generation);
       result = 0;
       eof_after = true;
     }
@@ -233,12 +316,29 @@ static int ReaderThread(SceSize args, void *argp) {
       __sync_lock_test_and_set(&g_ring_w, w + 1);
     }
 
-    uint32_t queued =
-        AtomicLoad32(&g_ring_w) - AtomicLoad32(&g_ring_r);
+    /* Count only this generation. The consumer may still be draining
+     * old blocks, but it cannot consume current-generation blocks until
+     * readiness has been published. */
+    if (AtomicLoad32(&g_ready_generation) != generation &&
+        AtomicLoad32(&g_failed_generation) != generation) {
+      uint32_t queued = 0;
+      uint32_t r = AtomicLoad32(&g_ring_r);
+      uint32_t w = AtomicLoad32(&g_ring_w);
 
-    if (queued >= MSU_READY_BLOCKS || (eof_after && queued != 0)) {
-      __sync_synchronize();
-      __sync_lock_test_and_set(&g_ready_generation, generation);
+      while (r != w) {
+        MsuBlock *slot = &g_ring[r % MSU_RING_BLOCKS];
+        __sync_synchronize();
+        if (slot->generation == generation)
+          ++queued;
+        ++r;
+      }
+
+      if (queued >= MSU_READY_BLOCKS || (eof_after && queued != 0)) {
+        __sync_synchronize();
+        __sync_lock_test_and_set(&g_ready_generation, generation);
+        PublishDiag(&g_diag_ready, generation, g_request_game_track,
+                    track, 0, 1, NULL);
+      }
     }
 
     if (eof_after || result <= 0) {
@@ -268,7 +368,9 @@ bool PspMsu_Init(void) {
   g_generation = 1;
   g_ready_generation = 0;
   g_stopped_generation = 0;
+  g_failed_generation = 0;
   g_request_track = 0;
+  g_request_game_track = 0;
   g_request_loop = false;
   g_stop = 0;
 
@@ -327,6 +429,7 @@ static void RequestTrack(uint8_t track, bool repeat) {
 
 static void StopTrack(void) {
   g_request_track = 0;
+  g_request_game_track = 0;
   g_request_loop = false;
 
   __sync_synchronize();
@@ -391,6 +494,8 @@ bool PspMsu_HandleMusic(uint8_t requested, uint8_t current, uint8_t bank) {
 
   if (requested == 0) {
     StopTrack();
+    PublishDiag(&g_diag_request, AtomicLoad32(&g_generation),
+                requested, 0, bank, 0, NULL);
     return false;
   }
 
@@ -420,7 +525,11 @@ bool PspMsu_HandleMusic(uint8_t requested, uint8_t current, uint8_t bank) {
   if (track == 0)
     return false;
 
+  g_request_game_track = requested;
   RequestTrack(track, TrackRepeats(track));
+
+  PublishDiag(&g_diag_request, AtomicLoad32(&g_generation),
+              requested, track, bank, 1, NULL);
 
   return AtomicLoad32(&g_ready_generation) ==
          AtomicLoad32(&g_generation);
@@ -436,12 +545,9 @@ bool PspMsu_PopBlock(int16_t *dst, int frames, bool *stop_spc) {
   if (!g_enabled || !dst || frames != PSP_MSU_BLOCK_FRAMES)
     return false;
 
-  uint32_t generation = AtomicLoad32(&g_generation);
-
-  if (AtomicLoad32(&g_ready_generation) != generation)
-    return false;
 
   for (;;) {
+    uint32_t generation = AtomicLoad32(&g_generation);
     uint32_t r = AtomicLoad32(&g_ring_r);
     uint32_t w = AtomicLoad32(&g_ring_w);
 
@@ -459,6 +565,19 @@ bool PspMsu_PopBlock(int16_t *dst, int frames, bool *stop_spc) {
       continue;
     }
 
+    /* A failed open or prebuffer read leaves SPC running. Discard any
+     * partial blocks rather than publishing an incomplete MSU track. */
+    if (AtomicLoad32(&g_failed_generation) == generation &&
+        AtomicLoad32(&g_ready_generation) != generation) {
+      __sync_lock_test_and_set(&g_ring_r, r + 1);
+      continue;
+    }
+
+    /* Do this after stale-block disposal: otherwise an old full ring
+     * prevents the new generation from ever reaching its prebuffer. */
+    if (AtomicLoad32(&g_ready_generation) != generation)
+      return false;
+
     memcpy(dst, slot->samples, MSU_BLOCK_BYTES);
     __sync_synchronize();
     __sync_lock_test_and_set(&g_ring_r, r + 1);
@@ -467,6 +586,8 @@ bool PspMsu_PopBlock(int16_t *dst, int frames, bool *stop_spc) {
         AtomicLoad32(&g_stopped_generation) != generation) {
       *stop_spc = true;
       __sync_lock_test_and_set(&g_stopped_generation, generation);
+      PublishDiag(&g_diag_consumed, generation, g_request_game_track,
+                  g_request_track, 0, 1, NULL);
     }
 
     return true;
@@ -475,4 +596,28 @@ bool PspMsu_PopBlock(int16_t *dst, int frames, bool *stop_spc) {
 
 int PspMsu_GetVolume(void) {
   return g_volume;
+}
+
+/* Called from the main thread only. Never perform file logging from the
+ * reader or audio/ME producer threads. */
+void PspMsu_PollDiagnostics(void) {
+  static uint32_t seen_request, seen_open, seen_ready, seen_consumed;
+  MsuDiagEvent event;
+
+  if (ReadDiag(&g_diag_request, &seen_request, &event))
+    PspLog("msu: request game=%u bank=%u track=%u generation=%u",
+           event.game_track, event.bank, event.track, event.generation);
+
+  if (ReadDiag(&g_diag_open, &seen_open, &event))
+    PspLog("msu: open %s track=%u generation=%u path=%s",
+           event.status ? "OK" : "FAILED", event.track,
+           event.generation, event.path[0] ? event.path : "(no valid file)");
+
+  if (ReadDiag(&g_diag_ready, &seen_ready, &event))
+    PspLog("msu: prebuffer ready track=%u generation=%u",
+           event.track, event.generation);
+
+  if (ReadDiag(&g_diag_consumed, &seen_consumed, &event))
+    PspLog("msu: first PCM block consumed track=%u generation=%u",
+           event.track, event.generation);
 }

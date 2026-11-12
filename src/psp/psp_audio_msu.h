@@ -9,6 +9,7 @@
 #if PSP_AUDIO_ENABLED
 bool PspMsu_Init(void);
 bool PspMsu_Shutdown(void);
+void PspMsu_PollDiagnostics(void);
 bool PspMsu_HandleMusic(uint8_t requested, uint8_t current, uint8_t bank);
 bool PspMsu_PopBlock(int16_t *dst, int frames, bool *stop_spc);
 int PspMsu_GetVolume(void);
