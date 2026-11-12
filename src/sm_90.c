@@ -3827,6 +3827,9 @@ void ProjectileReflection(uint16 r20) {  // 0x90BE00
 }
 
 void HudSelectionHandler_MissilesOrSuperMissiles(void) {  // 0x90BE62
+  if (!Samus_IsHudItemEnabled(hud_item_index))
+    return;
+
   if ((button_config_shoot_x & joypad1_newkeys) == 0 && (button_config_shoot_x & joypad1_newinput_samusfilter) == 0
       || !(Samus_CanFireSuperMissile() & 1)) {
     return;
@@ -4056,11 +4059,13 @@ void HandleSwitchingHudSelection(void) {
   uint16 v0;
   uint16 r18 = hud_item_index;
   uint16 item_count = (demo_enable & 0x8000) != 0 ? 6 : 5;
+  bool hud_item_toggled = false;
   
   if ((button_config_itemcancel_y & joypad1_newkeys) != 0) {
     if (hud_item_index != 0) {
       uint16 item_bit = (uint16)(1u << hud_item_index);
       samus_hud_items_enabled ^= item_bit;
+      hud_item_toggled = true;
 
       // Let the existing Grapple cancellation handler unwind movement
       // and restore the normal Samus state.
@@ -4094,6 +4099,9 @@ void HandleSwitchingHudSelection(void) {
   } else {
     hud_item_changed_this_frame = 1;
   }
+  
+  if (hud_item_toggled)
+    hud_item_changed_this_frame = 1;
 }
 
 uint8 SwitchToHudHandler_Nothing(void) {  // 0x90C545
@@ -4161,7 +4169,10 @@ uint8 UpdateArmCannonIsOpenFlag(void) {  // 0x90C5EB
   static const int8 kFlagShouldArmCannonBeOpen[6] = { 0, 1, 1, 0, 1, 0 };
   if (sign16(hud_item_changed_this_frame - 2))
     return 0;
-  uint16 r18 = kFlagShouldArmCannonBeOpen[hud_item_index];
+  uint16 item_index = hud_item_index;
+  if (item_index != 0 && !Samus_IsHudItemEnabled(item_index))
+    item_index = 0;
+  uint16 r18 = kFlagShouldArmCannonBeOpen[item_index];
   if (flag_arm_cannon_open_or_opening == r18)
     return 0;
   if (r18)

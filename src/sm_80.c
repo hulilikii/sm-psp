@@ -1406,6 +1406,18 @@ void HandleHudTilemap(void) {  // 0x809B44
   uint16 v4 = 5120;
   if ((nmi_frame_counter_byte & 0x10) != 0)
     v4 = 4096;
+  // Restore the normal selected/unselected palette for every icon.
+  // Disabled icons use the original alternating highlight palettes.
+  for (uint16 i = 1; i < 6; ++i) {
+    uint16 palette = (i == hud_item_index) ? 0x1000 : 0x1400;
+
+    if ((samus_hud_items_enabled & (uint16)(1u << i)) == 0)
+      palette = v4;
+
+    ToggleHudItemHighlight(i, palette);
+  }
+
+  // Preserve the original auto-cancel flashing behavior.
   ToggleHudItemHighlight(samus_auto_cancel_hud_item_index, v4);
   uint16 v5 = vram_write_queue_tail;
   gVramWriteEntry(vram_write_queue_tail)->size = 192;
