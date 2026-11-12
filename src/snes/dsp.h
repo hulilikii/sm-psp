@@ -101,6 +101,9 @@ void dsp_getSamples(Dsp* dsp, int16_t* sampleData, int samplesPerFrame);
 // and holds the previous frames' tail: DSP_RS_WORK_SAMPLES int16 values. Output is delayed
 // by 8 input samples (0.25 ms). Pad/align `work` to 64 bytes if the ME uses it.
 #define DSP_RS_WORK_SAMPLES ((15 + 534) * 2)
+// The first DSP_RS_HISTORY_SAMPLES values of `work` are the history carried to the next block: this is all that
+// has to move when the stream changes between the CPU and the ME.
+#define DSP_RS_HISTORY_SAMPLES (15 * 2)
 void dsp_getSamplesHQ(Dsp* dsp, int16_t* sampleData, int samplesPerFrame, int16_t* work);
 void dsp_saveload(Dsp *dsp, SaveLoadFunc *func, void *ctx);
 

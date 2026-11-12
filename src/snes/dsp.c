@@ -16,6 +16,17 @@
 
 #define MY_CHANGES 1
 
+// The SPC/DSP code also runs on the Media Engine, which has no libc: no memcpy/memset on that path. dsp.o is built
+// with -fno-tree-loop-distribute-patterns so GCC does not turn these loops back into library calls.
+static inline void DspZero16(int16_t *d, int n) {
+  for (int i = 0; i < n; i++)
+    d[i] = 0;
+}
+static inline void DspCopy16(int16_t *d, const int16_t *s, int n) {
+  for (int i = 0; i < n; i++)
+    d[i] = s[i];
+}
+
 static const int rateValues[32] = {
   0, 2048, 1536, 1280, 1024, 768, 640, 512,
   384, 320, 256, 192, 160, 128, 96, 80,
@@ -266,7 +277,7 @@ static void dsp_cycleChannel(Dsp* dsp, int ch) {
       uint16_t samplePointer = dsp->dirPage + 4 * dsp->channel[ch].srcn;
       dsp->channel[ch].decodeOffset = dsp->apu_ram[samplePointer];
       dsp->channel[ch].decodeOffset |= dsp->apu_ram[(samplePointer + 1) & 0xffff] << 8;
-      memset(dsp->channel[ch].decodeBuffer, 0, sizeof(dsp->channel[ch].decodeBuffer));
+      DspZero16(dsp->channel[ch].decodeBuffer, (int)(sizeof(dsp->channel[ch].decodeBuffer) / sizeof(int16_t)));
       dsp->channel[ch].gain = 0;
       dsp->channel[ch].adsrState = dsp->channel[ch].useGain ? 3 : 0;
     }
@@ -502,7 +513,7 @@ void dsp_write(Dsp* dsp, uint8_t adr, uint8_t val) {
           uint16_t samplePointer = dsp->dirPage + 4 * dsp->channel[ch].srcn;
           dsp->channel[ch].decodeOffset = dsp->apu_ram[samplePointer];
           dsp->channel[ch].decodeOffset |= dsp->apu_ram[(samplePointer + 1) & 0xffff] << 8;
-          memset(dsp->channel[ch].decodeBuffer, 0, sizeof(dsp->channel[ch].decodeBuffer));
+          DspZero16(dsp->channel[ch].decodeBuffer, (int)(sizeof(dsp->channel[ch].decodeBuffer) / sizeof(int16_t)));
           dsp->channel[ch].gain = 0;
           dsp->channel[ch].adsrState = dsp->channel[ch].useGain ? 3 : 0;
         }
@@ -609,7 +620,7 @@ void dsp_getSamplesHQ(Dsp* dsp, int16_t* sampleData, int samplesPerFrame, int16_
     return;
   }
   // work = [15 frames of history][534 new frames]
-  memcpy(work + 15 * 2, dsp->sampleBuffer, sizeof(dsp->sampleBuffer));
+  DspCopy16(work + 15 * 2, dsp->sampleBuffer, 534 * 2);
   int k = 0, acc = 0;  // k = floor(i * 534 / 735), tracked exactly
   for(int i = 0; i < 735; i++) {
     const int16_t* tap = kDspResampleTab[i];
@@ -631,6 +642,6 @@ void dsp_getSamplesHQ(Dsp* dsp, int16_t* sampleData, int samplesPerFrame, int16_
     }
   }
   // keep the last 15 frames as history for the next block
-  memcpy(work, work + 534 * 2, 15 * 2 * sizeof(int16_t));
+  DspCopy16(work, work + 534 * 2, 15 * 2);
   dsp->sampleOffset = 0;
 }

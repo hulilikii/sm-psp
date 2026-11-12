@@ -48,8 +48,9 @@ ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
 
-# Audio. PSP_AUDIO=1 plays SPC/DSP audio on the CPU; PSP_AUDIO_ME=1 moves SPC+DSP
-# to the Media Engine (needs psp-media-engine-custom-core installed: make install).
+# Audio. PSP_AUDIO=1 plays SPC/DSP audio on the CPU; PSP_AUDIO_ME=1 moves SPC+DSP to the Media Engine as
+# one MIST task per audio block (needs psp-media-engine-mist and psp-media-engine-custom-core (me-core-mapper)
+# installed, and a CFW: MIST loads a kernel helper PRX. Without it the game falls back to CPU audio).
 PSP_AUDIO ?= 1
 PSP_AUDIO_ME ?= 1
 ifeq ($(PSP_AUDIO_ME),1)
@@ -91,12 +92,14 @@ CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_P
 # SPC/DSP code runs on the Media Engine, which has no libc/syscalls: an assert()
 # that fires there would hang the ME instead of reporting.
 src/spc_player.o src/snes/dsp.o: CFLAGS += -DNDEBUG
+# dsp.c has hand-written copy/clear loops for the same reason: keep GCC from turning them back into memcpy/memset.
+src/snes/dsp.o: CFLAGS += -fno-tree-loop-distribute-patterns
 
 # PSP-only build. PSPSDK supplies its standard libraries through build.mak.
 LIBS :=
-# me-core must precede me-core-lib (it references meLibLoadPrx/kcall/kinit).
+# me-mist uses the mapper's tables (meCoreSystemTable, meCoreSelectSystemTable), so it comes first.
 ifeq ($(PSP_AUDIO_ME),1)
-LIBS += -lme-core -lme-core-lib
+LIBS += -lme-mist -lme-core-mapper
 endif
 LIBS += -lpspaudiolib \
         -lpspaudio \

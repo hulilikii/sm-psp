@@ -84,6 +84,9 @@ void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
   PspLog("DIE: %s", error);
   PspLog_Flush();
+#if PSP_AUDIO_ME
+  PspAudioMe_Shutdown();  /* an injected ME syscall must not outlive this module; idempotent and bounded (~3 s) */
+#endif
   sceKernelExitGame();
   for (;;) sceKernelDelayThread(1000000);
 }
@@ -110,10 +113,20 @@ void RtlApuUnlockRaw(void) {
     sceKernelSignalSema(g_audio_sema, 1);
 }
 
-void RtlApuLock(void) {
+bool RtlApuLockTimed(uint32_t timeout_us) {
+  if (g_audio_sema < 0)
+    return true;
+  SceUInt timeout = timeout_us;
+  return sceKernelWaitSema(g_audio_sema, 1, &timeout) >= 0;
+}
+
+/* false: ME audio owns (or may own) the SPC/DSP state, the caller must skip its state access. The lock is held either way. */
+bool RtlApuLock(void) {
   RtlApuLockRaw();
 #if PSP_AUDIO_ME
-  PspAudioMe_LockState();
+  return PspAudioMe_LockState();
+#else
+  return true;
 #endif
 }
 
@@ -167,10 +180,11 @@ static void Audio_Init(void) {
 
 #if PSP_AUDIO_ME
   // Before pspAudioInit so no audio callback can race the ME start-up.
-  if (PspAudioMe_Init(g_spc_player))
-    PspLog("audio: SPC/DSP running on the Media Engine");
+  PspAudioMeInit me_init = PspAudioMe_Init(g_spc_player);
+  if (me_init == PSPME_INIT_OK)
+    PspLog("audio: SPC/DSP running on the Media Engine (MIST task per block)");
   else
-    PspLog("audio: Media Engine unavailable, using CPU audio");
+    PspLog("audio: Media Engine unavailable (init=%d), using CPU audio", (int)me_init);
 #endif
 
   if (pspAudioInit() < 0)
@@ -181,11 +195,14 @@ static void Audio_Init(void) {
 }
 
 static void Audio_Shutdown(void) {
-  // Order: stop the audio callback first, then the ME, then the semaphores.
+  // Order: stop the audio callback first, then the ME producer and task, then the semaphores.
   pspAudioSetChannelCallback(0, NULL, NULL);
   pspAudioEnd();
 #if PSP_AUDIO_ME
-  PspAudioMe_Shutdown();
+  PspAudioMeShutdown me_sd = PspAudioMe_Shutdown();
+  PspLog("audio: ME shutdown %s", me_sd == PSPME_SHUTDOWN_UNSAFE ? "UNSAFE (an ME task may still reference this module)" : "clean");
+  if (me_sd == PSPME_SHUTDOWN_UNSAFE)
+    return;  /* the producer may still use the semaphores: leave everything allocated */
 #endif
   if (g_audio_sema >= 0) {
     sceKernelDeleteSema(g_audio_sema);
@@ -203,31 +220,40 @@ static void Audio_Shutdown(void) {
 
 /* Callback thread, before the PSP sleeps: park the ME while no job is running. The audio thread carries on
  * with the CPU path (PspAudioMe_IsActive() is false). No PspLog here: it is not thread safe. */
+ 
+#if PSP_AUDIO_ME
+static volatile int g_me_suspend_result = -1;
+#endif
+
 static void Audio_PowerSuspend(void) {
 #if PSP_AUDIO_ME
-  if (!PspAudioMe_IsActive())
-    return;
-  RtlApuLock();  /* waits out a running ME job and syncs the CPU view of the SPC/DSP state */
-  PspAudioMe_Shutdown();
-  RtlApuUnlock();
+  /* Parks the producer and gives the stream back to the CPU only if no ME task is unresolved (bounded wait).
+   * If it is unresolved the ME stays "owner" (silent) and is not restarted on resume. */
+  g_me_suspend_result = (int)PspAudioMe_Suspend();
 #endif
 }
 
-/* Main thread, after resume: the sleep reset the ME, so start it again. On failure CPU audio stays. */
+/* Main thread, after resume: the sleep reset the ME, so start it again (Init takes the locks itself).
+ * On failure CPU audio stays; after an unresolved suspend ME audio stays off for the session. */
 static void Audio_PowerResume(void) {
 #if PSP_AUDIO_ME && SM_PSP_ME_RESTART
   if (PspAudioMe_IsActive())
     return;
-  RtlApuLockRaw();  /* the audio thread must not render while the state is handed to the ME */
-  bool ok = PspAudioMe_Init(g_spc_player);
-  RtlApuUnlockRaw();
-  PspLog("resume: ME audio %s", ok ? "restarted" : "unavailable, CPU audio");
+  PspAudioMeInit r = PspAudioMe_Init(g_spc_player);
+  PspLog("resume: ME audio init=%d (suspend=%d) %s", (int)r, g_me_suspend_result,
+         r == PSPME_INIT_OK ? "restarted" : "unavailable, CPU audio");
 #endif
 }
 
 #else
 
-void RtlApuLock(void) {
+bool RtlApuLock(void) {
+  return true;
+}
+
+bool RtlApuLockTimed(uint32_t timeout_us) {
+  (void)timeout_us;
+  return true;
 }
 
 void RtlApuUnlock(void) {

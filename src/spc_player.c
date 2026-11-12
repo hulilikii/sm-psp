@@ -384,7 +384,9 @@ static void Dsp_Write(SpcPlayer *p, uint8_t reg, uint8 value) {
 
 static void Not_Implemented(void) {
   assert(0);
+#ifndef NDEBUG  /* NDEBUG builds also run on the Media Engine, which has no libc */
   printf("Not Implemented\n");
+#endif
 }
 
 static uint16 SpcDivHelper(int a, uint8 b) {

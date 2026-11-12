@@ -27,6 +27,9 @@ struct StateRecorder;
 static void RtlSaveMusicStateToRam_Locked();
 static void RtlRestoreMusicAfterLoad_Locked(bool is_reset);
 
+// Result of the last RtlApuLock(): false while ME audio owns (or may own) the SPC/DSP state. Only valid with the lock held.
+static bool g_apu_state_ok = true;
+
 uint8 g_ram[0x20000];
 uint8 *g_sram;
 const uint8 *g_rom;
@@ -175,7 +178,7 @@ void RtlReset(int mode) {
   
   coroutine_state_0 = 1;
     
-  RtlApuLock();
+  g_apu_state_ok = RtlApuLock();
   RtlRestoreMusicAfterLoad_Locked(true);
   RtlApuUnlock();
 
@@ -455,7 +458,7 @@ void RtlSaveSnapshot(const char *filename, bool saving_with_bug) {
     return;
   }
 
-  RtlApuLock();
+  g_apu_state_ok = RtlApuLock();
   RtlSaveMusicStateToRam_Locked();
   StateRecorder_Save(&state_recorder, f, saving_with_bug);
   RtlApuUnlock();
@@ -486,7 +489,7 @@ void RtlSaveLoad(int cmd, int slot) {
       printf("Failed fopen: %s\n", name);
       return;
     }
-    RtlApuLock();
+    g_apu_state_ok = RtlApuLock();
     StateRecorder_Load(&state_recorder, f, cmd == kSaveLoad_Replay);
     ppu_copy(g_snes->my_ppu, g_snes->ppu);
     RtlApuUnlock();
@@ -654,14 +657,12 @@ static void RtlPopApuState_Locked(void) {
   }
 }
 
-// ME path: pop one queued frame of port writes (255 = unset). Takes the queue lock.
-static void RtlPopApuPorts(uint8 ports[4]) {
-  memset(ports, 0xff, 4);
+// ME audio producer (APU lock held, state accessible): apply one queued frame of port writes to the SPC state before
+// the job is triggered. The writes are then part of the state the ME renders from, so a failed or late job can neither
+// lose nor reorder them.
+void RtlApuPopPortsToState(void) {
   RtlApuQueueLock();
-  if (!is_uploading_apu && g_apu_queue_size != 0) {
-    ApuWriteEnt *w = &g_apu_write_ents[(g_apu_write_ent_pos - g_apu_queue_size--) & (kApuMaxQueueSize - 1)];
-    memcpy(ports, w->ports, 4);
-  }
+  RtlPopApuState_Locked();
   RtlApuQueueUnlock();
 }
 
@@ -672,23 +673,24 @@ static void RtlResetApuQueue(void) {
 
 void RtlApuUpload(const uint8 *p) {
   IO_T0();
-  RtlApuLock();
+  bool state_ok = RtlApuLock();
   RtlApuQueueLock();
   RtlResetApuQueue();
   RtlApuQueueUnlock();
-  SpcPlayer_Upload(g_spc_player, p);
+  if (state_ok)  // ME audio unresolved: the SPC state must not be written (the upload is lost, music stays as it is)
+    SpcPlayer_Upload(g_spc_player, p);
   RtlApuUnlock();
   IO_LOG("apu upload");
 }
 
 void RtlRestoreMusicAfterLoad_Locked(bool is_reset) {
-  if (g_use_my_apu_code) {
+  if (g_use_my_apu_code && g_apu_state_ok) {
     memcpy(g_spc_player->ram, g_snes->apu->ram, 65536);
     memcpy(g_spc_player->dsp->ram, g_snes->apu->dsp->ram, sizeof(Dsp) - offsetof(Dsp, ram));
     SpcPlayer_CopyVariablesFromRam(g_spc_player);
   }
 
-  if (is_reset) {
+  if (is_reset && g_apu_state_ok) {
     SpcPlayer_Initialize(g_spc_player);
   }
 
@@ -698,7 +700,7 @@ void RtlRestoreMusicAfterLoad_Locked(bool is_reset) {
 }
 
 void RtlSaveMusicStateToRam_Locked(void) {
-  if (g_use_my_apu_code) {
+  if (g_use_my_apu_code && g_apu_state_ok) {
     // Apply the whole contents of the queue to input ports
     SpcPlayer *spc_player = g_spc_player;
     RtlApuQueueLock();
@@ -719,24 +721,37 @@ void RtlSaveMusicStateToRam_Locked(void) {
 // Resampler history for the CPU path (the ME path keeps its own, inside psp_audio_me.c).
 static int16 g_cpu_rs_work[DSP_RS_WORK_SAMPLES];
 
+// Hand-over of the resampler history between the CPU path and the ME (APU lock held).
+void RtlGetCpuRsHistory(int16 *hist) {
+  memcpy(hist, g_cpu_rs_work, DSP_RS_HISTORY_SAMPLES * sizeof(int16));
+}
+
+void RtlSetCpuRsHistory(const int16 *hist) {
+  memcpy(g_cpu_rs_work, hist, DSP_RS_HISTORY_SAMPLES * sizeof(int16));
+}
+
 void RtlRenderAudio(int16 *audio_buffer, int samples, int channels) {
   assert(channels == 2);
 
 #if PSP_AUDIO_ME
-  if (g_use_my_apu_code && PspAudioMe_IsActive()) {
-    // The state lock is held for the whole ME job so the game thread cannot
-    // touch the SPC/DSP state while the ME owns it. RtlApuLockRaw does not
-    // flush caches: this thread never reads the player itself.
-    uint8 ports[4];
-    RtlApuLockRaw();
-    RtlPopApuPorts(ports);
-    PspAudioMe_Render(audio_buffer, samples, channels, ports);
-    RtlApuUnlockRaw();
-    return;
-  }
+  // Audio callback: never waits for the ME. While the ME owns the stream it only takes finished blocks from the
+  // ring (or plays silence). The CPU renders only when it owns the stream, which is re-checked under the APU lock:
+  // PspAudioMe_Init/Suspend change the owner under the same lock.
+  for (;;) {
+    if (g_use_my_apu_code) {
+      PspAudioMePop pop = PspAudioMe_PopBlock(audio_buffer, samples);
+      if (pop != PSPME_POP_CPU)
+        return;
+    }
+    RtlApuLock();
+    if (!g_use_my_apu_code || !PspAudioMe_IsActive())
+      break;
+    RtlApuUnlock();
+   }
+#else
+  RtlApuLock();
 #endif
 
-  RtlApuLock();
   RtlApuQueueLock();
   RtlPopApuState_Locked();
   RtlApuQueueUnlock();
