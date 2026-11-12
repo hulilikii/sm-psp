@@ -53,6 +53,9 @@ static int g_ppu_render_flags;
 static int g_snes_width = 256;
 static int g_snes_height = 240;
 static uint32_t g_frame_ctr;
+#if PSP_AUDIO_ENABLED
+static bool g_psp_audio_started;
+#endif
 
 
 /* HOME is owned by the firmware in user mode: without an exit callback the
@@ -209,6 +212,7 @@ static void Audio_Init(void) {
   if (pspAudioInit() < 0)
     Die("pspAudioInit failed");
 
+  g_psp_audio_started = true;
   pspAudioSetChannelCallback(0, AudioCallback, NULL);
   pspAudioSetVolume(0, PSP_VOLUME_MAX, PSP_VOLUME_MAX);
 }
@@ -217,6 +221,7 @@ static void Audio_Shutdown(void) {
   // Order: stop the audio callback first, then the ME producer and task, then the semaphores.
   pspAudioSetChannelCallback(0, NULL, NULL);
   pspAudioEnd();
+  g_psp_audio_started = false;
 #if PSP_AUDIO_ME
   PspAudioMeShutdown me_sd = PspAudioMe_Shutdown();
   PspLog("audio: ME shutdown %s", me_sd == PSPME_SHUTDOWN_UNSAFE ? "UNSAFE (an ME task may still reference this module)" : "clean");
