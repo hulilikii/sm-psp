@@ -8,6 +8,7 @@
 
 #if PSP_AUDIO_ENABLED
 bool PspMsu_Init(const char *app_dir);
+void PspMsu_Resume(void);
 bool PspMsu_Shutdown(void);
 void PspMsu_PollDiagnostics(void);
 bool PspMsu_HandleMusic(uint8_t requested, uint8_t current, uint8_t bank);

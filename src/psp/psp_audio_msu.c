@@ -554,6 +554,26 @@ static void StopTrack(void) {
   NextGeneration();
 }
 
+ static void StopTrack(void) {
+   g_request_track = 0;
+   g_request_game_track = 0;
+   g_request_loop = false;
+
+   __sync_synchronize();
+   NextGeneration();
+ }
+
+/* A suspend/resume can leave the reader's open file handle unusable.
+ * Force the reader to close and reopen the current track. */
+void PspMsu_Resume(void) {
+  if (!g_enabled || g_request_track == 0)
+    return;
+
+  uint32_t generation = NextGeneration();
+  PspLog("msu: resume track=%u generation=%u",
+         g_request_track, generation);
+}
+
 /* Exact data and lengths from supermetroid_msu1.asm.
  * Rows correspond to MusicBank values $00, $03, ... $48.
  * Unlike the original proposal, short rows are not padded.

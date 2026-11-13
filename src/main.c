@@ -290,6 +290,9 @@ static void Audio_PowerSuspend(void) {
  * suspend if the stream is still ME-owned and restarts only when the state is back with the CPU (it takes the
  * locks itself). On failure CPU audio stays, or silence if the ME still owns the state. */
 static void Audio_PowerResume(void) {
+#if PSP_AUDIO_ENABLED
+  PspMsu_Resume();
+#endif
 #if PSP_AUDIO_ME && SM_PSP_ME_RESTART
   PspAudioMeInit r = PspAudioMe_Resume(g_spc_player);
   PspLog("resume: ME audio init=%d (suspend=%d) %s", (int)r, g_me_suspend_result,
