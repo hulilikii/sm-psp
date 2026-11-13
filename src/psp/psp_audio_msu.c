@@ -17,6 +17,18 @@
 #define MSU_READER_STACK  0x4000
 #define MSU_READER_PRIO   0x1f
 
+enum {
+  MSU_OPEN_STAGE_OK = 0,
+  MSU_OPEN_STAGE_PATH_FORMAT,
+  MSU_OPEN_STAGE_IO_OPEN,
+  MSU_OPEN_STAGE_HEADER_READ,
+  MSU_OPEN_STAGE_HEADER_MAGIC,
+  MSU_OPEN_STAGE_FILE_SIZE,
+  MSU_OPEN_STAGE_EMPTY_PCM,
+  MSU_OPEN_STAGE_LOOP_POINT,
+  MSU_OPEN_STAGE_DATA_SEEK
+};
+
 typedef struct MsuBlock {
   uint32_t generation;
   int16_t samples[MSU_SAMPLES];
@@ -54,11 +66,14 @@ typedef struct MsuDiagEvent {
   uint8_t track;
   uint8_t bank;
   uint8_t status;
-  char path[64];
+  uint8_t stage;
+  uint8_t candidate;
+  int32_t io_result;
+  char path[320];
 } MsuDiagEvent;
 
 static MsuDiagEvent g_diag_request;
-static MsuDiagEvent g_diag_open;
+static MsuDiagEvent g_diag_open[2];
 static MsuDiagEvent g_diag_ready;
 static MsuDiagEvent g_diag_consumed;
 
@@ -73,6 +88,9 @@ static void PublishDiag(MsuDiagEvent *event, uint32_t generation,
   event->track = track;
   event->bank = bank;
   event->status = status;
+  event->stage = MSU_OPEN_STAGE_OK;
+  event->candidate = 0;
+  event->io_result = 0;
   if (path)
     snprintf(event->path, sizeof(event->path), "%s", path);
   else
@@ -93,6 +111,9 @@ static bool ReadDiag(MsuDiagEvent *event, uint32_t *seen,
   snapshot->track = event->track;
   snapshot->bank = event->bank;
   snapshot->status = event->status;
+  snapshot->stage = event->stage;
+  snapshot->candidate = event->candidate;
+  snapshot->io_result = event->io_result;
   memcpy(snapshot->path, event->path, sizeof(snapshot->path));
   __sync_synchronize();
 
@@ -102,6 +123,26 @@ static bool ReadDiag(MsuDiagEvent *event, uint32_t *seen,
 
   *seen = after;
   return true;
+}
+
+static void PublishOpenDiag(MsuDiagEvent *event, uint32_t generation,
+                            uint8_t game_track, uint8_t track,
+                            uint8_t candidate, uint8_t stage,
+                            int32_t io_result, const char *path) {
+  event->generation = generation;
+  event->game_track = game_track;
+  event->track = track;
+  event->bank = 0;
+  event->status = stage == MSU_OPEN_STAGE_OK;
+  event->stage = stage;
+  event->candidate = candidate;
+  event->io_result = io_result;
+  if (path)
+    snprintf(event->path, sizeof(event->path), "%s", path);
+  else
+    event->path[0] = 0;
+  __sync_synchronize();
+  __sync_add_and_fetch(&event->sequence, 1);
 }
 
 static uint32_t AtomicLoad32(volatile uint32_t *p) {
@@ -122,18 +163,34 @@ static uint32_t ReadLe32(const uint8_t *p) {
          ((uint32_t)p[3] << 24);
 }
 
-static bool ReadExact(SceUID fd, void *dst, unsigned bytes) {
+// Returns 1 on success, 0 on EOF, or the negative sceIoRead error.
+static int ReadExact(SceUID fd, void *dst, unsigned bytes) {
   uint8_t *p = (uint8_t *)dst;
   unsigned done = 0;
 
   while (done < bytes) {
     int n = sceIoRead(fd, p + done, bytes - done);
     if (n <= 0)
-      return false;
+      return n;
     done += (unsigned)n;
   }
 
-  return true;
+  return 1;
+}
+
+static const char *OpenStageName(uint8_t stage) {
+  switch (stage) {
+    case MSU_OPEN_STAGE_OK:          return "ok";
+    case MSU_OPEN_STAGE_PATH_FORMAT: return "path-format";
+    case MSU_OPEN_STAGE_IO_OPEN:     return "sceIoOpen";
+    case MSU_OPEN_STAGE_HEADER_READ:return "header-read";
+    case MSU_OPEN_STAGE_HEADER_MAGIC:return "header-magic";
+    case MSU_OPEN_STAGE_FILE_SIZE:   return "file-size";
+    case MSU_OPEN_STAGE_EMPTY_PCM:   return "empty-pcm";
+    case MSU_OPEN_STAGE_LOOP_POINT:  return "loop-point";
+    case MSU_OPEN_STAGE_DATA_SEEK:   return "data-seek";
+    default:                         return "unknown";
+  }
 }
 
 /* MSU-1 PCM header:
@@ -141,8 +198,8 @@ static bool ReadExact(SceUID fd, void *dst, unsigned bytes) {
  * Followed by signed 16-bit interleaved stereo PCM at 44100 Hz.
  */
 static bool OpenTrack(uint8_t track, bool repeat,
-                      SceUID *out_fd, int *loop_offset,
-                      char *out_path, size_t out_path_size) {
+                      uint32_t generation, uint8_t game_track,
+                      SceUID *out_fd, int *loop_offset) {
   static const char *const patterns[] = {
     "%ssupermetroid_msu1-%u.pcm",
     "%s%u.pcm",
@@ -153,22 +210,50 @@ static bool OpenTrack(uint8_t track, bool repeat,
   for (unsigned i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
     int path_len = snprintf(path, sizeof(path), patterns[i],
                             g_audio_dir, (unsigned)track);
-    if (path_len < 0 || path_len >= (int)sizeof(path))
+    if (path_len < 0 || path_len >= (int)sizeof(path)) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_PATH_FORMAT,
+                      path_len, path);
       continue;
-
+   }
+  
     SceUID fd = sceIoOpen(path, O_RDONLY, 0);
-    if (fd < 0)
+    if (fd < 0) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_IO_OPEN, fd, path);
       continue;
+    }
 
     uint8_t header[8];
-    if (!ReadExact(fd, header, sizeof(header)) ||
-        memcmp(header, "MSU1", 4) != 0) {
+    int read_result = ReadExact(fd, header, sizeof(header));
+    if (read_result != 1) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_HEADER_READ,
+                      read_result, path);
+      sceIoClose(fd);
+      continue;
+    }
+
+    if (memcmp(header, "MSU1", 4) != 0) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_HEADER_MAGIC, 0, path);
       sceIoClose(fd);
       continue;
     }
 
     int file_size = sceIoLseek32(fd, 0, SEEK_END);
+    if (file_size < 0) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_FILE_SIZE,
+                      file_size, path);
+      sceIoClose(fd);
+      continue;
+    }
+
     if (file_size < 8 || ((file_size - 8) & 3) != 0) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_FILE_SIZE,
+                      file_size, path);
       sceIoClose(fd);
       continue;
     }
@@ -177,18 +262,38 @@ static bool OpenTrack(uint8_t track, bool repeat,
     uint32_t loop_frame = ReadLe32(header + 4);
     uint64_t offset = 8ULL + (uint64_t)loop_frame * 4ULL;
 
-    if (total_frames == 0 ||
-        (repeat && loop_frame >= total_frames) ||
-        (repeat && (offset > INT_MAX || offset >= (uint32_t)file_size)) ||
-        sceIoLseek32(fd, 8, SEEK_SET) < 0) {
+    if (total_frames == 0) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_EMPTY_PCM,
+                      file_size, path);
+      sceIoClose(fd);
+      continue;
+    }
+
+    if (repeat &&
+        (loop_frame >= total_frames ||
+         offset > INT_MAX ||
+         offset >= (uint32_t)file_size)) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_LOOP_POINT,
+                      (int32_t)loop_frame, path);
+      sceIoClose(fd);
+      continue;
+    }
+
+    int seek_result = sceIoLseek32(fd, 8, SEEK_SET);
+    if (seek_result < 0) {
+      PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                      (uint8_t)i, MSU_OPEN_STAGE_DATA_SEEK,
+                      seek_result, path);
       sceIoClose(fd);
       continue;
     }
 
     *loop_offset = repeat ? (int)offset : 8;
     *out_fd = fd;
-    if (out_path && out_path_size)
-      snprintf(out_path, out_path_size, "%s", path);
+    PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
+                    (uint8_t)i, MSU_OPEN_STAGE_OK, 0, path);
     return true;
   }
 
@@ -241,6 +346,7 @@ static int ReaderThread(SceSize args, void *argp) {
   bool repeat = false;
   bool eof = false;
   uint8_t track = 0;
+  uint8_t game_track = 0;
   int loop_offset = 8;
 
   int16_t block[MSU_SAMPLES];
@@ -258,12 +364,12 @@ static int ReaderThread(SceSize args, void *argp) {
 
       __sync_synchronize();
       track = g_request_track;
+      game_track = g_request_game_track;
       repeat = g_request_loop;
 
       if (track) {
-        char path[64] = { 0 };
-        bool opened = OpenTrack(track, repeat, &fd, &loop_offset,
-                                path, sizeof(path));
+        bool opened = OpenTrack(track, repeat, generation, game_track,
+                                &fd, &loop_offset);
 
         if (generation != AtomicLoad32(&g_generation)) {
           if (fd >= 0)
@@ -271,9 +377,6 @@ static int ReaderThread(SceSize args, void *argp) {
           fd = -1;
           continue;
         }
-
-        PublishDiag(&g_diag_open, generation, g_request_game_track,
-                    track, 0, opened ? 1 : 0, path);
 
         if (!opened)
           __sync_lock_test_and_set(&g_failed_generation, generation);
@@ -617,17 +720,22 @@ int PspMsu_GetVolume(void) {
 /* Called from the main thread only. Never perform file logging from the
  * reader or audio/ME producer threads. */
 void PspMsu_PollDiagnostics(void) {
-  static uint32_t seen_request, seen_open, seen_ready, seen_consumed;
+  static uint32_t seen_request, seen_open[2], seen_ready, seen_consumed;
   MsuDiagEvent event;
 
   if (ReadDiag(&g_diag_request, &seen_request, &event))
     PspLog("msu: request game=%u bank=%u track=%u generation=%u",
            event.game_track, event.bank, event.track, event.generation);
 
-  if (ReadDiag(&g_diag_open, &seen_open, &event))
-    PspLog("msu: open %s track=%u generation=%u path=%s",
-           event.status ? "OK" : "FAILED", event.track,
-           event.generation, event.path[0] ? event.path : "(no valid file)");
+  for (unsigned i = 0; i < 2; i++) {
+    if (ReadDiag(&g_diag_open[i], &seen_open[i], &event))
+      PspLog("msu: open %s candidate=%u track=%u game=%u generation=%u "
+             "stage=%s detail=0x%08X path=%s",
+             event.status ? "OK" : "FAILED", event.candidate,
+             event.track, event.game_track, event.generation,
+             OpenStageName(event.stage), (unsigned)event.io_result,
+             event.path[0] ? event.path : "(path unavailable)");
+  }
 
   if (ReadDiag(&g_diag_ready, &seen_ready, &event))
     PspLog("msu: prebuffer ready track=%u generation=%u",
