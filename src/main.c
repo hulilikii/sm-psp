@@ -274,15 +274,19 @@ static void Audio_Shutdown(void) {
  
 #if PSP_AUDIO_ME
 static volatile int g_me_suspend_result = -1;
+static volatile uint32_t g_me_suspend_us;  /* callback thread writes, Power_Resume logs */
 #endif
 
 static void Audio_PowerSuspend(void) {
 #if PSP_AUDIO_ME
   /* Parks the producer and gives the stream back to the CPU only if no ME task is unresolved (bounded wait).
    * If it is unresolved the ME stays "owner" (silent) and is not restarted on resume. */
+  const uint32_t t0 = sceKernelGetSystemTimeLow();
   PspAudioMeSuspend r = PspAudioMe_Suspend();
-  if (r != PSPME_SUSPEND_ALREADY)  /* the firmware may notify twice; a repeat must not overwrite the real result */
+  if (r != PSPME_SUSPEND_ALREADY) {  /* the firmware may notify twice; a repeat must not overwrite the real result */
     g_me_suspend_result = (int)r;
+    g_me_suspend_us = sceKernelGetSystemTimeLow() - t0;
+  }
 #endif
 }
 
@@ -294,8 +298,10 @@ static void Audio_PowerResume(void) {
   PspMsu_Resume();
 #endif
 #if PSP_AUDIO_ME && SM_PSP_ME_RESTART
+  const uint32_t t0 = sceKernelGetSystemTimeLow();
   PspAudioMeInit r = PspAudioMe_Resume(g_spc_player);
-  PspLog("resume: ME audio init=%d (suspend=%d) %s", (int)r, g_me_suspend_result,
+  PspLog("resume: ME audio init=%d (suspend=%d, suspend_us=%u, resume_us=%u) %s", (int)r, g_me_suspend_result,
+         (unsigned)g_me_suspend_us, (unsigned)(sceKernelGetSystemTimeLow() - t0),
          r == PSPME_INIT_OK ? "restarted" : r == PSPME_INIT_UNRESOLVED ? "state still ME-owned, silent" : "unavailable, CPU audio");
   g_me_suspend_result = -1;
 #endif
