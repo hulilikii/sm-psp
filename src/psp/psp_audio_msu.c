@@ -5,7 +5,6 @@
 
 #include <pspkernel.h>
 #include <pspiofilemgr.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
@@ -217,7 +216,7 @@ static bool OpenTrack(uint8_t track, bool repeat,
       continue;
    }
   
-    SceUID fd = sceIoOpen(path, O_RDONLY, 0);
+    SceUID fd = sceIoOpen(path, PSP_O_RDONLY, 0);
     if (fd < 0) {
       PublishOpenDiag(&g_diag_open[i], generation, game_track, track,
                       (uint8_t)i, MSU_OPEN_STAGE_IO_OPEN, fd, path);
