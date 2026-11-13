@@ -565,9 +565,8 @@ void PspMsu_Resume(void) {
          g_request_track, generation);
 }
 
-/* Exact data and lengths from supermetroid_msu1.asm.
+/* Rows match the updated IPS driver's mapping table at $80:CE18.
  * Rows correspond to MusicBank values $00, $03, ... $48.
- * Unlike the original proposal, short rows are not padded.
  */
 static const uint8_t kMusicMap[] = {
   4, 5,
@@ -590,10 +589,10 @@ static const uint8_t kMusicMap[] = {
   0, 0, 0,
   28,
   29,
-  30,
-  0,
-  0,
-  22, 23,
+  30, 100, 101, 22, 23, 10,
+  100, 101, 22, 23, 10,
+  101, 22, 23, 10,
+  22, 23, 10,
   10,
 };
 
@@ -602,7 +601,7 @@ static const uint8_t kMusicMapOffset[25] = {
   10, 11, 12, 13, 14,
   16, 18, 19, 22, 24,
   25, 28, 30, 33, 34,
-  35, 36, 37, 38, 40,
+  35, 41, 46, 50, 53,
 };
 
 static const uint8_t kMusicMapLength[25] = {
@@ -610,11 +609,12 @@ static const uint8_t kMusicMapLength[25] = {
   1, 1, 1, 1, 2,
   2, 1, 3, 2, 1,
   3, 2, 3, 1, 1,
-  1, 1, 1, 2, 1,
+  6, 5, 4, 3, 1,
 };
 
 static bool TrackRepeats(uint8_t track) {
-  return track != 1 && track != 2 && track != 29 && track != 30;
+  return track != 1 && track != 2 && track != 29 && track != 30 &&
+         track != 100 && track != 101;
 }
 
 bool PspMsu_HandleMusic(uint8_t requested, uint8_t current, uint8_t bank) {
