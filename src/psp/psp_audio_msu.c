@@ -554,15 +554,6 @@ static void StopTrack(void) {
   NextGeneration();
 }
 
- static void StopTrack(void) {
-   g_request_track = 0;
-   g_request_game_track = 0;
-   g_request_loop = false;
-
-   __sync_synchronize();
-   NextGeneration();
- }
-
 /* A suspend/resume can leave the reader's open file handle unusable.
  * Force the reader to close and reopen the current track. */
 void PspMsu_Resume(void) {
