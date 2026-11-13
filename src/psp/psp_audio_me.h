@@ -50,7 +50,8 @@ typedef enum {
   PSPME_INIT_MIST,          // meMistInit() < 0: no CFW kernel loader, unsupported ME core (BL/SD/unknown), ...
   PSPME_INIT_UNSUPPORTED,   // mapper table lacks an entry the task needs
   PSPME_INIT_PING,          // the injected task did not report completion
-  PSPME_INIT_UNRESOLVED,    // Resume: the pre-sleep suspend did not hand the state back; ME audio stays off
+  PSPME_INIT_UNRESOLVED,    // ownership not established (state still ME-owned / a task unresolved); ME audio stays off
+  PSPME_INIT_PRODUCER_BUSY, // the previous producer thread has not ended yet; none is started (never two). CPU audio stays
 } PspAudioMeInit;
 
 typedef enum {
@@ -77,9 +78,10 @@ typedef enum {
   PSPME_POP_CPU,             // ring empty and the CPU owns the stream: the caller renders the block
 } PspAudioMePop;
 
-// Boot and every resume. Not with the APU lock held. On any failure the CPU keeps the audio path.
+// Boot and every resume: a full re-init (ME restart, reinjection, ping, fresh shared state, one new producer). Requires
+// that the previous producer is gone and the CPU owns the state. Not with the APU lock held. On any failure the CPU keeps the audio path.
 PspAudioMeInit PspAudioMe_Init(struct SpcPlayer *player);
-// Power callback, before sleep. Parks the producer and returns the stream to the CPU if (and only if) no task is unresolved. Blocks up to ~2 s.
+// Power callback, before sleep. Returns the stream to the CPU and stops + joins the producer if (and only if) no task is unresolved. Blocks up to ~2 s.
 PspAudioMeSuspend PspAudioMe_Suspend(void);
 // After a sleep (main thread, not with the APU lock held). Re-runs Suspend first if the stream is still ME-owned (duplicate/missed/unresolved suspend), and only calls Init when the state is back with the CPU. A sleep reset of the ME is not accepted as proof that a task stopped.
 PspAudioMeInit PspAudioMe_Resume(struct SpcPlayer *player);

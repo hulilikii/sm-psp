@@ -55,6 +55,9 @@
 #ifndef ME_FIRST_BLOCK_WAIT_US
 #define ME_FIRST_BLOCK_WAIT_US 100000
 #endif
+#ifndef ME_PRODUCER_JOIN_US
+#define ME_PRODUCER_JOIN_US 300000  // a told-to-stop producer leaves within a few ms
+#endif
 #define ME_PARK_POLL_US 5000
 #define ME_PRODUCER_PRIO 0x14         // below the audio thread (0x12), above the main thread (0x20)
 #define ME_PRODUCER_STACK 0x4000
@@ -387,7 +390,11 @@ static void PaintSharedBuffers(void) {
   CpuWritebackInvalidate(&g_job, sizeof(g_job));
   CpuWritebackInvalidate(&g_result, sizeof(g_result));
   CpuWritebackInvalidate(g_me_stack, sizeof(g_me_stack));
+  memset(g_me_output, 0, sizeof(g_me_output));  // ME idle: fresh PCM buffer too
+  CpuWritebackInvalidate(g_me_output, sizeof(g_me_output));
   g_seq = g_outstanding = 0;
+  g_pending = false;
+  g_refusals = 0;
   g_state = PSPME_IDLE;
 }
 
@@ -434,6 +441,7 @@ static void Disengage_Locked(void) {
   RtlSetCpuRsHistory(g_me_rs_work);
   g_engaged = false;
   g_accepting = false;
+  g_stop = true;  // the producer retires with the stream; Init starts a fresh one (never two)
 }
 
 static void ProduceOne(void) {
@@ -527,6 +535,48 @@ static int ProducerThread(SceSize args, void *argp) {
   return 0;
 }
 
+// ---- producer lifecycle ----
+// At most one producer exists. g_thread is the only handle: StartProducer() sets it, ReapProducer() clears it only after
+// the thread has really ended. A thread that does not end keeps its handle, so no second one can start. It is never
+// terminated (it may sit in a kernel wait or hold the APU lock). Call both without the APU lock held.
+static bool ReapProducer(uint32_t timeout_us) {
+  if (g_thread < 0)
+    return true;
+  if (g_unknown)
+    return false;  // RecoveryStep needs this thread to see a late marker
+  g_stop = true;
+  SceUInt to = timeout_us;
+  if (sceKernelWaitThreadEnd(g_thread, &to) < 0)
+    return false;
+  sceKernelDeleteThread(g_thread);
+  g_thread = -1;
+  return true;
+}
+
+static bool StartProducer(void) {
+  if (g_thread >= 0)
+    return false;
+  g_accepting = false;
+  g_stop = false;
+  const SceUID t = sceKernelCreateThread("sm-me-audio", ProducerThread, ME_PRODUCER_PRIO, ME_PRODUCER_STACK,
+                                         PSP_THREAD_ATTR_USER, NULL);
+  if (t < 0)
+    return false;
+  g_thread = t;
+  if (sceKernelStartThread(t, 0, NULL) < 0) {
+    g_stop = true;
+    sceKernelDeleteThread(t);
+    g_thread = -1;
+    return false;
+  }
+  return true;
+}
+
+// The CPU owns the stream and every ME-visible buffer: no producer, nothing in flight or unresolved, no unpublished block.
+static bool CpuOwnsState(void) {
+  return g_thread < 0 && !g_engaged && !g_unknown && !g_fatal && !g_disabled && !g_pending && g_state == PSPME_IDLE;
+}
+
 // ---- syscall entry lifetime ----
 // MIST has no API to remove an injected entry or to read the original one. The only restore possible with
 // the public API is to inject the address the mapper lists for this index (me-core-mapper's table mirrors
@@ -555,23 +605,12 @@ PspAudioMeInit PspAudioMe_Init(SpcPlayer *player) {
   if (!player || !player->dsp || ((uintptr_t)player & (ME_CACHE_LINE - 1)) ||
       ((uintptr_t)player->dsp & (ME_CACHE_LINE - 1)))
     return PSPME_INIT_BAD_ARGS;  // would share cache lines with unrelated heap data
+  // Strict ownership before meMistInit() restarts the ME core: the previous producer has ended and the CPU owns the state.
+  if (!ReapProducer(ME_PRODUCER_JOIN_US))
+    return PSPME_INIT_PRODUCER_BUSY;
+  if (!CpuOwnsState())
+    return PSPME_INIT_UNRESOLVED;
   g_me_player = player;
-
-  if (g_thread < 0) {
-    g_stop = false;
-    g_accepting = false;
-    g_thread = sceKernelCreateThread("sm-me-audio", ProducerThread, ME_PRODUCER_PRIO, ME_PRODUCER_STACK,
-                                     PSP_THREAD_ATTR_USER, NULL);
-    if (g_thread < 0) {
-      g_thread = -1;
-      return PSPME_INIT_NO_RESOURCES;
-    }
-    if (sceKernelStartThread(g_thread, 0, NULL) < 0) {
-      sceKernelDeleteThread(g_thread);
-      g_thread = -1;
-      return PSPME_INIT_NO_RESOURCES;
-    }
-  }
 
   // No ME task can be in flight here (boot, or resume after a suspend that confirmed idle): meMistInit()
   // restarts the ME core, so it must never run while a task may be live.
@@ -602,6 +641,11 @@ PspAudioMeInit PspAudioMe_Init(SpcPlayer *player) {
   }
   g_state = PSPME_IDLE;
 
+  // The ME answered. Exactly one producer is started now (it parks until engaged below); if that fails the ME stays
+  // idle and the CPU keeps the stream.
+  if (!StartProducer())
+    return PSPME_INIT_NO_RESOURCES;
+
   // Hand the stream to the ME. The CPU path's resampler history moves into the ME's workspace.
   RtlApuLockRaw();
   int16_t hist[ME_HIST_SAMPLES];
@@ -625,8 +669,10 @@ PspAudioMeInit PspAudioMe_Init(SpcPlayer *player) {
 
 // the firmware can deliver the suspend notification more than once per sleep. A repeat after a successful suspend returns ALREADY (the first result is the one that matters), it never reports a stale "not engaged" for a stream that was engaged until the first call.
 PspAudioMeSuspend PspAudioMe_Suspend(void) {
-  if (!g_engaged)
+  if (!g_engaged) {
+    ReapProducer(ME_PRODUCER_JOIN_US);  // a producer retired by a refusal streak still holds its handle
     return g_suspended ? PSPME_SUSPEND_ALREADY : PSPME_SUSPEND_NOT_ENGAGED;
+  }
   g_accepting = false;  // no job starts after the one in flight (the producer re-checks under the lock)
   const uint32_t t0 = sceKernelGetSystemTimeLow();
   // A block that is rendered but not yet queued still belongs to the stream: wait for the callback to make room.
@@ -648,6 +694,8 @@ PspAudioMeSuspend PspAudioMe_Suspend(void) {
   Disengage_Locked();
   g_suspended = true;
   RtlApuUnlockRaw();
+  // The producer was told to stop under the lock; join it outside (it needs the lock to leave). If it is late the state is still the CPU's, but Init refuses to start another until this one is gone.
+  ReapProducer(ME_PRODUCER_JOIN_US);
   return PSPME_SUSPEND_OK;
 }
 
