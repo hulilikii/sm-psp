@@ -1330,6 +1330,7 @@ static void FlickLog(void) {
 /* Fullscreen source dimensions and HUD layout. */
 enum {
   kSrcRows = 224,
+  kCompX = 60, kCompY = 1, kCompW = 360, kCompH = 270,
   kHudRows = 31,          /* HUD IRQ ends at V=31 */
   kHudRowsMax = 32,       /* Gameplay begins at source row 32 */
   kHudBlock = 24,         /* Three rows of 8-pixel HUD tiles */
@@ -1587,14 +1588,7 @@ enum { kImgSlots = 2, kImgW = 512, kImgH = 256, kImgCells = 64 * 32, kImgMinRuns
  * elsewhere). The image is described to the GE with its real size, so every texel the GE may address is inside the
  * allocation. Rows 224-255 hold stale data and are never sampled (UV inset, see ComposeQuad users).
  * Only the 224 visible SNES rows exist; an overscan frame is composed as Layout B from its first 224 rows. */
-enum {
-  kSrcRows = 224,
-  kCompX = 60, kCompY = 1, kCompW = 360, kCompH = 270,  /* centred 4:3 gameplay rectangle on the 480x272 panel */
-  kHudRows = 31,                                        /* HUD lines 1-31: the IRQ handlers end it at V=31 (sm_80.c) */
-  kHudRowsMax = 32,                                     /* the gameplay crop starts at row 32 */
-  kHudBlock = 24,                                       /* hud_tilemap: 3 tile rows */
-  kHudResvWord = 0x5820 + 8,                            /* VRAM word of hud_tilemap[8]: auto-reserve glyph (row 0, col 8) */
-};
+
 CASSERT(kGameWidth * 256 * 2 <= kSubBytes);  /* 256x256 RGB565 fits the 256 KB texture region */
 
 typedef struct LayerImg { uint16_t map, tile; uint8_t wide, high, valid; uint16_t nhi, maxt; } LayerImg;  /* maxt: highest tile number + 1 */
