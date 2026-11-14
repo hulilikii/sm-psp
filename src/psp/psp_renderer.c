@@ -14,6 +14,7 @@
 #include "src/psp/psp_renderer.h"
 #include "src/psp/psp_log.h"
 #include "src/psp/psp_audio_me.h"
+#include "src/psp/psp_hud_icons.h"
 
 #if SM_PSP_LOG
 #define PROF(...) __VA_ARGS__
@@ -1326,7 +1327,97 @@ static void FlickLog(void) {
 }
 #endif
 
+/* ---- HUD detection for the final composition. Runs from the PPU line hook in every renderer path (GE active, software,
+ * software PPU skipped), before CaptureImpl()'s g_ge_active early-out. The HUD interval is the one the game's IRQ handlers
+ * make (sm_80.c): each *_BeginHud sets TM=4 (BG3 only) and schedules its end at V=31; the main and start-of-door handlers also
+ * write BG3SC=$5A (map $5800, 32x64), the others (Draygon, vertical/horizontal door) leave BG3SC as it is, so the signature
+ * checks the register state, not which handler ran. $5800 is where InitializeHud/HandleHudTilemap keep the HUD tilemap, so
+ * "BG3 only, map $5800" is by definition the HUD being displayed. The interval must be 31 (or 32) rows from row 0, with no
+ * later matching row and one constant BG3 scroll. Nothing here looks at scene names or only at the BG mode. Rows that are
+ * BG3-only but use another map are counted (tm4) and logged, so a handler that shows the HUD with a different map is visible. */
+typedef struct HudCap {
+  uint16_t run;            /* consecutive HUD rows from row 0 */
+  uint16_t nlines;         /* last line seen (224 normally, 239/240 for an overscan frame) */
+  uint16_t hs, vs;         /* BG3 scroll on the first HUD row */
+  uint16_t tm4;            /* BG3-only rows (mode 1, not blanked) that did not match the HUD map */
+  uint16_t rsv;            /* hud_tilemap[8] as rendered this frame (auto-reserve glyph) */
+  bool open, stray, gap, scroll_ok;
+} HudCap;
+static HudCap g_hud;
+static const Ppu *g_hud_ppu;  /* for frameOverscan, which the PPU sets at V=225 of the frame being composed */
+
+static inline bool HudLineSig(const Ppu *p) {
+  const BgLayer *b = &p->bgLayer[2];
+  return !p->forcedBlank && p->mode == 1 && (p->screenEnabled[0] & 0x1f) == 4 && b->tilemapAdr == 0x5800 &&
+         !b->tilemapWider && b->tilemapHigher && !b->bigTiles;
+}
+
+static void HudCapture(const Ppu *p, int line) {
+  if (line < 1 || line > kMaxLines)
+    return;
+  HudCap *h = &g_hud;
+  g_hud_ppu = p;
+  if (line == 1) {
+    memset(h, 0, sizeof(*h));
+    h->open = true;
+    h->scroll_ok = true;
+  } else if (line != (int)h->nlines + 1) {
+    h->gap = true;
+  }
+  h->nlines = (uint16_t)line;
+  if (!HudLineSig(p)) {
+    h->open = false;
+    if (!p->forcedBlank && p->mode == 1 && (p->screenEnabled[0] & 0x1f) == 4)
+      h->tm4++;
+    return;
+  }
+  uint16_t hs = p->bgLayer[2].hScroll & 0x3ff, vs = p->bgLayer[2].vScroll & 0x3ff;
+  if (h->open && h->run == 0) {
+    h->hs = hs;
+    h->vs = vs;
+    h->rsv = p->vram[kHudResvWord];
+  } else if (hs != h->hs || vs != h->vs) {
+    h->scroll_ok = false;
+  }
+  if (h->open)
+    h->run++;
+  else
+    h->stray = true;
+}
+
+/* Layout decision. kHudOk: Layout A; everything else is Layout B (the full image) with the reason for the log. */
+enum { kHudOk, kHudNone, kHudGap, kHudStray, kHudScroll, kHudLong, kHudGeom, kHudShort, kHudOverscan };
+
+/* *off: BG3 pixel row b is on screen row b - *off (the SNES BG line is 1-based: off = 1 + vscroll). hud_tilemap row 0 is BG
+ * tile row 1 ($5820; the 32-word row at $5800 is a separate header row), so it starts on screen row 8 - off. */
+static int HudResolve(int *off) {
+  const HudCap *h = &g_hud;
+  if ((g_hud_ppu && g_hud_ppu->frameOverscan) || h->nlines > kSrcRows)
+    return kHudOverscan;  /* 239/240 line frame: composed as Layout B from its first 224 rows */
+  if (h->gap || h->nlines < kSrcRows)
+    return kHudGap;
+  if (h->run == 0)
+    return kHudNone;
+  if (h->stray)
+    return kHudStray;
+  if (!h->scroll_ok || (h->hs & 0x3ff) != 0)
+    return kHudScroll;
+  if (h->run < kHudRows)
+    return kHudShort;
+  if (h->run > kHudRowsMax)
+    return kHudLong;
+  int vs = h->vs & 0x3ff;
+  if (vs >= 0x200)
+    vs -= 0x400;
+  const int o = 1 + vs;
+  if (8 - o < 0 || 8 - o + kHudBlock > (int)h->run)
+    return kHudGeom;
+  *off = o;
+  return kHudOk;
+}
+
 void PspRenderer_CaptureLine(const Ppu *p, int line) {
+  HudCapture(p, line);
 #if SM_PSP_LOG
 #if SM_PSP_PROBES
   WinProbe(p, line);
@@ -1478,6 +1569,25 @@ static void BuildClut7(int b) {
 enum { kImgSlots = 2, kImgW = 512, kImgH = 256, kImgCells = 64 * 32, kImgMinRuns = 12, kImgVerify = 8,
        kImgBytes = kImgW * kImgH,  /* VRAM: two images behind the third frame buffer (BG2, BG3); 512x256 (wide map) or 256x512 (high map) */
        kVramImg0 = kVramBuf2 + kBufBytes, kVramImgEnd = kVramImg0 + kImgSlots * kImgBytes };
+
+/* Final 4:3 composition (fullscreen.md). The GE scene is still drawn at (kLeft, kTop) of the draw buffer. Present() then
+ * copies its 256x224 visible rows into the texture region (kVramTexture, 262144 bytes) as a 256x256 RGB565 image, and the
+ * compositor samples that copy, so no render target is sampled while the GE writes it. No EDRAM is added: this region
+ * holds the multisub target, the mosaic source images and the software-frame texture, which are all dead once the scene
+ * list has been synced (each is rewritten before use in the next frame; layer images, atlases and frame buffers are
+ * elsewhere). The image is described to the GE with its real size, so every texel the GE may address is inside the
+ * allocation. Rows 224-255 hold stale data and are never sampled (UV inset, see ComposeQuad users).
+ * Only the 224 visible SNES rows exist; an overscan frame is composed as Layout B from its first 224 rows. */
+enum {
+  kSrcRows = 224,
+  kCompX = 60, kCompY = 1, kCompW = 360, kCompH = 270,  /* centred 4:3 gameplay rectangle on the 480x272 panel */
+  kHudRows = 31,                                        /* HUD lines 1-31: the IRQ handlers end it at V=31 (sm_80.c) */
+  kHudRowsMax = 32,                                     /* the gameplay crop starts at row 32 */
+  kHudBlock = 24,                                       /* hud_tilemap: 3 tile rows */
+  kHudResvWord = 0x5820 + 8,                            /* VRAM word of hud_tilemap[8]: auto-reserve glyph (row 0, col 8) */
+};
+CASSERT(kGameWidth * 256 * 2 <= kSubBytes);  /* 256x256 RGB565 fits the 256 KB texture region */
+
 typedef struct LayerImg { uint16_t map, tile; uint8_t wide, high, valid; uint16_t nhi, maxt; } LayerImg;  /* maxt: highest tile number + 1 */
 static LayerImg g_img[kImgSlots];                       /* slot = layer - 1 (BG2 4bpp, BG3 2bpp) */
 static uint16_t g_img_cw[kImgSlots][kImgCells];         /* tilemap word each image cell was built from */
@@ -3086,7 +3196,9 @@ static void GeVerify(void) {
   }
 }
 
-static void Present(void) {
+static void ComposeGeFrame(void);
+
+static void Present(bool ge_scene) {
   uint32_t t = Now();
   g_build_us = t - g_t_list_start;
   sceGuFinish();
@@ -3096,6 +3208,11 @@ static void Present(void) {
     g_verify_now = false;
     PROF(g_hit_verified = true;)    
     GeVerify();
+  }
+  if (ge_scene) {  /* the scene is complete in the draw buffer: scale it and place the HUD, then swap */
+    uint32_t t_c = Now();
+    ComposeGeFrame();
+    g_gewait_us += Now() - t_c;
   }
   Pace();
   if (g_triple) {
@@ -3222,6 +3339,186 @@ enum { kVtTile = GU_TEXTURE_32BITF | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
 static inline void GeDraw(int vtype, int n, const void *v) {
   PROF(g_c_draws++; g_c_verts += (uint32_t)n;)
   sceGuDrawArray(GU_SPRITES, vtype, n, NULL, v);
+}
+
+/* ---- Final composition: one post-pass for the GE scene and for the software frame ------------------------------- */
+typedef struct ComposeSrc { const void *ptr; int psm, w, h, stride; } ComposeSrc;
+
+/* Original HUD elements as rendered (BG3 pixels, nearest, 1:1) and where they go in the 60 px side panels.
+ * x, w: source columns (tilemap column * 8); bg0, h: BG3 pixel rows (hud_tilemap row 0 = BG row 8); px, py: panel position.
+ * Left panel: energy, [auto-reserve icon], missiles, super missiles, power bombs, grapple. Right panel: minimap (with its
+ * frame), [speedbooster icon], x-ray visor. The two bracketed icons are the new artwork below, not game pixels. */
+typedef struct HudRect { int16_t x, w, bg0, h, px, py; } HudRect;
+#ifndef SM_PSP_HUD_MAP_FRAME
+#define SM_PSP_HUD_MAP_FRAME 1  /* 0: minimap without its frame (40 px, as the fullscreen.md table) */
+#endif
+enum {
+  kHudResvX = 2, kHudResvY = 36,      /* auto-reserve icon 32x16: under the energy block, left edge on the "ENERGY" label */
+  kHudSpeedX = 442, kHudSpeedY = 48,  /* speedbooster icon 16x16: right panel, under the minimap */
+};
+static const HudRect kHudRects[] = {
+  {   8, 56,  8, 24,   2,   8 },  /* energy tanks, label, digits (cols 1-7); the label is x 8-40 = screen x 2-34 */
+  {  80, 24,  8, 24,  18,  60 },  /* missiles (cols 10-12) */
+  { 112, 16,  8, 24,  22,  90 },  /* super missiles (cols 14-15) */
+  { 136, 16,  8, 24,  22, 120 },  /* power bombs (cols 17-18) */
+  { 160, 16,  8, 16,  22, 150 },  /* grapple beam (cols 20-21) */
+#if SM_PSP_HUD_MAP_FRAME
+  { 208, 48,  0, 32, 426,   8 },  /* minimap: cols 26-30 plus its frame: BG tile row 0 ($2c1d/$2c1c) and col 31 ($2c1e), non-blank tiles in kHudTilemaps */
+#else
+  { 208, 40,  8, 24, 430,   8 },  /* minimap exactly as the fullscreen.md table */
+#endif
+  { 184, 16,  8, 16, 442,  72 },  /* x-ray visor (cols 23-24), below the speedbooster icon */
+};
+#define kHudRectN ((int)(sizeof(kHudRects) / sizeof(kHudRects[0])))
+
+/* Auto-reserve state from the glyph the game put in hud_tilemap[8] (HandleHudTilemap, sm_80.c): tile $33 is shown only in
+ * auto mode; palette 7 ($3c33...) is used while the reserve tank has energy, palette 3 ($2c33...) while it is empty.
+ * 0: not shown, 1: auto, reserve empty (deactivated icon), 2: auto, reserve has energy (activated icon). */
+static int HudReserveState(void) {
+  const unsigned w = g_hud.rsv;
+  if ((w & 0x3ff) != 0x33)
+    return 0;
+  return ((w >> 10) & 7) == 7 ? 2 : 1;
+}
+
+/* Speedbooster state: 0 hidden (Speed Booster not equipped in the pause item menu, which also covers "not collected"),
+ * 1 equipped but the run/dash toggle is off (unselected icon), 2 equipped and the toggle is on, so the boost can be used
+ * (selected icon). equipped_items is $7E:09A2 (variables.h), the Speed Booster is bit $2000 (Samus_HandleExtraRunspeedX,
+ * sm_90.c). The toggle is Samus_IsRunButtonActive() (sm_91.c): true only in run mode, false when off or in x-ray mode. */
+extern uint8_t g_ram[0x20000];
+extern uint8_t Samus_IsRunButtonActive(void);
+static int HudSpeedState(void) {
+  const unsigned eq = g_ram[0x9a2] | (unsigned)g_ram[0x9a3] << 8;
+  if (!(eq & 0x2000))
+    return 0;
+  return Samus_IsRunButtonActive() ? 2 : 1;
+}
+
+/* Sprite (two vertices) whose pixel i of j samples the source at (su0 + i * stepx, sv0 + j * stepy), the steps chosen so that
+ * the first and last pixel hit su0/su1 and sv0/sv1 (texel centres). Samples never leave [su0, su1] x [sv0, sv1], so bilinear
+ * filtering stays inside the rows/columns the caller names. g_uvh: where the GE samples inside a pixel (boot self test). */
+static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1, int dx, int dy, int dw, int dh) {
+  const float sx = dw > 1 ? (su1 - su0) / (float)(dw - 1) : 0.0f;
+  const float sy = dh > 1 ? (sv1 - sv0) / (float)(dh - 1) : 0.0f;
+  const float u0 = su0 - g_uvh[0] * sx, v0 = sv0 - g_uvh[1] * sy;
+  w[0] = (TileVert){u0, v0, (int16_t)dx, (int16_t)dy, 0};
+  w[1] = (TileVert){u0 + (float)dw * sx, v0 + (float)dh * sy, (int16_t)(dx + dw), (int16_t)(dy + dh), 0};
+}
+
+/* Appends the composition of the source image s (256 wide, rows 0-223 valid) to the open list: black panel, then Layout A
+ * (HUD present: source rows 32-223 -> 360x270, original HUD elements in the side panels) or Layout B (rows 0-223 -> 360x270,
+ * empty margins). The list is open and the source is complete; exactly one Present() follows. */
+static void ComposeDraw(const ComposeSrc *s) {
+  static bool icons_flushed;
+  if (!icons_flushed) {  /* the icon textures are read by the GE from RAM: write the CPU's copy back once (never written again) */
+    icons_flushed = true;
+    sceKernelDcacheWritebackRange(g_hud_ico_reserve_on, sizeof(g_hud_ico_reserve_on));
+    sceKernelDcacheWritebackRange(g_hud_ico_reserve_off, sizeof(g_hud_ico_reserve_off));
+    sceKernelDcacheWritebackRange(g_hud_ico_speed_sel, sizeof(g_hud_ico_speed_sel));
+    sceKernelDcacheWritebackRange(g_hud_ico_speed_uns, sizeof(g_hud_ico_speed_uns));
+  }
+  int off = 0;
+  const int why = HudResolve(&off);
+  const bool hud = why == kHudOk;
+#if SM_PSP_LOG
+  {  /* why: 0 HUD, 1 none, 2 gap/short frame, 3 stray HUD row, 4 scroll, 5 run too long, 6 geometry, 7 run too short, 8 overscan */
+    static int last_why = -1;
+    static unsigned nlog;
+    if (why != last_why && nlog < 64) {
+      nlog++;
+      PspLog("layout f=%u %s why=%d run=%u rows=%u os=%d hs=%u vs=%u gap=%d stray=%d tm4=%u", (unsigned)g_frame,
+             hud ? "HUD" : "FULL", why, (unsigned)g_hud.run, (unsigned)g_hud.nlines,
+             g_hud_ppu ? (int)g_hud_ppu->frameOverscan : -1, (unsigned)g_hud.hs, (unsigned)g_hud.vs, (int)g_hud.gap,
+             (int)g_hud.stray, (unsigned)g_hud.tm4);
+    }
+    last_why = why;
+  }
+#endif
+  /* every state the composition depends on is set here; none is inherited from the scene pass */
+  sceGuEnable(GU_SCISSOR_TEST);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuDisable(GU_STENCIL_TEST);
+  sceGuDisable(GU_DITHER);
+  sceGuDisable(GU_CULL_FACE);
+  sceGuDisable(GU_TEXTURE_2D);
+  sceGuClearColor(0xff000000);
+  sceGuClear(GU_COLOR_BUFFER_BIT);  /* the 60 px panels, and whatever the scene left outside the gameplay rectangle */
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexMode(s->psm, 0, 0, GU_FALSE);
+  sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
+  sceGuTexFlush();
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+
+  TileVert *base = sceGuGetMemory((int)((1 + kHudRectN + 2) * 2 * sizeof(TileVert)));
+  const int srow0 = hud ? 32 : 0;
+  ComposeQuad(base, 0.5f, (float)srow0 + 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX, kCompY, kCompW,
+              kCompH);
+  sceGuTexFilter(GU_LINEAR, GU_LINEAR);
+  GeDraw(kVtTile, 2, base);
+  if (!hud)
+    return;
+
+  TileVert *w = base + 2;
+  int nv = 0;
+  for (int k = 0; k < kHudRectN; k++) {
+    const HudRect *r = &kHudRects[k];
+    int sy = r->bg0 - off, h = r->h, py = r->py;
+    if (sy < 0) {  /* BG row 0 is above screen row 0 (1-based BG line) */
+      py -= sy;
+      h += sy;
+      sy = 0;
+    }
+    if (h <= 0 || sy + h > (int)g_hud.run)
+      continue;
+    ComposeQuad(&w[nv], (float)r->x + 0.5f, (float)sy + 0.5f, (float)(r->x + r->w) - 0.5f, (float)(sy + h) - 0.5f, r->px, py,
+                r->w, h);
+    nv += 2;
+  }
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  if (nv)
+    GeDraw(kVtTile, nv, w);
+
+  /* The two new icons: RGBA8888 textures from RAM, transparent pixels dropped by the alpha test. */
+  const int rs = HudReserveState(), ss = HudSpeedState();
+  const struct { const uint32_t *px; int w, h, dx, dy; bool show; } ic[2] = {
+    {rs == 2 ? g_hud_ico_reserve_on : g_hud_ico_reserve_off, 32, 16, kHudResvX, kHudResvY, rs != 0},
+    {ss == 2 ? g_hud_ico_speed_sel : g_hud_ico_speed_uns, 16, 16, kHudSpeedX, kHudSpeedY, ss != 0},
+  };
+  TileVert *iv = base + 2 + 2 * kHudRectN;
+  sceGuEnable(GU_ALPHA_TEST);
+  sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+  for (int i = 0; i < 2; i++) {
+    if (!ic[i].show)
+      continue;
+    sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+    sceGuTexImage(0, ic[i].w, ic[i].h, ic[i].w, ic[i].px);
+    sceGuTexFlush();
+    ComposeQuad(&iv[2 * i], 0.5f, 0.5f, (float)ic[i].w - 0.5f, (float)ic[i].h - 0.5f, ic[i].dx, ic[i].dy, ic[i].w, ic[i].h);
+    GeDraw(kVtTile, 2, &iv[2 * i]);
+  }
+  sceGuDisable(GU_ALPHA_TEST);
+}
+
+/* GE scene: it is complete in the draw buffer (previous list synced, so the multisub / mosaic users of the texture region are
+ * done). Copy its 256x224 to the texture region, wait for the copy (TexSync), then compose into the same draw buffer from the
+ * copy. Own short list; g_gu_list is idle here. */
+static void ComposeGeFrame(void) {
+  sceGuStart(GU_DIRECT, g_gu_list);
+  SelectDrawBuffer();
+  sceGuCopyImage(GU_PSM_5650, kLeft, kTop, kGameWidth, kSrcRows, 512, (void *)(uintptr_t)(0x04000000u | g_draw_off), 0, 0,
+                 kGameWidth, (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramTexture));
+  sceGuTexSync();
+  const ComposeSrc src = {g_texture, GU_PSM_5650, kGameWidth, 256, kGameWidth};
+  ComposeDraw(&src);
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
 
 /* Splits [x0,x1) at multiples of 64 framebuffer pixels. PPSSPP's GE notes say
@@ -4819,7 +5116,7 @@ static bool DrawGe(void) {
   if (g_m7w_frame)
     g_frames_m7w++;
   g_audit_now = false;
-  Present();
+  Present(true);
   return true;
 }
 
@@ -5640,16 +5937,10 @@ static void PspRenderer_EndDraw(void) {
       sceGuTexImage(0, 256, 256, 256, g_texture);
     }
     sceGuTexFlush();
-    int edges[8];
-    int nstrip = StripEdges(kLeft, kLeft + kGameWidth, edges);
-    PspVertex *v = (PspVertex *)sceGuGetMemory(nstrip * 2 * sizeof(PspVertex));
-    for (int st = 0; st < nstrip; st++) {
-      v[2 * st] = (PspVertex){(float)(edges[st] - kLeft), 0, (float)edges[st], kTop, 0};
-      v[2 * st + 1] = (PspVertex){(float)(edges[st + 1] - kLeft), kGameHeight, (float)edges[st + 1],
-                                  kTop + kGameHeight, 0};
-    }
-    GeDraw(kVtTexF, nstrip * 2, v);
-    Present();
+    const ComposeSrc csrc = swpath == 0 ? (ComposeSrc){g_texture, GU_PSM_5650, kTexWidth, kTexHeight, kTexWidth}
+                                        : (ComposeSrc){g_texture, GU_PSM_8888, 256, 256, 256};
+    ComposeDraw(&csrc);
+    Present(false);
     if (g_swpath < 0) {  /* calibration: CPU + GE cost of getting the frame on screen, per path */
       uint32_t k = g_cal_frames++;
       if (k % kSwCalFrames >= kSwCalSkip) {
