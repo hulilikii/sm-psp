@@ -1327,6 +1327,15 @@ static void FlickLog(void) {
 }
 #endif
 
+/* Fullscreen source dimensions and HUD layout. */
+enum {
+  kSrcRows = 224,
+  kHudRows = 31,          /* HUD IRQ ends at V=31 */
+  kHudRowsMax = 32,       /* Gameplay begins at source row 32 */
+  kHudBlock = 24,         /* Three rows of 8-pixel HUD tiles */
+  kHudResvWord = 0x5820 + 8, /* hud_tilemap[8]: auto-reserve glyph */
+};
+
 /* ---- HUD detection for the final composition. Runs from the PPU line hook in every renderer path (GE active, software,
  * software PPU skipped), before CaptureImpl()'s g_ge_active early-out. The HUD interval is the one the game's IRQ handlers
  * make (sm_80.c): each *_BeginHud sets TM=4 (BG3 only) and schedules its end at V=31; the main and start-of-door handlers also
