@@ -188,7 +188,9 @@ static int g_line_count;
 static uint16_t g_frame_reasons;
 #if SM_PSP_LOG
 /* Every distinct register signature that sends a frame to software is logged once (up to 48). */
-typedef struct Sig { uint32_t a, b, c; } Sig;
+extern uint8_t g_ram[0x20000];  /* sm_rtl.c; log only, read bytewise (no unaligned loads) */
+static inline unsigned GameRam16(unsigned a) { return g_ram[a] | (unsigned)g_ram[a + 1] << 8; }
+typedef struct Sig { uint32_t a, b, c, d; } Sig;  /* d: game state, so the same registers in another scene are logged again */
 static Sig g_sigs[48];
 static int g_nsigs;
 static bool NewSig(const Ppu *p, uint16_t reasons) {
@@ -201,8 +203,9 @@ static bool NewSig(const Ppu *p, uint16_t reasons) {
         (uint32_t)(p->subtractColor ? 1 : 0) << 10 | (uint32_t)p->preventMathMode << 11 | (uint32_t)p->clipMode << 13 |
         (uint32_t)p->screenWindowed[0] << 15 | (uint32_t)p->screenWindowed[1] << 23;
   s.c = p->windowsel | mm << 24;
+  s.d = GameRam16(0x998);
   for (int i = 0; i < g_nsigs; i++)
-    if (g_sigs[i].a == s.a && g_sigs[i].b == s.b && g_sigs[i].c == s.c)
+    if (g_sigs[i].a == s.a && g_sigs[i].b == s.b && g_sigs[i].c == s.c && g_sigs[i].d == s.d)
       return false;
   if (g_nsigs == 48)
     return false;
@@ -215,7 +218,7 @@ static bool g_frame_subnoop;
 static uint32_t g_frames_subnoop;
 static Run g_subruns[kMaxLines];
 #if SM_PSP_LOG
-typedef struct Note { int line; unsigned bits, mode, tm, ts, mathmask, add, sub, half, fixed, clip, prevent, tmw, wsel, tsw; } Note;
+typedef struct Note { int line; unsigned bits, mode, tm, ts, mathmask, add, sub, half, fixed, clip, prevent, tmw, wsel, tsw, gs, room, area; } Note;
 static Note g_note;
 static bool g_note_pending;
 #endif
@@ -1009,7 +1012,8 @@ static void CaptureImpl(const Ppu *p, int line) {
     g_note = (Note){line, s->reasons, p->mode, p->screenEnabled[0], p->screenEnabled[1], mm,
                     p->addSubscreen, p->subtractColor, p->halfColor,
                     p->fixedColorR | p->fixedColorG << 5 | p->fixedColorB << 10,
-                    p->clipMode, p->preventMathMode, p->screenWindowed[0], p->windowsel, p->screenWindowed[1]};
+                    p->clipMode, p->preventMathMode, p->screenWindowed[0], p->windowsel, p->screenWindowed[1],
+                    GameRam16(0x998), GameRam16(0x79B), g_ram[0x79F]};
     g_note_pending = true;
   }
 #endif
@@ -6031,9 +6035,10 @@ static void PspRenderer_EndDraw(void) {
   g_t_prev_end = t_end;
   if (g_note_pending) {
     g_note_pending = false;
-    PspLog("NEW reason bits=0x%x line=%d mode=%u TM=%02x TS=%02x math=%02x add=%u sub=%u half=%u fixed=%04x clip=%u prev=%u tmw=%02x tsw=%02x wsel=%x",
+    PspLog("NEW reason bits=0x%x line=%d mode=%u TM=%02x TS=%02x math=%02x add=%u sub=%u half=%u fixed=%04x clip=%u prev=%u tmw=%02x tsw=%02x wsel=%x gs=%04x room=%04x area=%u",
            g_note.bits, g_note.line, g_note.mode, g_note.tm, g_note.ts, g_note.mathmask, g_note.add,
-           g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.tsw, g_note.wsel);
+           g_note.sub, g_note.half, g_note.fixed, g_note.clip, g_note.prevent, g_note.tmw, g_note.tsw, g_note.wsel,
+           g_note.gs, g_note.room, g_note.area);
   }
   if (g_ge_active && (g_frame % 300) == 0) {
     PspLog("f=%u ge=%u (subnoop=%u blend=%u tint=%u) sw=%u gaps=%u ovf=%u mosf=%u m7i=%u prevf=%u cwf=%u sfx=%u shf=%u sho=%u w2f=%u shn=%u sfo=%u", (unsigned)g_frame, (unsigned)g_frames_ge,
