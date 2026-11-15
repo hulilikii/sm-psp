@@ -4652,6 +4652,7 @@ void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
 }
 
 void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
+  PspRenderer_ClearButtonIcons();
   HandleFadeOut();
   if (reg_INIDISP == 0x80) {
     EnableNMI();
@@ -4662,6 +4663,7 @@ void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
 }
 
 void GameOptionsMenu_4_StartGame(void) {  // 0x82EEB4
+  PspRenderer_ClearButtonIcons();
   game_options_screen_index = 0;
   if (enable_debug && (joypad1_lastkeys & 0x20) == 0) {
     game_state = kGameState_5_FileSelectMap;
@@ -4691,6 +4693,7 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
   uint16 n;
   uint16 v1;
 
+  PspRenderer_ClearButtonIcons();
   HandleFadeOut();
   if (reg_MOSAIC != 0xF3)
     reg_MOSAIC += 16;

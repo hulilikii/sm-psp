@@ -381,6 +381,7 @@ GETOUT:;
 
 static CoroutineRet CloseMessageBox_Async(void) {  // 0x858589
   COROUTINE_BEGIN(coroutine_state_4, 0);
+  PspRenderer_ClearButtonIcon(0);
   do {
     COROUTINE_AWAIT(1, WaitForNMI_NoUpdate_Async());
     HandleMusicQueue();
