@@ -1759,15 +1759,9 @@ void FileSelectMap_3_LoadAreaSelectBackgroundTilemap(void) {  // 0x81A582
 void LoadAreaSelectBackgroundTilemap(uint16 j) {  // 0x81A58A
   uint16 v1 = vram_write_queue_tail;
   VramWriteEntry *v2 = gVramWriteEntry(vram_write_queue_tail);
-  
-  const uint16 *src = (const uint16 *)RomPtr_81(
-      8 * 256 * j + addr_kAreaSelectBackgroundTilemaps);
-  for (int i = 0; i < 32 * 32; i++)
-    g_file_select_map_bg3_tilemap[i] = src[i];
-
   v2->size = 2048;
-  v2->src.addr = ADDR16_OF_RAM(g_file_select_map_bg3_tilemap);
-  v2->src.bank = 126;
+  v2->src.addr = 8 * 256 * j + addr_kAreaSelectBackgroundTilemaps;
+  v2->src.bank = 0x81;
   v2->vram_dst = (reg_BG3SC & 0xFC) << 8;
   vram_write_queue_tail = v1 + 7;
 }
