@@ -3615,17 +3615,32 @@ static void ComposeDraw(const ComposeSrc *s) {
     if (!b->pixels || b->y < srow0 || b->y + b->h > kSrcRows)
       continue;
 
+    const int brightness_y = b->y + b->h / 2;
+    if (brightness_y >= g_line_count)
+      continue;
+    const unsigned brightness = (unsigned)g_lines[brightness_y].brightness * 17;
+    if (!brightness)
+      continue;
+
     const int dx = kCompX + (b->x * kCompW + kGameWidth / 2) / kGameWidth;
     const int dy = kCompY + ((b->y - srow0) * kCompH + source_rows / 2) / source_rows;
     const int dw = (b->w * kCompW + kGameWidth / 2) / kGameWidth;
     const int dh = (b->h * kCompH + source_rows / 2) / source_rows;
 
+    const unsigned tint = 0xff000000u |
+                          (brightness << 16) |
+                          (brightness << 8) |
+                          brightness;
+    sceGuColor(tint);
+    sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
     sceGuTexImage(0, 16, 16, 16, b->pixels);
     sceGuTexFlush();
     ComposeQuad(&bv[2 * i], 0.5f, 0.5f, 15.5f, 15.5f, dx, dy, dw, dh);
     GeDraw(kVtTile, 2, &bv[2 * i]);
   }
 
+  sceGuColor(0xffffffff);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
   sceGuDisable(GU_ALPHA_TEST);
   sceGuDisable(GU_BLEND);
   sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
