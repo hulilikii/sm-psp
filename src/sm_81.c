@@ -854,6 +854,7 @@ void FileSelectMenu_8(void) {
       ++menu_index;
     }
   } else if ((joypad1_newkeys & 0x8000) != 0) {
+    PspRenderer_ClearButtonIcons();
     menu_index += 7;
     QueueSfx1_Max6(0x37);
   } else {
@@ -2230,6 +2231,10 @@ void FileSelectMap_10_RoomSelectMap(void) {  // 0x81AD7F
   HandleFileSelectMapScrollArrows();
   MapScrolling();
   DisplayMapElevatorDestinations();
+  
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 192, 16, 16);
+  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 192, 16, 16);
+
   if (enable_debug && (joypad2_new_keys & kButton_Select) != 0) {
     QueueSfx1_Max6(0x38);
     
@@ -2285,6 +2290,7 @@ LABEL_25:;
       reg_BG1VOFS = v11;
     }
   } else if ((joypad1_newkeys & 0x8000) != 0) {
+    PspRenderer_ClearButtonIcons();
     menu_index += 5;
     uint16 v0 = 0;
     while (area_index != kFileSelectMap_AreaIndexes[v0 >> 1]) {
