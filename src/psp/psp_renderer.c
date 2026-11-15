@@ -3360,21 +3360,21 @@ typedef struct HudRect { int16_t x, w, bg0, h, px, py; } HudRect;
 #define SM_PSP_HUD_MAP_FRAME 1  /* 0: minimap without its frame (40 px, as the fullscreen.md table) */
 #endif
 enum {
-  kHudResvX = 2, kHudResvY = 36,      /* auto-reserve icon 32x16: under the energy block, left edge on the "ENERGY" label */
-  kHudSpeedX = 442, kHudSpeedY = 48,  /* speedbooster icon 16x16: right panel, under the minimap */
+  kHudResvX = 14, kHudResvY = 34,      /* auto-reserve icon 32x16: under the energy block */
+  kHudSpeedX = 431, kHudSpeedY = 245,  /* speedbooster icon 16x16: right panel */
 };
 static const HudRect kHudRects[] = {
   {   8, 56,  8, 24,   2,   8 },  /* energy tanks, label, digits (cols 1-7); the label is x 8-40 = screen x 2-34 */
-  {  80, 24,  8, 24,  18,  60 },  /* missiles (cols 10-12) */
-  { 112, 16,  8, 24,  22,  90 },  /* super missiles (cols 14-15) */
-  { 136, 16,  8, 24,  22, 120 },  /* power bombs (cols 17-18) */
-  { 160, 16,  8, 16,  22, 150 },  /* grapple beam (cols 20-21) */
+  {  80, 24,  8, 24,  18, 238 },  /* missiles (cols 10-12) */
+  { 112, 16,  8, 24,  22, 209 },  /* super missiles (cols 14-15) */
+  { 136, 16,  8, 24,  22, 180 },  /* power bombs (cols 17-18) */
+  { 160, 16,  8, 16,  22, 158 },  /* grapple beam (cols 20-21) */
 #if SM_PSP_HUD_MAP_FRAME
   { 208, 48,  0, 32, 426,   8 },  /* minimap: cols 26-30 plus its frame: BG tile row 0 ($2c1d/$2c1c) and col 31 ($2c1e), non-blank tiles in kHudTilemaps */
 #else
   { 208, 40,  8, 24, 430,   8 },  /* minimap exactly as the fullscreen.md table */
 #endif
-  { 184, 16,  8, 16, 442,  72 },  /* x-ray visor (cols 23-24), below the speedbooster icon */
+  { 184, 16,  8, 16, 453, 245 },  /* x-ray visor (cols 23-24), below the speedbooster icon */
 };
 #define kHudRectN ((int)(sizeof(kHudRects) / sizeof(kHudRects[0])))
 
