@@ -1764,7 +1764,22 @@ void LoadAreaSelectBackgroundTilemap(uint16 j) {  // 0x81A58A
       8 * 256 * j + addr_kAreaSelectBackgroundTilemaps);
   for (int i = 0; i < 32 * 32; i++)
     g_file_select_map_bg3_tilemap[i] = src[i];
-//  Each 16x16 SNES button occupies a 2x2 block of 8x8 BG3 tiles. Tile 0x000F is the blank tile used by the existing menu code.
+
+  v2->size = 2048;
+  v2->src.addr = ADDR16_OF_RAM(g_file_select_map_bg3_tilemap);
+  v2->src.bank = 126;
+  v2->vram_dst = (reg_BG3SC & 0xFC) << 8;
+  vram_write_queue_tail = v1 + 7;
+}
+
+// Remove the original SNES A/B prompt glyphs only while the room-select map is displayed. Each 16x16 glyph occupies a 2x2 block of BG3 tiles.
+static void HideRoomSelectMapButtonGlyphs(void) {
+  const uint16 *src = (const uint16 *)RomPtr_81(
+      8 * 256 * area_index + addr_kAreaSelectBackgroundTilemaps);
+
+  for (int i = 0; i < 32 * 32; i++)
+    g_file_select_map_bg3_tilemap[i] = src[i];
+
   for (int row = 24; row < 26; row++) {
     g_file_select_map_bg3_tilemap[row * 32 + 12] = 0x000F;
     g_file_select_map_bg3_tilemap[row * 32 + 13] = 0x000F;
@@ -1772,6 +1787,8 @@ void LoadAreaSelectBackgroundTilemap(uint16 j) {  // 0x81A58A
     g_file_select_map_bg3_tilemap[row * 32 + 22] = 0x000F;
   }
 
+  uint16 v1 = vram_write_queue_tail;
+  VramWriteEntry *v2 = gVramWriteEntry(vram_write_queue_tail);
   v2->size = 2048;
   v2->src.addr = ADDR16_OF_RAM(g_file_select_map_bg3_tilemap);
   v2->src.bank = 126;
@@ -2221,6 +2238,7 @@ void FileSelectMap_9_InitRoomSelectMap(void) {  // 0x81AD17
   WaitUntilEndOfVblankAndClearHdma();
   RoomDefHeader *RoomDefHeader = get_RoomDefHeader(room_ptr);
   LOBYTE(area_index) = RoomDefHeader->area_index_;
+  HideRoomSelectMapButtonGlyphs();
   LOBYTE(room_x_coordinate_on_map) = RoomDefHeader->x_coordinate_on_map;
   LOBYTE(room_y_coordinate_on_map) = RoomDefHeader->y_coordinate_on_map;
   SetupMapScrollingForFileSelectMap();
