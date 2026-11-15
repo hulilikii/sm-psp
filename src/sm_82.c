@@ -4639,9 +4639,9 @@ void GameOptionsMenuItemFunc_4(void) {  // 0x82EE55
 }
 
 void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
-  PspRenderer_ClearButtonIcons();
   HandleFadeOut();
   if (reg_INIDISP == 0x80) {
+    PspRenderer_ClearButtonIcons();
     EnableNMI();
     screen_fade_delay = 0;
     screen_fade_counter = 0;
@@ -4652,9 +4652,9 @@ void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
 }
 
 void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
-  PspRenderer_ClearButtonIcons();
   HandleFadeOut();
   if (reg_INIDISP == 0x80) {
+    PspRenderer_ClearButtonIcons();
     EnableNMI();
     screen_fade_delay = 0;
     screen_fade_counter = 0;
@@ -4693,11 +4693,11 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
   uint16 n;
   uint16 v1;
 
-  PspRenderer_ClearButtonIcons();
   HandleFadeOut();
   if (reg_MOSAIC != 0xF3)
     reg_MOSAIC += 16;
   if (reg_INIDISP == 0x80) {
+    PspRenderer_ClearButtonIcons();
     EnableNMI();
     screen_fade_delay = 0;
     screen_fade_counter = 0;
