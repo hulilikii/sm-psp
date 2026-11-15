@@ -4904,14 +4904,38 @@ void OptionsMenuControllerFunc_7(void) {  // 0x82F25D
   }
 }
 
+static int OptionsMenu_GetPspButtonIcon(int binding) {
+  switch (binding) {
+  case 0: return PSP_BUTTON_ICON_TRIANGLE; /* SNES X */
+  case 1: return PSP_BUTTON_ICON_CIRCLE;   /* SNES A */
+  case 2: return PSP_BUTTON_ICON_CROSS;    /* SNES B */
+  case 4: return PSP_BUTTON_ICON_SQUARE;   /* SNES Y */
+  default: return -1;                     /* Select, L, R */
+  }
+}
+
+static void OptionsMenu_UpdateControllerButtonIcons(void) {
+  PspRenderer_ClearButtonIcons();
+  for (int i = 0; i < 7; i++) {
+    int icon = OptionsMenu_GetPspButtonIcon(eproj_F[i + 13]);
+    if (icon >= 0) {
+      PspRenderer_SetButtonIcon((unsigned)i, (enum PspButtonIcon)icon,
+                                184, 40 + i * 24 - (int)reg_BG1VOFS,
+                                16, 16);
+    }
+  }
+}
+
 void GameOptionsMenu_9_ScrollControllerSettingsDown(void) {  // 0x82F271
   reg_BG1VOFS += 2;
+  OptionsMenu_UpdateControllerButtonIcons();
   if (reg_BG1VOFS == 32)
     game_options_screen_index = 7;
 }
 
 void GameOptionsMenu_A_ScrollControllerSettingsUp(void) {  // 0x82F285
   reg_BG1VOFS -= 2;
+  OptionsMenu_UpdateControllerButtonIcons();
   if (!reg_BG1VOFS)
     game_options_screen_index = 7;
 }
@@ -5084,7 +5108,6 @@ static const uint16 g_word_82F6AD[6] = {  // 0x82F587
 };
 
 void OptionsMenuFunc6(void) {
-  PspRenderer_ClearButtonIcons();
   uint16 v0 = 0, v4;
   do {
     v4 = v0;
@@ -5098,26 +5121,20 @@ void OptionsMenuFunc6(void) {
     *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[33] + v2) = v3[4];
     *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[34] + v2) = v3[5];
     
-    int icon = -1;
-    switch (eproj_F[v1 + 13]) {
-    case 0: icon = PSP_BUTTON_ICON_TRIANGLE; break; /* SNES X */
-    case 1: icon = PSP_BUTTON_ICON_CIRCLE; break;   /* SNES A */
-    case 2: icon = PSP_BUTTON_ICON_CROSS; break;    /* SNES B */
-    case 4: icon = PSP_BUTTON_ICON_SQUARE; break;   /* SNES Y */
-    default: break;                                  /* Select, L, R */
-    }
+    int icon = OptionsMenu_GetPspButtonIcon(eproj_F[v1 + 13]);
 
     if (icon >= 0) {
       for (int row = 0; row < 2; row++)
         for (int col = 0; col < 3; col++)
           ram3000.pause_menu_map_tilemap[(5 + v1 * 3 + row) * 32 + 23 + col] = 0x000f;
 
-      PspRenderer_SetButtonIcon((unsigned)v1, (enum PspButtonIcon)icon,
-                                184, 40 + v1 * 24, 16, 16);
     }
 
     v0 = v4 + 2;
   } while ((int16)(v4 - 12) < 0);
+  
+  OptionsMenu_UpdateControllerButtonIcons();
+  
   if (eproj_instr_list_ptr[0] != 5 && eproj_instr_list_ptr[0] != 6) {
     *(unaligned_uint32 *)&ram3000.menu.backup_of_io_registers_in_gameover[46] = *(unaligned_uint32 *)g_word_82F6AD;
     ram3000.pause_menu_map_tilemap[665] = g_word_82F6AD[2];
