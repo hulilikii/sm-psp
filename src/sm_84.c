@@ -433,89 +433,107 @@ const uint8 *PlmInstr_SetItemBit(const uint8 *plmp, uint16 k) {  // 0x848899
 
 const uint8 *PlmInstr_PickupBeamAndShowMessage(const uint8 *plmp, uint16 k) {  // 0x8488B0
   uint16 t = GET_WORD(plmp);
+  bool first = (collected_beams & t) == 0;
   collected_beams |= t;
   equipped_beams |= t;
   equipped_beams &= ~((t << 1) & 8);
   equipped_beams &= ~((t >> 1) & 4);
   UpdateBeamTilesAndPalette();
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(plmp[2]);
+  if (first)
+    DisplayMessageBox(plmp[2]);
   return plmp + 3;
 }
 
 const uint8 *PlmInstr_PickupEquipmentAndShowMessage(const uint8 *plmp, uint16 k) {  // 0x8488F3
   uint16 t = GET_WORD(plmp);
+  bool first = (collected_items & t) == 0;
   equipped_items |= t;
   collected_items |= t;
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(plmp[2]);
+  if (first)
+    DisplayMessageBox(plmp[2]);
   return plmp + 3;
 }
 
 const uint8 *PlmInstr_PickupEquipmentAddGrappleShowMessage(const uint8 *plmp, uint16 k) {  // 0x84891A
   uint16 t = GET_WORD(plmp);
+  bool first = (collected_items & t) == 0;
   equipped_items |= t;
   collected_items |= t;
   AddGrappleToHudTilemap();
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(5);
+  if (first)
+    DisplayMessageBox(5);
   return plmp + 2;
 }
 
 const uint8 *PlmInstr_PickupEquipmentAddXrayShowMessage(const uint8 *plmp, uint16 k) {  // 0x848941
   uint16 t = GET_WORD(plmp);
+  bool first = (collected_items & t) == 0;
   equipped_items |= t;
   collected_items |= t;
   AddXrayToHudTilemap();
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(6);
+  if (first)
+    DisplayMessageBox(6);
   return plmp + 2;
 }
 
 const uint8 *PlmInstr_CollectHealthEnergyTank(const uint8 *plmp, uint16 k) {  // 0x848968
+  bool first = samus_max_health < 100;
   samus_max_health += GET_WORD(plmp);
   samus_health = samus_max_health;
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(1);
+  if (first)
+    DisplayMessageBox(1);
   return plmp + 2;
 }
 
 const uint8 *PlmInstr_CollectHealthReserveTank(const uint8 *plmp, uint16 k) {  // 0x848986
+  bool first = samus_max_reserve_health == 0;
   samus_max_reserve_health += GET_WORD(plmp);
   if (!reserve_health_mode)
     ++reserve_health_mode;
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(0x19);
+  if (first)
+    DisplayMessageBox(0x19);
   return plmp + 2;
 }
 
 const uint8 *PlmInstr_CollectAmmoMissileTank(const uint8 *plmp, uint16 k) {  // 0x8489A9
   uint16 t = GET_WORD(plmp);
+  bool first = samus_max_missiles == 0;
   samus_max_missiles += t;
   samus_missiles += t;
   AddMissilesToHudTilemap();
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(2);
+  if (first)
+    DisplayMessageBox(2);
   return plmp + 2;
 }
 
 const uint8 *PlmInstr_CollectAmmoSuperMissileTank(const uint8 *plmp, uint16 k) {  // 0x8489D2
   uint16 t = GET_WORD(plmp);
+  bool first = samus_max_super_missiles == 0;
   samus_max_super_missiles += t;
   samus_super_missiles += t;
   AddSuperMissilesToHudTilemap();
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(3);
+  if (first)
+    DisplayMessageBox(3);
   return plmp + 2;
 }
 
 const uint8 *PlmInstr_CollectAmmoPowerBombTank(const uint8 *plmp, uint16 k) {  // 0x8489FB
   uint16 t = GET_WORD(plmp);
+  bool first = samus_max_power_bombs == 0;
   samus_max_power_bombs += t;
   samus_power_bombs += t;
   AddPowerBombsToHudTilemap();
   PlayRoomMusicTrackAfterAFrames(0x168);
-  DisplayMessageBox(4);
+  if (first)
+    DisplayMessageBox(4);
   return plmp + 2;
 }
 
