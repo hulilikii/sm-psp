@@ -1341,21 +1341,15 @@ enum {
   kHudResvWord = 0x5820 + 8, /* hud_tilemap[8]: auto-reserve glyph */
 };
 
-/* ---- HUD detection for the final composition. Runs from the PPU line hook in every renderer path (GE active, software,
- * software PPU skipped), before CaptureImpl()'s g_ge_active early-out. The HUD interval is the one the game's IRQ handlers
- * make (sm_80.c): each *_BeginHud sets TM=4 (BG3 only) and schedules its end at V=31; the main and start-of-door handlers also
- * write BG3SC=$5A (map $5800, 32x64), the others (Draygon, vertical/horizontal door) leave BG3SC as it is, so the signature
- * checks the register state, not which handler ran. $5800 is where InitializeHud/HandleHudTilemap keep the HUD tilemap, so
- * "BG3 only, map $5800" is by definition the HUD being displayed. The interval must be 31 (or 32) rows from row 0, with no
- * later matching row and one constant BG3 scroll. Nothing here looks at scene names or only at the BG mode. Rows that are
- * BG3-only but use another map are counted (tm4) and logged, so a handler that shows the HUD with a different map is visible. */
+// The immutable header row is copied by InitializeHud() from ROM $80988B to VRAM $5800. It identifies the HUD independently of the IRQ handler or room. The HUD itself is drawn during the opening 31/32 scanlines. Later BG3 activity and scroll changes belong to the gameplay area and must not invalidate the detected HUD interval.
+extern const uint16 g_hud_top_row[32];
 typedef struct HudCap {
-  uint16_t run;            /* consecutive HUD rows from row 0 */
+  uint16_t run;            /* consecutive HUD rows from source row 0 */
   uint16_t nlines;         /* last line seen (224 normally, 239/240 for an overscan frame) */
   uint16_t hs, vs;         /* BG3 scroll on the first HUD row */
   uint16_t tm4;            /* BG3-only rows (mode 1, not blanked) that did not match the HUD map */
   uint16_t rsv;            /* hud_tilemap[8] as rendered this frame (auto-reserve glyph) */
-  bool open, stray, gap, scroll_ok;
+  bool open, gap, scroll_ok, marker_ok;
 } HudCap;
 static HudCap g_hud;
 static const Ppu *g_hud_ppu;  /* for frameOverscan, which the PPU sets at V=225 of the frame being composed */
@@ -1366,6 +1360,13 @@ static inline bool HudLineSig(const Ppu *p) {
          !b->tilemapWider && b->tilemapHigher && !b->bigTiles;
 }
 
+static bool HudTopRowSig(const Ppu *p) {
+  for (int i = 0; i < 32; i++)
+    if (p->vram[0x5800 + i] != g_hud_top_row[i])
+      return false;
+  return true;
+}
+
 static void HudCapture(const Ppu *p, int line) {
   if (line < 1 || line > kMaxLines)
     return;
@@ -1373,30 +1374,34 @@ static void HudCapture(const Ppu *p, int line) {
   g_hud_ppu = p;
   if (line == 1) {
     memset(h, 0, sizeof(*h));
-    h->open = true;
+    h->marker_ok = HudTopRowSig(p);
+    h->open = h->marker_ok;
     h->scroll_ok = true;
   } else if (line != (int)h->nlines + 1) {
     h->gap = true;
   }
   h->nlines = (uint16_t)line;
   if (!HudLineSig(p)) {
-    h->open = false;
+    if (line <= kHudRowsMax)
+      h->open = false;
     if (!p->forcedBlank && p->mode == 1 && (p->screenEnabled[0] & 0x1f) == 4)
       h->tm4++;
     return;
   }
+  if (line > kHudRowsMax || !h->open)
+    return;
+
   uint16_t hs = p->bgLayer[2].hScroll & 0x3ff, vs = p->bgLayer[2].vScroll & 0x3ff;
-  if (h->open && h->run == 0) {
+  if (h->run == 0) {
     h->hs = hs;
     h->vs = vs;
     h->rsv = p->vram[kHudResvWord];
   } else if (hs != h->hs || vs != h->vs) {
     h->scroll_ok = false;
   }
-  if (h->open)
-    h->run++;
-  else
-    h->stray = true;
+  h->run++;
+  if (line == kHudRowsMax)
+    h->open = false;
 }
 
 /* Layout decision. kHudOk: Layout A; everything else is Layout B (the full image) with the reason for the log. */
@@ -1410,10 +1415,8 @@ static int HudResolve(int *off) {
     return kHudOverscan;  /* 239/240 line frame: composed as Layout B from its first 224 rows */
   if (h->gap || h->nlines < kSrcRows)
     return kHudGap;
-  if (h->run == 0)
+  if (!h->marker_ok || h->run == 0)
     return kHudNone;
-  if (h->stray)
-    return kHudStray;
   if (!h->scroll_ok || (h->hs & 0x3ff) != 0)
     return kHudScroll;
   if (h->run < kHudRows)
@@ -3428,15 +3431,15 @@ static void ComposeDraw(const ComposeSrc *s) {
   const int why = HudResolve(&off);
   const bool hud = why == kHudOk;
 #if SM_PSP_LOG
-  {  /* why: 0 HUD, 1 none, 2 gap/short frame, 3 stray HUD row, 4 scroll, 5 run too long, 6 geometry, 7 run too short, 8 overscan */
+  {  /* why: 0 HUD, 1 none, 2 gap/short frame, 3 reserved, 4 scroll, 5 run too long, 6 geometry, 7 run too short, 8 overscan */
     static int last_why = -1;
     static unsigned nlog;
     if (why != last_why && nlog < 64) {
       nlog++;
-      PspLog("layout f=%u %s why=%d run=%u rows=%u os=%d hs=%u vs=%u gap=%d stray=%d tm4=%u", (unsigned)g_frame,
+      PspLog("layout f=%u %s why=%d run=%u rows=%u os=%d hs=%u vs=%u gap=%d marker=%d tm4=%u", (unsigned)g_frame,
              hud ? "HUD" : "FULL", why, (unsigned)g_hud.run, (unsigned)g_hud.nlines,
              g_hud_ppu ? (int)g_hud_ppu->frameOverscan : -1, (unsigned)g_hud.hs, (unsigned)g_hud.vs, (int)g_hud.gap,
-             (int)g_hud.stray, (unsigned)g_hud.tm4);
+             (int)g_hud.marker_ok, (unsigned)g_hud.tm4);
     }
     last_why = why;
   }
