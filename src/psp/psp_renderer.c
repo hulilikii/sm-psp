@@ -1354,19 +1354,23 @@ typedef struct HudCap {
 static HudCap g_hud;
 static const Ppu *g_hud_ppu;  /* for frameOverscan, which the PPU sets at V=225 of the frame being composed */
 
-/* The HUD IRQ handlers (sm_80.c *_BeginHud) write CGWSEL = CGADSUB = 0, so HUD rows never have colour math. In rooms whose
- * gameplay also uses TM = 4 and BG3SC = $5A (water FX layer blend), math is the only register that tells the two apart. */
-static inline bool HudMathOff(const Ppu *p) {
+/* The HUD IRQ handlers (sm_80.c *_BeginHud) write CGWSEL = CGADSUB = 0.
+ * Match every decoded bit so gameplay rows with the same BG3 configuration
+ * cannot match merely because their layer colour-math enables are clear. */
+static inline bool HudColorRegsZero(const Ppu *p) {
+  if (p->directColor || p->addSubscreen || p->preventMathMode || p->clipMode ||
+      p->subtractColor || p->halfColor)
+    return false;
   for (int i = 0; i < 6; i++)
     if (p->mathEnabled[i])
       return false;
-  return !p->addSubscreen;
+  return true;
 }
 
 static inline bool HudLineSig(const Ppu *p) {
   const BgLayer *b = &p->bgLayer[2];
   return !p->forcedBlank && p->mode == 1 && (p->screenEnabled[0] & 0x1f) == 4 && b->tilemapAdr == 0x5800 &&
-         !b->tilemapWider && b->tilemapHigher && !b->bigTiles && HudMathOff(p);
+         !b->tilemapWider && b->tilemapHigher && !b->bigTiles && HudColorRegsZero(p);
 }
 
 static bool HudTopRowSig(const Ppu *p) {
@@ -1393,7 +1397,8 @@ static void HudCapture(const Ppu *p, int line) {
   if (!HudLineSig(p)) {
     if (line <= kHudRowsMax)
       h->open = false;
-    if (!p->forcedBlank && p->mode == 1 && (p->screenEnabled[0] & 0x1f) == 4 && HudMathOff(p))
+    if (!p->forcedBlank && p->mode == 1 && (p->screenEnabled[0] & 0x1f) == 4 &&
+        HudColorRegsZero(p))
       h->tm4++;
     return;
   }
