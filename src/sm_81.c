@@ -34,9 +34,6 @@
 
 static const uint16 kFileSelectMap_AreaIndexes[6] = { 0, 3, 5, 1, 4, 2 };
 
-// PSP: staging copy of the area-select BG3 tilemap with the original SNES A/B button glyphs removed.
-static uint16 g_file_select_map_bg3_tilemap[32 * 32] __attribute__((aligned(64)));
-
 void SoftReset(void) {
   game_state = 0xffff;
 }
@@ -1766,27 +1763,23 @@ void LoadAreaSelectBackgroundTilemap(uint16 j) {  // 0x81A58A
   vram_write_queue_tail = v1 + 7;
 }
 
-// Remove the original SNES A/B prompt glyphs only while the room-select map is displayed. Each 16x16 glyph occupies a 2x2 block of BG3 tiles.
+// Remove the original SNES A/B prompt glyphs from the room-select BG2 tilemap.
 static void HideRoomSelectMapButtonGlyphs(void) {
-  const uint16 *src = (const uint16 *)RomPtr_81(
-      8 * 256 * area_index + addr_kAreaSelectBackgroundTilemaps);
-
-  for (int i = 0; i < 32 * 32; i++)
-    g_file_select_map_bg3_tilemap[i] = src[i];
-
-  for (int row = 24; row < 26; row++) {
-    g_file_select_map_bg3_tilemap[row * 32 + 12] = 0x000F;
-    g_file_select_map_bg3_tilemap[row * 32 + 13] = 0x000F;
-    g_file_select_map_bg3_tilemap[row * 32 + 21] = 0x000F;
-    g_file_select_map_bg3_tilemap[row * 32 + 22] = 0x000F;
+  // The original A/B glyphs occupy two 2x2 regions in the BG2 tilemap.
+  // 0x2801 is the existing blank/background tile used by this tilemap.
+  for (int row = 25; row < 27; row++) {
+    ram4000.xray_tilemaps[row * 32 + 12] = 0x2801;
+    ram4000.xray_tilemaps[row * 32 + 13] = 0x2801;
+    ram4000.xray_tilemaps[row * 32 + 21] = 0x2801;
+    ram4000.xray_tilemaps[row * 32 + 22] = 0x2801;
   }
 
   uint16 v1 = vram_write_queue_tail;
   VramWriteEntry *v2 = gVramWriteEntry(vram_write_queue_tail);
   v2->size = 2048;
-  v2->src.addr = ADDR16_OF_RAM(g_file_select_map_bg3_tilemap);
+  v2->src.addr = ADDR16_OF_RAM(ram4000);
   v2->src.bank = 126;
-  v2->vram_dst = (reg_BG3SC & 0xFC) << 8;
+  v2->vram_dst = (reg_BG2SC & 0xFC) << 8;
   vram_write_queue_tail = v1 + 7;
 }
 
@@ -2259,8 +2252,8 @@ void FileSelectMap_10_RoomSelectMap(void) {  // 0x81AD7F
   MapScrolling();
   DisplayMapElevatorDestinations();
   
-  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 192, 16, 16);
-  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 192, 16, 16);
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 176, 16, 16);
+  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 176, 16, 16);
 
   if (enable_debug && (joypad2_new_keys & kButton_Select) != 0) {
     QueueSfx1_Max6(0x38);
