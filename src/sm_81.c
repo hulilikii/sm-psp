@@ -5,6 +5,7 @@
 #include "variables.h"
 #include "funcs.h"
 #include "enemy_types.h"
+#include "src/psp/psp_renderer.h"
 
 
 #define kOffsetToSaveSlot ((unaligned_uint16*)RomFixedPtr(0x81812b))
@@ -1636,6 +1637,7 @@ LABEL_28:
 void FileSelectMap_0(void) {  // 0x81A32A
   VramWriteEntry *v1;
 
+  PspRenderer_ClearButtonIcons();
   ClearMenuTilemap();
   uint16 v0 = vram_write_queue_tail;
   v1 = gVramWriteEntry(vram_write_queue_tail);
@@ -2340,6 +2342,7 @@ void FileSelectMap_13(void) {  // 0x81AF66
 
 void FileSelectMap_14(void) {  // 0x81AF83
   if (!--enemy_data[0].x_pos) {
+    PspRenderer_ClearButtonIcons();
     ScreenOff();
     ++game_state;
     menu_index = 0;
