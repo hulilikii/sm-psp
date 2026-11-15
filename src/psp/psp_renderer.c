@@ -1350,6 +1350,7 @@ typedef struct HudCap {
   uint16_t hs, vs;         /* BG3 scroll on the first HUD row */
   uint16_t tm4;            /* BG3-only rows (mode 1, not blanked) that did not match the HUD map */
   uint16_t rsv;            /* hud_tilemap[8] as rendered this frame (auto-reserve glyph) */
+  uint8_t brightness;      /*capture brightness*/
   bool open, gap, scroll_ok, marker_ok;
 } HudCap;
 static HudCap g_hud;
@@ -1411,6 +1412,7 @@ static void HudCapture(const Ppu *p, int line) {
     h->hs = hs;
     h->vs = vs;
     h->rsv = p->vram[kHudResvWord];
+    h->brightness = p->brightness & 0x0f;
   } else if (hs != h->hs || vs != h->vs) {
     h->scroll_ok = false;
   }
@@ -3570,9 +3572,15 @@ static void ComposeDraw(const ComposeSrc *s) {
     TileVert *iv = base + 2 + 2 * kHudRectN;
     sceGuEnable(GU_ALPHA_TEST);
     sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
-    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+    const unsigned brightness = (unsigned)g_hud.brightness * 17;
+    const unsigned hud_tint = 0xff000000u |
+                              (brightness << 16) |
+                              (brightness << 8) |
+                              brightness;
+    sceGuColor(hud_tint);
+    sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
     for (int i = 0; i < 2; i++) {
-      if (!ic[i].show)
+      if (!ic[i].show || !brightness)
         continue;
       sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
       sceGuTexImage(0, ic[i].w, ic[i].h, ic[i].w, ic[i].px);
@@ -3582,6 +3590,8 @@ static void ComposeDraw(const ComposeSrc *s) {
                   ic[i].dx, ic[i].dy, ic[i].w, ic[i].h);
       GeDraw(kVtTile, 2, &iv[2 * i]);
     }
+    sceGuColor(0xffffffff);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
     sceGuDisable(GU_ALPHA_TEST);
   }
 

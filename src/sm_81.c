@@ -2252,8 +2252,8 @@ void FileSelectMap_10_RoomSelectMap(void) {  // 0x81AD7F
   MapScrolling();
   DisplayMapElevatorDestinations();
   
-  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 176, 16, 16);
-  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 176, 16, 16);
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 192, 16, 16);
+  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 192, 16, 16);
 
   if (enable_debug && (joypad2_new_keys & kButton_Select) != 0) {
     QueueSfx1_Max6(0x38);
