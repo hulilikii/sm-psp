@@ -1735,20 +1735,20 @@ void FileSelectMap_2_LoadAreaSelectForegroundTilemap(void) {  // 0x81A546
   VramWriteEntry *v1;
 
 // Copy the original foreground tilemap to RAM so the SNES A/B prompt cells can be blanked before the PSP button overlays are drawn.
-  memcpy(ram3000.menu.menu_tilemap,
+  memcpy(ram3000.pause_menu_map_tilemap,
          RomPtr_81(addr_kAreaSelectForegroundTilemap), 2048);
 
   for (int row = 0; row < 2; row++) {
     for (int col = 0; col < 2; col++) {
-      ram3000.menu.menu_tilemap[(24 + row) * 32 + 12 + col] = 0x000f;
-      ram3000.menu.menu_tilemap[(24 + row) * 32 + 21 + col] = 0x000f;
+      ram3000.pause_menu_map_tilemap[(24 + row) * 32 + 12 + col] = 0x000f;
+      ram3000.pause_menu_map_tilemap[(24 + row) * 32 + 21 + col] = 0x000f;
     }
   }
 
   uint16 v0 = vram_write_queue_tail;
   v1 = gVramWriteEntry(vram_write_queue_tail);
   v1->size = 2048;
-  v1->src.addr = ADDR16_OF_RAM(ram3000.menu.menu_tilemap);
+  v1->src.addr = ADDR16_OF_RAM(ram3000.pause_menu_map_tilemap);
   *(unaligned_uint16 *)&v1->src.bank = 126;
   v1->vram_dst = (reg_BG1SC & 0xFC) << 8;
   vram_write_queue_tail = v0 + 7;
