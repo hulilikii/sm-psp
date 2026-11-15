@@ -4,6 +4,7 @@
 #include "variables.h"
 #include "funcs.h"
 #include "enemy_types.h"
+#include "src/psp/psp_renderer.h"
 
 #define kDemoRoomData ((unaligned_uint16*)RomFixedPtr(0x82876c))
 #define kPauseScreenSpriteAnimationData_0 (*(PauseScreenSpriteAnimationData*)RomFixedPtr(0x82c0b2))
@@ -4485,6 +4486,29 @@ void GameOptionsMenuFunc_0(void) {  // 0x82EBDB
   }
 }
 
+static void OptionsMenu_BlankButtonCells(int col, int row, int width) {
+  for (int y = 0; y < 2; y++)
+    for (int x = 0; x < width; x++)
+      ram3000.pause_menu_map_tilemap[(row + y) * 32 + col + x] = 0x000f;
+}
+
+static void OptionsMenu_SetMainButtonIcons(void) {
+  PspRenderer_ClearButtonIcons();
+
+  OptionsMenu_BlankButtonCells(12, 25, 2);
+  OptionsMenu_BlankButtonCells(20, 25, 2);
+
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 200, 16, 16);
+  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 160, 200, 16, 16);
+}
+
+static void OptionsMenu_SetSpecialButtonIcon(void) {
+  PspRenderer_ClearButtonIcons();
+
+  OptionsMenu_BlankButtonCells(19, 25, 2);
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 152, 200, 16, 16);
+}
+
 void GameOptionsMenu_1_LoadingOptionsScreen(void) {  // 0x82EC11
   uint16 j;
   reg_BG12NBA = 0;
@@ -4522,6 +4546,7 @@ void GameOptionsMenu_1_LoadingOptionsScreen(void) {  // 0x82EC11
   CreateOptionsMenuObject_(0, addr_stru_82F4C4);
   ++game_options_screen_index;
   OptionsMenuFunc4();
+  OptionsMenu_SetMainButtonIcons();
 }
 
 void GameOptionsMenu_2_FadeInOptionsScreen(void) {  // 0x82ECE4
@@ -4614,6 +4639,7 @@ void GameOptionsMenuItemFunc_4(void) {  // 0x82EE55
 }
 
 void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
+  PspRenderer_ClearButtonIcons();
   HandleFadeOut();
   if (reg_INIDISP == 0x80) {
     EnableNMI();
@@ -4689,6 +4715,7 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
         OptionsMenuFunc7();
         menu_option_index = 4;
         CreateOptionsMenuObject_(4, addr_stru_82F4D0);
+        OptionsMenu_SetSpecialButtonIcon();
       } else {
         if (japanese_text_flag) {
           for (k = 1023; (k & 0x8000) == 0; --k) {
@@ -4709,6 +4736,7 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
       for (n = 1023; (n & 0x8000) == 0; --n)
         ram3000.pause_menu_map_tilemap[n] = custom_background[n + 5375];
       OptionsMenuFunc4();
+      OptionsMenu_SetMainButtonIcons();
       uint16 v6 = 0; // bug
       CreateOptionsMenuObject_(v6, addr_stru_82F4C4);
     }
@@ -5056,6 +5084,7 @@ static const uint16 g_word_82F6AD[6] = {  // 0x82F587
 };
 
 void OptionsMenuFunc6(void) {
+  PspRenderer_ClearButtonIcons();
   uint16 v0 = 0, v4;
   do {
     v4 = v0;
@@ -5068,6 +5097,25 @@ void OptionsMenuFunc6(void) {
     *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[32] + v2) = v3[3];
     *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[33] + v2) = v3[4];
     *(unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[34] + v2) = v3[5];
+    
+    int icon = -1;
+    switch (eproj_F[v1 + 13]) {
+    case 0: icon = PSP_BUTTON_ICON_TRIANGLE; break; /* SNES X */
+    case 1: icon = PSP_BUTTON_ICON_CIRCLE; break;   /* SNES A */
+    case 2: icon = PSP_BUTTON_ICON_CROSS; break;    /* SNES B */
+    case 4: icon = PSP_BUTTON_ICON_SQUARE; break;   /* SNES Y */
+    default: break;                                  /* Select, L, R */
+    }
+
+    if (icon >= 0) {
+      for (int row = 0; row < 2; row++)
+        for (int col = 0; col < 3; col++)
+          ram3000.pause_menu_map_tilemap[(5 + v1 * 3 + row) * 32 + 23 + col] = 0x000f;
+
+      PspRenderer_SetButtonIcon((unsigned)v1, (enum PspButtonIcon)icon,
+                                184, 40 + v1 * 24, 16, 16);
+    }
+
     v0 = v4 + 2;
   } while ((int16)(v4 - 12) < 0);
   if (eproj_instr_list_ptr[0] != 5 && eproj_instr_list_ptr[0] != 6) {

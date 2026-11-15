@@ -2,6 +2,7 @@
 #include "ida_types.h"
 #include "variables.h"
 #include "funcs.h"
+#include "src/psp/psp_renderer.h"
 
 uint16 message_box_das0l_value;
 
@@ -51,6 +52,7 @@ static void InitializePpuForMessageBoxes(void) {  // 0x858143
 }
 
 static void ClearMessageBoxBg3Tilemap(void) {  // 0x8581F3
+  PspRenderer_ClearButtonIcon(0);
   int16 v0;
   v0 = 1790;
   do {
@@ -212,7 +214,26 @@ static void DrawSpecialButtonAndSetupPpuForLargeMessageBox(uint16 a) {
       }
     }
   }
-  * (unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[256] + kMsgBoxSpecialButtonTilemapOffs[message_box_index - 1]) = kTileNumbersForButtonLetters[v1 >> 1];
+  const uint16 offs = kMsgBoxSpecialButtonTilemapOffs[message_box_index - 1];
+  const uint16 tile = kTileNumbersForButtonLetters[v1 >> 1];
+  int icon = -1;
+
+  switch (v1) {
+  case 0: icon = PSP_BUTTON_ICON_CIRCLE; break;    /* SNES A */
+  case 2: icon = PSP_BUTTON_ICON_CROSS; break;     /* SNES B */
+  case 4: icon = PSP_BUTTON_ICON_TRIANGLE; break;  /* SNES X */
+  case 6: icon = PSP_BUTTON_ICON_SQUARE; break;    /* SNES Y */
+  default: break;                                  /* Select, L, R */
+  }
+
+  PspRenderer_ClearButtonIcon(0);
+  if (offs != 0 && icon >= 0) {
+    int x = offs == 0x12a ? 168 : offs == 0x12c ? 176 : 128;
+    * (unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[256] + offs) = 0xe;
+    PspRenderer_SetButtonIcon(0, (enum PspButtonIcon)icon, x, 96, 8, 8);
+  } else {
+    * (unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[256] + offs) = tile;
+  }
   SetupPpuForActiveMessageBox(416);
 }
 

@@ -15,6 +15,7 @@
 #include "src/psp/psp_log.h"
 #include "src/psp/psp_audio_me.h"
 #include "src/psp/psp_hud_icons.h"
+#include "src/psp/psp_button_icons.h"
 
 #if SM_PSP_LOG
 #define PROF(...) __VA_ARGS__
@@ -3365,6 +3366,48 @@ static inline void GeDraw(int vtype, int n, const void *v) {
   sceGuDrawArray(GU_SPRITES, vtype, n, NULL, v);
 }
 
+enum { kPspButtonIconSlots = 8 };
+
+typedef struct ButtonOverlay {
+  const uint32_t *pixels;
+  int x, y, w, h;
+} ButtonOverlay;
+
+static ButtonOverlay g_button_overlays[kPspButtonIconSlots];
+
+void PspRenderer_ClearButtonIcon(unsigned slot) {
+  if (slot < kPspButtonIconSlots)
+    memset(&g_button_overlays[slot], 0, sizeof(g_button_overlays[slot]));
+}
+
+void PspRenderer_ClearButtonIcons(void) {
+  memset(g_button_overlays, 0, sizeof(g_button_overlays));
+}
+
+void PspRenderer_SetButtonIcon(unsigned slot, enum PspButtonIcon icon,
+                               int x, int y, int w, int h) {
+  if (slot >= kPspButtonIconSlots || x < 0 || y < 0 ||
+      w <= 0 || h <= 0 || w > 256 || h > 224 ||
+      x > 256 - w || y > 224 - h) {
+    if (slot < kPspButtonIconSlots)
+      PspRenderer_ClearButtonIcon(slot);
+    return;
+  }
+
+  const uint32_t *pixels;
+  switch (icon) {
+  case PSP_BUTTON_ICON_CIRCLE:   pixels = g_psp_button_circle; break;
+  case PSP_BUTTON_ICON_CROSS:    pixels = g_psp_button_cross; break;
+  case PSP_BUTTON_ICON_SQUARE:   pixels = g_psp_button_square; break;
+  case PSP_BUTTON_ICON_TRIANGLE: pixels = g_psp_button_triangle; break;
+  default:
+    PspRenderer_ClearButtonIcon(slot);
+    return;
+  }
+
+  g_button_overlays[slot] = (ButtonOverlay){pixels, x, y, w, h};
+}
+
 /* ---- Final composition: one post-pass for the GE scene and for the software frame ------------------------------- */
 typedef struct ComposeSrc { const void *ptr; int psm, w, h, stride; } ComposeSrc;
 
@@ -3387,9 +3430,9 @@ static const HudRect kHudRects[] = {
   { 136, 16,  8, 24,  22, 180 },  /* power bombs (cols 17-18) */
   { 160, 16,  8, 16,  22, 158 },  /* grapple beam (cols 20-21) */
 #if SM_PSP_HUD_MAP_FRAME
-  { 208, 48,  0, 32, 426,   8 },  /* minimap: cols 26-30 plus its frame: BG tile row 0 ($2c1d/$2c1c) and col 31 ($2c1e), non-blank tiles in kHudTilemaps */
+  { 208, 48,  0, 32, 430,   4 },  /* minimap: cols 26-30 plus its frame: BG tile row 0 ($2c1d/$2c1c) and col 31 ($2c1e), non-blank tiles in kHudTilemaps */
 #else
-  { 208, 40,  8, 24, 430,   8 },  /* minimap exactly as the fullscreen.md table */
+  { 208, 40,  8, 24, 430,   4 },  /* minimap exactly as the fullscreen.md table */
 #endif
   { 184, 16,  8, 16, 453, 245 },  /* x-ray visor (cols 23-24), below the speedbooster icon */
 };
@@ -3440,6 +3483,10 @@ static void ComposeDraw(const ComposeSrc *s) {
     sceKernelDcacheWritebackRange(g_hud_ico_reserve_off, sizeof(g_hud_ico_reserve_off));
     sceKernelDcacheWritebackRange(g_hud_ico_speed_sel, sizeof(g_hud_ico_speed_sel));
     sceKernelDcacheWritebackRange(g_hud_ico_speed_uns, sizeof(g_hud_ico_speed_uns));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_circle, sizeof(g_psp_button_circle));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_cross, sizeof(g_psp_button_cross));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_square, sizeof(g_psp_button_square));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_triangle, sizeof(g_psp_button_triangle));
   }
   int off = 0;
   const int why = HudResolve(&off);
@@ -3479,55 +3526,99 @@ static void ComposeDraw(const ComposeSrc *s) {
   sceGuTexScale(1.0f, 1.0f);
   sceGuTexOffset(0.0f, 0.0f);
 
-  TileVert *base = sceGuGetMemory((int)((1 + kHudRectN + 2) * 2 * sizeof(TileVert)));
+  TileVert *base = sceGuGetMemory((int)((1 + kHudRectN + 2 + kPspButtonIconSlots) * 2 * sizeof(TileVert)));
   const int srow0 = hud ? 32 : 0;
   ComposeQuad(base, 0.5f, (float)srow0 + 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX, kCompY, kCompW,
               kCompH);
   sceGuTexFilter(GU_LINEAR, GU_LINEAR);
   GeDraw(kVtTile, 2, base);
-  if (!hud)
-    return;
-
-  TileVert *w = base + 2;
-  int nv = 0;
-  for (int k = 0; k < kHudRectN; k++) {
-    const HudRect *r = &kHudRects[k];
-    int sy = r->bg0 - off, h = r->h, py = r->py;
-    if (sy < 0) {  /* BG row 0 is above screen row 0 (1-based BG line) */
-      py -= sy;
-      h += sy;
-      sy = 0;
+  if (hud) {
+    TileVert *w = base + 2;
+    int nv = 0;
+    for (int k = 0; k < kHudRectN; k++) {
+      const HudRect *r = &kHudRects[k];
+      int sy = r->bg0 - off, h = r->h, py = r->py;
+      if (sy < 0) {
+        py -= sy;
+        h += sy;
+        sy = 0;
+      }
+      if (h <= 0 || sy + h > (int)g_hud.run)
+        continue;
+      ComposeQuad(&w[nv], (float)r->x + 0.5f, (float)sy + 0.5f,
+                  (float)(r->x + r->w) - 0.5f, (float)(sy + h) - 0.5f,
+                  r->px, py, r->w, h);
+      nv += 2;
     }
-    if (h <= 0 || sy + h > (int)g_hud.run)
-      continue;
-    ComposeQuad(&w[nv], (float)r->x + 0.5f, (float)sy + 0.5f, (float)(r->x + r->w) - 0.5f, (float)(sy + h) - 0.5f, r->px, py,
-                r->w, h);
-    nv += 2;
-  }
-  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
-  if (nv)
-    GeDraw(kVtTile, nv, w);
 
-  /* The two new icons: RGBA8888 textures from RAM, transparent pixels dropped by the alpha test. */
-  const int rs = HudReserveState(), ss = HudSpeedState();
-  const struct { const uint32_t *px; int w, h, dx, dy; bool show; } ic[2] = {
-    {rs == 2 ? g_hud_ico_reserve_on : g_hud_ico_reserve_off, 32, 16, kHudResvX, kHudResvY, rs != 0},
-    {ss == 2 ? g_hud_ico_speed_sel : g_hud_ico_speed_uns, 16, 16, kHudSpeedX, kHudSpeedY, ss != 0},
-  };
-  TileVert *iv = base + 2 + 2 * kHudRectN;
-  sceGuEnable(GU_ALPHA_TEST);
-  sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
-  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
-  for (int i = 0; i < 2; i++) {
-    if (!ic[i].show)
-      continue;
-    sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
-    sceGuTexImage(0, ic[i].w, ic[i].h, ic[i].w, ic[i].px);
-    sceGuTexFlush();
-    ComposeQuad(&iv[2 * i], 0.5f, 0.5f, (float)ic[i].w - 0.5f, (float)ic[i].h - 0.5f, ic[i].dx, ic[i].dy, ic[i].w, ic[i].h);
-    GeDraw(kVtTile, 2, &iv[2 * i]);
+    sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+    if (nv)
+      GeDraw(kVtTile, nv, w);
+
+    const int rs = HudReserveState(), ss = HudSpeedState();
+    const struct {
+      const uint32_t *px;
+      int w, h, dx, dy;
+      bool show;
+    } ic[2] = {
+      {rs == 2 ? g_hud_ico_reserve_on : g_hud_ico_reserve_off,
+       32, 16, kHudResvX, kHudResvY, rs != 0},
+      {ss == 2 ? g_hud_ico_speed_sel : g_hud_ico_speed_uns,
+       16, 16, kHudSpeedX, kHudSpeedY, ss != 0},
+    };
+
+    TileVert *iv = base + 2 + 2 * kHudRectN;
+    sceGuEnable(GU_ALPHA_TEST);
+    sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+    for (int i = 0; i < 2; i++) {
+      if (!ic[i].show)
+        continue;
+      sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+      sceGuTexImage(0, ic[i].w, ic[i].h, ic[i].w, ic[i].px);
+      sceGuTexFlush();
+      ComposeQuad(&iv[2 * i], 0.5f, 0.5f,
+                  (float)ic[i].w - 0.5f, (float)ic[i].h - 0.5f,
+                  ic[i].dx, ic[i].dy, ic[i].w, ic[i].h);
+      GeDraw(kVtTile, 2, &iv[2 * i]);
+    }
+    sceGuDisable(GU_ALPHA_TEST);
   }
+
+  /*
+   * Face-button overlays. These are drawn after the source composition and
+   * HUD, so they work for both HUD and non-HUD frames.
+   */
+  TileVert *bv = base + 2 + 2 * kHudRectN + 4;
+  const int source_rows = kSrcRows - srow0;
+
+  sceGuEnable(GU_BLEND);
+  sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+  sceGuEnable(GU_ALPHA_TEST);
+  sceGuAlphaFunc(GU_GREATER, 0, 0xff);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+  sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+  sceGuTexFilter(GU_LINEAR, GU_LINEAR);
+
+  for (int i = 0; i < kPspButtonIconSlots; i++) {
+    const ButtonOverlay *b = &g_button_overlays[i];
+    if (!b->pixels || b->y < srow0 || b->y + b->h > kSrcRows)
+      continue;
+
+    const int dx = kCompX + (b->x * kCompW + kGameWidth / 2) / kGameWidth;
+    const int dy = kCompY + ((b->y - srow0) * kCompH + source_rows / 2) / source_rows;
+    const int dw = (b->w * kCompW + kGameWidth / 2) / kGameWidth;
+    const int dh = (b->h * kCompH + source_rows / 2) / source_rows;
+
+    sceGuTexImage(0, 16, 16, 16, b->pixels);
+    sceGuTexFlush();
+    ComposeQuad(&bv[2 * i], 0.5f, 0.5f, 15.5f, 15.5f, dx, dy, dw, dh);
+    GeDraw(kVtTile, 2, &bv[2 * i]);
+  }
+
   sceGuDisable(GU_ALPHA_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
 }
 
 /* GE scene: it is complete in the draw buffer (previous list synced, so the multisub / mosaic users of the texture region are

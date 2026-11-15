@@ -20,3 +20,16 @@ bool PspRenderer_GeActive(void);
 
 // After suspend/resume: VRAM atlases are rebuilt and the next frames are drawn by the software PPU.
 void PspRenderer_Resume(void);
+
+enum PspButtonIcon {
+  PSP_BUTTON_ICON_CIRCLE,
+  PSP_BUTTON_ICON_CROSS,
+  PSP_BUTTON_ICON_SQUARE,
+  PSP_BUTTON_ICON_TRIANGLE,
+};
+
+// Button overlays use 256x224 source-frame coordinates.
+void PspRenderer_SetButtonIcon(unsigned slot, enum PspButtonIcon icon,
+                               int x, int y, int w, int h);
+void PspRenderer_ClearButtonIcon(unsigned slot);
+void PspRenderer_ClearButtonIcons(void);
