@@ -1763,26 +1763,6 @@ void LoadAreaSelectBackgroundTilemap(uint16 j) {  // 0x81A58A
   vram_write_queue_tail = v1 + 7;
 }
 
-// Remove the original SNES A/B prompt glyphs from the room-select BG2 tilemap.
-static void HideRoomSelectMapButtonGlyphs(void) {
-    // Remove the original SNES A/B button glyphs before uploading
-    // the room-select legend to BG2.
-    for (int row = 27; row <= 28; row++) {
-      ram4000.xray_tilemaps[row * 32 + 12] = 0x2801;
-      ram4000.xray_tilemaps[row * 32 + 13] = 0x2801;
-      ram4000.xray_tilemaps[row * 32 + 21] = 0x2801;
-      ram4000.xray_tilemaps[row * 32 + 22] = 0x2801;
-    }
-
-  uint16 v1 = vram_write_queue_tail;
-  VramWriteEntry *v2 = gVramWriteEntry(vram_write_queue_tail);
-  v2->size = 2048;
-  v2->src.addr = ADDR16_OF_RAM(ram4000);
-  v2->src.bank = 126;
-  v2->vram_dst = (reg_BG2SC & 0xFC) << 8;
-  vram_write_queue_tail = v1 + 7;
-}
-
 void FileSelectMap_4_SetupExpandingSquareTransition(void) {  // 0x81A5B3
   reg_TS = 4;
   WriteReg(TS, 4);
@@ -1898,6 +1878,16 @@ void FileSelectMap_5_ExpandingSquare(void) {  // 0x81A725
       ram4000.xray_tilemaps[v3--] = kFileSelectExpandingSquareTilemap[v2 >> 1];
       v2 -= 2;
     } while (v2);
+    
+    // Hide the original SNES A/B glyphs before the first room-select
+    // BG2 upload, so they cannot appear during the expanding-square reveal.
+    for (int row = 27; row <= 28; row++) {
+      ram4000.xray_tilemaps[row * 32 + 12] = 0x2801;
+      ram4000.xray_tilemaps[row * 32 + 13] = 0x2801;
+      ram4000.xray_tilemaps[row * 32 + 21] = 0x2801;
+      ram4000.xray_tilemaps[row * 32 + 22] = 0x2801;
+    }
+
     uint16 v4 = vram_write_queue_tail;
     v5 = gVramWriteEntry(vram_write_queue_tail);
     v5->size = 2048;
@@ -2094,6 +2084,8 @@ static const uint16 kRoomSelectMapExpandingSquareTimers[6] = { 0x33, 0x35, 0x2d,
 
 void FileSelectMap_7_PrepExpandSquareTransToRoomMap(void) {  // 0x81AAAC
   DrawAreaSelectMapLabels();
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 193, 16, 16);
+  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 193, 16, 16);
   SetupInitialExpandingSquareHDMA();
   reg_TM = 19;
   reg_TMW = 19;
@@ -2225,7 +2217,6 @@ void FileSelectMap_9_InitRoomSelectMap(void) {  // 0x81AD17
   WaitUntilEndOfVblankAndClearHdma();
   RoomDefHeader *RoomDefHeader = get_RoomDefHeader(room_ptr);
   LOBYTE(area_index) = RoomDefHeader->area_index_;
-  HideRoomSelectMapButtonGlyphs();
   LOBYTE(room_x_coordinate_on_map) = RoomDefHeader->x_coordinate_on_map;
   LOBYTE(room_y_coordinate_on_map) = RoomDefHeader->y_coordinate_on_map;
   SetupMapScrollingForFileSelectMap();
@@ -2251,9 +2242,6 @@ void FileSelectMap_10_RoomSelectMap(void) {  // 0x81AD7F
   HandleFileSelectMapScrollArrows();
   MapScrolling();
   DisplayMapElevatorDestinations();
-  
-  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 192, 16, 16);
-  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 192, 16, 16);
 
   if (enable_debug && (joypad2_new_keys & kButton_Select) != 0) {
     QueueSfx1_Max6(0x38);
