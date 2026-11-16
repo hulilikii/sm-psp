@@ -2084,8 +2084,8 @@ static const uint16 kRoomSelectMapExpandingSquareTimers[6] = { 0x33, 0x35, 0x2d,
 
 void FileSelectMap_7_PrepExpandSquareTransToRoomMap(void) {  // 0x81AAAC
   DrawAreaSelectMapLabels();
-  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 96, 193, 16, 16);
-  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 168, 193, 16, 16);
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 94, 191, 16, 16);
+  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 166, 191, 16, 16);
   SetupInitialExpandingSquareHDMA();
   reg_TM = 19;
   reg_TMW = 19;
