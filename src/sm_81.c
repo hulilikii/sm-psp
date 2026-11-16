@@ -1765,14 +1765,14 @@ void LoadAreaSelectBackgroundTilemap(uint16 j) {  // 0x81A58A
 
 // Remove the original SNES A/B prompt glyphs from the room-select BG2 tilemap.
 static void HideRoomSelectMapButtonGlyphs(void) {
-  // The original A/B glyphs occupy two 2x2 regions in the BG2 tilemap.
-  // 0x2801 is the existing blank/background tile used by this tilemap.
-  for (int row = 25; row < 27; row++) {
-    ram4000.xray_tilemaps[row * 32 + 12] = 0x2801;
-    ram4000.xray_tilemaps[row * 32 + 13] = 0x2801;
-    ram4000.xray_tilemaps[row * 32 + 21] = 0x2801;
-    ram4000.xray_tilemaps[row * 32 + 22] = 0x2801;
-  }
+    // Remove the original SNES A/B button glyphs before uploading
+    // the room-select legend to BG2.
+    for (int row = 27; row <= 28; row++) {
+      ram4000.xray_tilemaps[row * 32 + 12] = 0x2801;
+      ram4000.xray_tilemaps[row * 32 + 13] = 0x2801;
+      ram4000.xray_tilemaps[row * 32 + 21] = 0x2801;
+      ram4000.xray_tilemaps[row * 32 + 22] = 0x2801;
+    }
 
   uint16 v1 = vram_write_queue_tail;
   VramWriteEntry *v2 = gVramWriteEntry(vram_write_queue_tail);
