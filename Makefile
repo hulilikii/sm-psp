@@ -71,11 +71,6 @@ ME_LOG_ON := 0
 endif
 
 OBJS := $(SRCS:%.c=%.o)
-OBJS += build/embedded_rom.o
-
-build/embedded_rom.o: sm.smc
-	@mkdir -p build
-	psp-ld -r -b binary -o $@ $<
 
 CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
@@ -139,7 +134,7 @@ $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
 	@touch $@
-$(filter-out build/embedded_rom.o,$(OBJS)): $(BUILD_STAMP)
+$(OBJS)): $(BUILD_STAMP)
 
 # Its own stamp (not flags_*, which the main stamp rule deletes): toggling PSP_BENCH_M7 rebuilds the renderer.
 BENCH_M7_STAMP := build/bench_m7_$(PSP_BENCH_M7).stamp

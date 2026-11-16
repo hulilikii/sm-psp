@@ -11,9 +11,6 @@
 #include "enemy_types.h"
 #include <time.h>
 
-extern const uint8_t _binary_sm_smc_start[];
-extern const uint8_t _binary_sm_smc_end[];
-
 void RtlRunFrameCompare(uint16 input, int run_what);
 
 enum RunMode { RM_BOTH, RM_MINE, RM_THEIRS };
@@ -707,16 +704,13 @@ void RtlUpdateSnesPatchForBugfix() {
 }
 
 Snes *SnesInit(const char *filename) {
-  (void)filename;
+  if (filename == NULL || filename[0] == '\0')
+    return NULL;
   g_snes = snes_init(g_ram);
 
   g_cpu = g_snes->cpu;
 
-  const uint8_t *rom = _binary_sm_smc_start;
-   size_t rom_size = (size_t)(_binary_sm_smc_end - _binary_sm_smc_start);
- 
-   bool loaded = snes_loadRom(g_snes, (uint8_t *)rom, (int)rom_size);
-  if (!loaded) {
+  if (!loadRom(filename, g_snes)) {
     return NULL;
   }
 
