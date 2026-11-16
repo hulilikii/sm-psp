@@ -10,6 +10,7 @@
 #include "util.h"
 #include "enemy_types.h"
 #include <time.h>
+#include <psputils.h>
 
 void RtlRunFrameCompare(uint16 input, int run_what);
 
@@ -669,16 +670,37 @@ int RunAsmCode(uint32 pc, uint16 a, uint16 x, uint16 y, int flags) {
   return g_calling_asm_from_c_ret;
 }
 
+const char *g_rom_error;
+
 static bool loadRom(const char *name, Snes *snes) {
+  static const uint8_t kExpectedSha1[20] = {
+    0xda, 0x95, 0x7f, 0x0d, 0x63, 0xd1, 0x4c, 0xb4, 0x41, 0xd2,
+    0x15, 0x46, 0x29, 0x04, 0xc4, 0xfa, 0x85, 0x19, 0xc6, 0x13
+  };
+  const size_t kRomSize = 0x300000;
   size_t length = 0;
-  uint8_t *file = NULL;
-  file = ReadWholeFile(name, &length);
+  uint8_t *file = ReadWholeFile(name, &length);
   if (file == NULL) {
-    puts("Failed to read file");
+    g_rom_error = "sm.smc not found";
+    return false;
+  }
+  size_t header = length == kRomSize + 0x200 ? 0x200 : 0;
+  if (length != kRomSize && header == 0) {
+    g_rom_error = "unsupported file size";
+    free(file);
+    return false;
+  }
+  uint8_t digest[20] __attribute__((aligned(16)));
+  if (sceKernelUtilsSha1Digest(file + header, (u32)kRomSize, digest) < 0 ||
+      memcmp(digest, kExpectedSha1, sizeof(digest)) != 0) {
+    g_rom_error = "SHA-1 mismatch";
+    free(file);
     return false;
   }
   bool result = snes_loadRom(snes, file, (int)length);
   free(file);
+  if (!result)
+    g_rom_error = "ROM rejected by loader";
   return result;
 }
 

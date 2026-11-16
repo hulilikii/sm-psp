@@ -12,6 +12,7 @@
 #include <psppower.h>
 #include <pspaudiolib.h>
 #include <pspthreadman.h>
+#include <pspdebug.h>
 
 #include "snes/ppu.h"
 #include "types.h"
@@ -120,6 +121,24 @@ void NORETURN Die(const char *error) {
 #elif PSP_AUDIO_ENABLED
   PspMsu_Shutdown();
 #endif
+  sceKernelExitGame();
+  for (;;) sceKernelDelayThread(1000000);
+}
+
+extern const char *g_rom_error;
+
+static void NORETURN ShowRomLoadError(void) {
+  PspLog("ROM load failed: %s", g_rom_error ? g_rom_error : "unknown");
+  PspLog_Flush();
+  g_renderer_funcs.Destroy();
+  pspDebugScreenInit();
+  pspDebugScreenSetBackColor(0xFF202020);
+  pspDebugScreenSetTextColor(0xFFFFFFFF);
+  pspDebugScreenClear();
+  pspDebugScreenPrintf(
+      "FAILED TO LOAD ASSETS!\n\n"
+      "Returning to the home menu.");
+  sceKernelDelayThread(4 * 1000 * 1000);
   sceKernelExitGame();
   for (;;) sceKernelDelayThread(1000000);
 }
@@ -490,7 +509,7 @@ int main(int argc, char **argv) {
 
   g_snes = SnesInit("sm.smc");
   if (g_snes == NULL)
-    Die("Unable to load sm.smc");
+    ShowRomLoadError();
 
   PpuBeginDrawing(g_snes->snes_ppu, PspRenderer_FrameBuffer(), 256 * 4, 0);
   PpuBeginDrawing(g_snes->my_ppu, g_my_pixels, 256 * 4, 0);
