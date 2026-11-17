@@ -710,7 +710,8 @@ void FileSelectMenu_5_FadeOutFromMain(void) {  // 0x8194EE
 
 void FileSelectMenu_15_FadeOutToMain(void) {  // 0x8194F4
   HandleFadeOut();
-  reg_MOSAIC = reg_MOSAIC & 0x0F | (16 * (reg_INIDISP & 0xF)) ^ 0xF0;
+  reg_MOSAIC &= 0x0F;  /* size nibble stays 0: the mosaic is applied to the final frame */
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
   if ((reg_INIDISP & 0xF) == 0) {
     ScreenOff();
     ++menu_index;
@@ -736,7 +737,8 @@ void FileSelectMenu_17_FadeInToMain(void) {
 void FileSelectMenu_7_FadeInFromMain(void) {  // 0x819532
   DrawMenuSelectionMissile();
   HandleFadeIn();
-  reg_MOSAIC = reg_MOSAIC & 0x0F | (16 * (reg_INIDISP & 0xF)) ^ 0xF0;
+  reg_MOSAIC &= 0x0F;
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
   if ((reg_INIDISP & 0xF) == 15)
     ++menu_index;
 }
@@ -1550,6 +1552,9 @@ void FileSelectMenu_4_Main(void) {  // 0x81A1C2
   int16 v0;
   uint16 v1, v2;
   int v3;
+
+  reg_MOSAIC &= 0x0F;  /* PSP: the transition mosaic is a final-frame pass, not an emulated-PPU effect */
+  PspRenderer_SetMosaicTransition(1);
 
   DrawBorderAroundSamusData();
   DrawMenuSelectionMissile();

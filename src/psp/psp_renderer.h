@@ -21,6 +21,9 @@ bool PspRenderer_GeActive(void);
 // After suspend/resume: VRAM atlases are rebuilt and the next frames are drawn by the software PPU.
 void PspRenderer_Resume(void);
 
+// Post-composition mosaic over the complete PSP frame (GE only). Size 1 disables it, 16 is the maximum.
+void PspRenderer_SetMosaicTransition(unsigned size);
+
 enum PspButtonIcon {
   PSP_BUTTON_ICON_CIRCLE,
   PSP_BUTTON_ICON_CROSS,

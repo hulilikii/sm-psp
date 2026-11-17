@@ -4639,8 +4639,12 @@ void OptionsMenuFunc4(void) {  // 0x82EDED
   }
 }
 
+static uint8 g_psp_options_mosaic_size = 1;  /* options dissolve ($82:EF18 / $82:EFDB): size as the old reg_MOSAIC +-16 stepped it */
+
 void GameOptionsMenuItemFunc_4(void) {  // 0x82EE55
   reg_MOSAIC = 3;
+  g_psp_options_mosaic_size = 1;
+  PspRenderer_SetMosaicTransition(1);
   screen_fade_delay = 0;
   screen_fade_counter = 0;
   game_options_screen_index = 5;
@@ -4702,8 +4706,9 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
   uint16 v1;
 
   HandleFadeOut();
-  if (reg_MOSAIC != 0xF3)
-    reg_MOSAIC += 16;
+  if (g_psp_options_mosaic_size < 16)
+    ++g_psp_options_mosaic_size;
+  PspRenderer_SetMosaicTransition(g_psp_options_mosaic_size);
   if (reg_INIDISP == 0x80) {
     PspRenderer_ClearButtonIcons();
     EnableNMI();
@@ -4756,10 +4761,13 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
 
 void GameOptionsMenu_6_DissolveInScreen(void) {  // 0x82EFDB
   HandleFadeIn();
-  if (reg_MOSAIC != 3)
-    reg_MOSAIC -= 16;
+  if (g_psp_options_mosaic_size > 1)
+    --g_psp_options_mosaic_size;
+  PspRenderer_SetMosaicTransition(g_psp_options_mosaic_size);
   if (reg_INIDISP == 15) {
     reg_MOSAIC = 0;
+    g_psp_options_mosaic_size = 1;
+    PspRenderer_SetMosaicTransition(1);
     screen_fade_delay = 0;
     screen_fade_counter = 0;
     if (menu_option_index) {

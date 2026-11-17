@@ -186,6 +186,9 @@ static uint16_t *g_texture;                 /* uncached VRAM: 565 texture, or th
 /* Software-PPU frame, 256x256 8888 (rows 240-255 unused). */
 static uint8_t g_framebuffer[kGameWidth * 256 * 4] __attribute__((aligned(64)));
 
+/* Post-composition mosaic block size (1 = off), set by the menu transitions. */
+static uint8_t g_mosaic_size = 1;
+
 static LineSnap g_lines[kMaxLines];
 static int g_line_count;
 static uint16_t g_frame_reasons;
@@ -272,6 +275,10 @@ static int g_draw_i, g_prev_i = 1;  /* buffer being drawn / the one queued by th
 static void SelectDrawBuffer(void) {
   if (g_triple)
     sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+}
+
+void PspRenderer_SetMosaicTransition(unsigned size) {
+  g_mosaic_size = (uint8_t)(size < 1 ? 1 : size > 16 ? 16 : size);
 }
 /* Mode 7 (GE path): matrix and flags are snapshotted per row (LineSnap). Frames with one constant matrix, b = c = 0,
  * a, d > 0, large field only (no flips/charfill/mosaic) are drawn as tile quads (M7Prepare). Everything else
@@ -3226,6 +3233,7 @@ static void GeVerify(void) {
 }
 
 static void ComposeGeFrame(void);
+static void ApplyMosaicTransition(void);
 
 static void Present(bool ge_scene) {
   uint32_t t = Now();
@@ -3242,6 +3250,11 @@ static void Present(bool ge_scene) {
     uint32_t t_c = Now();
     ComposeGeFrame();
     g_gewait_us += Now() - t_c;
+  }
+  if (g_mosaic_size > 1) {  /* the compose list is synced: the draw buffer is complete and idle */
+    uint32_t t_m = Now();
+    ApplyMosaicTransition();
+    g_gewait_us += Now() - t_m;
   }
   Pace();
   if (g_triple) {
@@ -4044,6 +4057,51 @@ static void ComposeGeFrame(void) {
   sceGuTexSync();
   const ComposeSrc src = {g_texture, GU_PSM_5650, kGameWidth, 256, kGameWidth};
   ComposeDraw(&src);
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+}
+
+// Post-composition mosaic, GE only (no CPU pixels, no frame-buffer readback). Both compose lists are synced, so the draw buffer is complete and idle. Pass A renders pixels into the texture region (dead after compose), sampling the draw buffer at the block origins. Pass B stretches that image over the draw buffer (nearest). 5650 -> 5650 is exact (dither off). Pass A writes elsewhere while it reads the draw buffer, and pass B reads the texture region while it writes the draw buffer: no feedback loop.
+static void ApplyMosaicTransition(void) {
+  const int size = g_mosaic_size;
+  const int cw = (kPspWidth + size - 1) / size, ch = (kPspHeight + size - 1) / size;
+  const float inv = 1.0f / (float)size;
+
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuEnable(GU_SCISSOR_TEST);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuDisable(GU_STENCIL_TEST);
+  sceGuDisable(GU_DITHER);
+  sceGuDisable(GU_CULL_FACE);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+
+  TileVert *v = sceGuGetMemory(4 * (int)sizeof(TileVert));
+// Pass A: pixel j of the small image samples texel j * size (ComposeQuad: step = (su1 - su0) / (dw - 1) = size).
+  sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)kVramTexture, 256);
+  sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+  sceGuTexImage(0, 512, 512, 512, g_vram_u + g_draw_off);
+  sceGuTexFlush();
+  ComposeQuad(&v[0], 0.5f, 0.5f, 0.5f + (float)((cw - 1) * size), 0.5f + (float)((ch - 1) * size), 0, 0, cw, ch);
+  GeDraw(kVtTile, 2, &v[0]);
+  
+// Pass B: destination pixel x shows texel floor(x / size) (sampled at (x + 0.5) / size; g_uvh as in DrawMosPass).
+  const float u0 = (0.5f - g_uvh[0]) * inv, v0 = (0.5f - g_uvh[1]) * inv;
+  v[2] = (TileVert){u0, v0, 0, 0, 0};
+  v[3] = (TileVert){u0 + (float)kPspWidth * inv, v0 + (float)kPspHeight * inv, (int16_t)kPspWidth, (int16_t)kPspHeight, 0};
+  sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+  sceGuTexImage(0, 256, 256, 256, g_vram_u + kVramTexture);
+  sceGuTexFlush();
+  sceGuTexSync();  /* pass A has been rendered by the GE */
+  GeDraw(kVtTile, 2, &v[2]);
+
   sceGuFinish();
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
