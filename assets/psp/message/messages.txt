@@ -2,7 +2,7 @@ Super Metroid US — complete editable message list
 ROM MD5: 21f3e98df4780ee1c667b84e57d88675
 Source: InsaneFirebat/sm_disassembly, src/bank_85.asm
 Text below follows the disassembly's MessageTilemaps comments and message configuration table.
-Tokens: {item:name}, {button:role}, {bomb_animation}, {selection:YES|NO}.
+Tokens: {item:name}, {button:role}, {selection:YES|NO}.
 
 Messages 1–19: item/equipment messages
 
