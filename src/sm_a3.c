@@ -184,7 +184,8 @@ void Metalee_Main(void) {  // 0xA38979
 
 void Metalee_Func_1(void) {  // 0xA38987
   Enemy_Metalee *E = Get_Metalee(cur_enemy_index);
-  if (abs16(E->base.x_pos - samus_x_pos) < 0x48) {
+  if (abs16(E->base.x_pos - samus_x_pos) < 0x48 &&
+      samus_y_pos >= E->base.y_pos) {
     Metalee_Func_2(cur_enemy_index);
     ++E->metalee_var_C;
     Metalee_Func_6();
