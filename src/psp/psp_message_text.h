@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-// From assets/psp/message/messages.txt. ROM message ids 1-29, index = id - 1.
+// ROM message ids 1-29, index = id - 1.
 // Tokens: {item:...}, {button:shoot|run}. The renderer wraps lines; "" is a blank line. */
 // TITLE: line 0 is a title, the rest is body; SAVE: YES/NO prompt 
 enum { PSP_MSG_TITLE = 1, PSP_MSG_SAVE = 2 };  

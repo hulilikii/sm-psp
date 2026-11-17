@@ -3643,8 +3643,10 @@ static void MsgWalk(const char *s, const char *e, float *cx, float y, float sc, 
       int dw = (int)((float)g->w * sc + 0.5f), dh = (int)((float)g->h * sc + 0.5f);
       if (dw < 1) dw = 1;
       if (dh < 1) dh = 1;
+      const int baseline = (int)(y + (float)PSP_MSG_FONT_BASE * sc + 0.5f);
+      const int gy = baseline - (int)((float)(PSP_MSG_FONT_BASE - g->yoff) * sc + 0.5f);
       MsgQuad(&gv[*nv], (float)g->x, (float)g->y, (float)g->w, (float)g->h,
-              (int)(*cx + (float)g->xoff * sc + 0.5f), (int)(y + (float)g->yoff * sc + 0.5f), dw, dh);
+              (int)(*cx + (float)g->xoff * sc + 0.5f), gy, dw, dh);
       *nv += 2;
     }
     *cx += (float)g->advance * sc;
@@ -3763,6 +3765,8 @@ static void DrawNativeMessage(void) {
   MsgLine ln[kMsgMaxLines];
   const int nl = MsgLayout(m, ln);
   const bool save = (m->flags & PSP_MSG_SAVE) != 0;
+  const bool gold = (g_msg_id >= 20 && g_msg_id <= 24) || g_msg_id == 28;
+  const uint32_t text_rgb = gold ? 0x0002b0f8u : 0x00ffffffu;
   const float lh_opt = (float)PSP_MSG_FONT_LINE_HEIGHT * kMsgOptionScale;
   float total = 0.0f;
   for (int i = 0; i < nl; i++) {
@@ -3779,7 +3783,7 @@ static void DrawNativeMessage(void) {
     const float w = MsgWidth(ln[i].s, ln[i].e, ln[i].scale);
     const uint32_t rgb =
         ((m->flags & PSP_MSG_TITLE) && ln[i].scale == kMsgTitleScale)
-            ? 0x008c3ed4u : 0x00ffffffu;
+            ? 0x008c3ed4u : text_rgb;
     MsgDrawRun(ln[i].s, ln[i].e, cx - w * 0.5f, y, ln[i].scale, rgb, a);
     y += (float)PSP_MSG_FONT_LINE_HEIGHT * ln[i].scale;
     if (ln[i].gap)
@@ -3790,9 +3794,9 @@ static void DrawNativeMessage(void) {
     const float wy = MsgStrWidth("YES", kMsgOptionScale), wn = MsgStrWidth("NO", kMsgOptionScale), gap = 64.0f;
     const float yes_x = cx - (wy + gap + wn) * 0.5f, no_x = yes_x + wy + gap;
     const bool yes = g_msg_sel == 0;
-    MsgDrawStr(">", (yes ? yes_x : no_x) - 20.0f, y, kMsgOptionScale, 0x00ffffffu, a);
-    MsgDrawStr("YES", yes_x, y, kMsgOptionScale, yes ? 0x00ffffffu : 0x00909090u, a);
-    MsgDrawStr("NO", no_x, y, kMsgOptionScale, yes ? 0x00909090u : 0x00ffffffu, a);
+    MsgDrawStr(">", (yes ? yes_x : no_x) - 20.0f, y, kMsgOptionScale, text_rgb, a);
+    MsgDrawStr("YES", yes_x, y, kMsgOptionScale, yes ? text_rgb : 0x00909090u, a);
+    MsgDrawStr("NO", no_x, y, kMsgOptionScale, yes ? 0x00909090u : text_rgb, a);
   }
 }
 
