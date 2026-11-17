@@ -80,7 +80,7 @@ Messages 1–19: item/equipment messages
 
 19. Bomb [large]
   title: BOMB
-  body: when in morphball & set it with the {button:shoot} button.
+  body: when in morphball, set it with the {button:shoot} button.
 
 Messages 20–28: system and save messages
 
