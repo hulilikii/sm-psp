@@ -3511,8 +3511,10 @@ extern const uint8_t psp_msg_font_rgba[], psp_msg_grapple_rgba[], psp_msg_missil
     psp_msg_supermissile_rgba[], psp_msg_xray_rgba[];
 
 enum { kMsgPassGlyphs, kMsgPassIcons, kMsgPassMeasure,
-       kMsgMaxLines = 12, kMsgMaxW = 320, kMsgIconH = 20, kMsgIconPad = 2, kMsgDimAlpha = 0xa0 };
-static const float kMsgTitleScale = 0.5f, kMsgBodyScale = 0.4f, kMsgTitleGap = 6.0f, kMsgOptGap = 12.0f;
+       kMsgMaxLines = 12, kMsgMaxW = 320, kMsgIconH = 16, kMsgIconPad = 2, kMsgDimAlpha = 0xa0 };
+static const float kMsgTitleScale = 0.4f, kMsgBodyScale = 0.32f,
+                   kMsgTextScale = 0.5f, kMsgOptionScale = 0.5f,
+                   kMsgTitleGap = 6.0f, kMsgOptGap = 12.0f;
 
 static uint8_t g_msg_id, g_msg_sel, g_msg_fade;
 static const uint32_t *g_msg_btn_px;
@@ -3681,7 +3683,9 @@ static int MsgLayout(const PspMessageText *m, MsgLine *out) {
   for (int i = 0; i < m->n; i++) {
     const char *s = m->line[i];
     const bool title = (m->flags & PSP_MSG_TITLE) && i == 0;
-    const float sc = ((m->flags & PSP_MSG_TITLE) && i > 0) ? kMsgBodyScale : kMsgTitleScale;
+    const float sc = (m->flags & PSP_MSG_TITLE)
+                         ? (i == 0 ? kMsgTitleScale : kMsgBodyScale)
+                         : kMsgTextScale;
     if (!*s) {
       if (n < kMsgMaxLines)
         out[n++] = (MsgLine){s, s, sc, false};
@@ -3759,7 +3763,7 @@ static void DrawNativeMessage(void) {
   MsgLine ln[kMsgMaxLines];
   const int nl = MsgLayout(m, ln);
   const bool save = (m->flags & PSP_MSG_SAVE) != 0;
-  const float lh_opt = (float)PSP_MSG_FONT_LINE_HEIGHT * kMsgTitleScale;
+  const float lh_opt = (float)PSP_MSG_FONT_LINE_HEIGHT * kMsgOptionScale;
   float total = 0.0f;
   for (int i = 0; i < nl; i++) {
     total += (float)PSP_MSG_FONT_LINE_HEIGHT * ln[i].scale;
@@ -3773,19 +3777,22 @@ static void DrawNativeMessage(void) {
   float y = (float)kCompY + ((float)kCompH - total) * 0.5f;
   for (int i = 0; i < nl; i++) {
     const float w = MsgWidth(ln[i].s, ln[i].e, ln[i].scale);
-    MsgDrawRun(ln[i].s, ln[i].e, cx - w * 0.5f, y, ln[i].scale, 0x00ffffffu, a);
+    const uint32_t rgb =
+        ((m->flags & PSP_MSG_TITLE) && ln[i].scale == kMsgTitleScale)
+            ? 0x008c3ed4u : 0x00ffffffu;
+    MsgDrawRun(ln[i].s, ln[i].e, cx - w * 0.5f, y, ln[i].scale, rgb, a);
     y += (float)PSP_MSG_FONT_LINE_HEIGHT * ln[i].scale;
     if (ln[i].gap)
       y += kMsgTitleGap;
   }
   if (save) {  /* current game-owned selection: 0 = YES, 2 = NO */
     y += kMsgOptGap;
-    const float wy = MsgStrWidth("YES", kMsgTitleScale), wn = MsgStrWidth("NO", kMsgTitleScale), gap = 64.0f;
+    const float wy = MsgStrWidth("YES", kMsgOptionScale), wn = MsgStrWidth("NO", kMsgOptionScale), gap = 64.0f;
     const float yes_x = cx - (wy + gap + wn) * 0.5f, no_x = yes_x + wy + gap;
     const bool yes = g_msg_sel == 0;
-    MsgDrawStr(">", (yes ? yes_x : no_x) - 20.0f, y, kMsgTitleScale, 0x00ffffffu, a);
-    MsgDrawStr("YES", yes_x, y, kMsgTitleScale, yes ? 0x00ffffffu : 0x00909090u, a);
-    MsgDrawStr("NO", no_x, y, kMsgTitleScale, yes ? 0x00909090u : 0x00ffffffu, a);
+    MsgDrawStr(">", (yes ? yes_x : no_x) - 20.0f, y, kMsgOptionScale, 0x00ffffffu, a);
+    MsgDrawStr("YES", yes_x, y, kMsgOptionScale, yes ? 0x00ffffffu : 0x00909090u, a);
+    MsgDrawStr("NO", no_x, y, kMsgOptionScale, yes ? 0x00909090u : 0x00ffffffu, a);
   }
 }
 
