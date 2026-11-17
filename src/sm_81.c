@@ -2240,6 +2240,7 @@ void FileSelectMap_10_RoomSelectMap(void) {  // 0x81AD7F
   int16 v5;
   int16 v8;
 
+  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_DPAD_LRUD, 16, 191, 16, 16);
   DrawFileSelectMapIcons();
   HandleFileSelectMapScrollArrows();
   MapScrolling();

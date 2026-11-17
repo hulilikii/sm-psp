@@ -3374,6 +3374,7 @@ enum { kPspButtonIconSlots = 8 };
 
 typedef struct ButtonOverlay {
   const uint32_t *pixels;
+  int tex_w, tex_h;
   int x, y, w, h;
   unsigned effects;
 } ButtonOverlay;
@@ -3402,17 +3403,24 @@ void PspRenderer_SetButtonIconEx(unsigned slot, enum PspButtonIcon icon,
   }
 
   const uint32_t *pixels;
+  int tex_w = 16, tex_h = 16;
   switch (icon) {
-  case PSP_BUTTON_ICON_CIRCLE:   pixels = g_psp_button_circle; break;
-  case PSP_BUTTON_ICON_CROSS:    pixels = g_psp_button_cross; break;
-  case PSP_BUTTON_ICON_SQUARE:   pixels = g_psp_button_square; break;
-  case PSP_BUTTON_ICON_TRIANGLE: pixels = g_psp_button_triangle; break;
+  case PSP_BUTTON_ICON_CIRCLE:    pixels = g_psp_button_circle; break;
+  case PSP_BUTTON_ICON_CROSS:     pixels = g_psp_button_cross; break;
+  case PSP_BUTTON_ICON_SQUARE:    pixels = g_psp_button_square; break;
+  case PSP_BUTTON_ICON_TRIANGLE:  pixels = g_psp_button_triangle; break;
+  case PSP_BUTTON_ICON_L:         pixels = g_psp_button_l; tex_w = 32; break;
+  case PSP_BUTTON_ICON_R:         pixels = g_psp_button_r; tex_w = 32; break;
+  case PSP_BUTTON_ICON_SELECT:    pixels = g_psp_button_select; tex_w = 32; break;
+  case PSP_BUTTON_ICON_DPAD_UD:   pixels = g_psp_button_dpad_ud; break;
+  case PSP_BUTTON_ICON_DPAD_LR:   pixels = g_psp_button_dpad_lr; break;
+  case PSP_BUTTON_ICON_DPAD_LRUD: pixels = g_psp_button_dpad_lrud; break;
   default:
     PspRenderer_ClearButtonIcon(slot);
     return;
   }
 
-  g_button_overlays[slot] = (ButtonOverlay){pixels, x, y, w, h, effects};
+  g_button_overlays[slot] = (ButtonOverlay){pixels, tex_w, tex_h, x, y, w, h, effects};
 }
 
 void PspRenderer_SetButtonIcon(unsigned slot, enum PspButtonIcon icon,
@@ -3961,12 +3969,12 @@ static void ComposeDraw(const ComposeSrc *s) {
       continue;
 
     sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
-    sceGuTexImage(0, 16, 16, 16, b->pixels);
+    sceGuTexImage(0, b->tex_w, b->tex_h, b->tex_w, b->pixels);
     sceGuTexFlush();
 
-    /* Texel-centre sampling: the icon's first/last pixel hit texel 0.5 / 15.5 (as the original single quad). */
-    const float uscale = b->w > 1 ? 15.0f / (float)(b->w - 1) : 0.0f;
-    const float vscale = b->h > 1 ? 15.0f / (float)(b->h - 1) : 0.0f;
+    /* Texel-centre sampling supports both 16x16 and 32x16 source textures. */
+    const float uscale = b->w > 1 ? (float)(b->tex_w - 1) / (float)(b->w - 1) : 0.0f;
+    const float vscale = b->h > 1 ? (float)(b->tex_h - 1) / (float)(b->h - 1) : 0.0f;
 
     int y = b->y;
     while (y < yend) {

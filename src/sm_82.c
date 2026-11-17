@@ -4500,6 +4500,7 @@ static void OptionsMenu_SetMainButtonIcons(void) {
 
   PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 102, 199, 16, 16);
   PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 158, 199, 16, 16);
+  PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 16, 199, 16, 16);
 }
 
 static void OptionsMenu_SetSpecialButtonIcon(void) {
@@ -4507,6 +4508,8 @@ static void OptionsMenu_SetSpecialButtonIcon(void) {
 
   OptionsMenu_BlankButtonCells(19, 25, 2);
   PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 153, 199, 16, 16);
+  PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 16, 199, 16, 16);
+  PspRenderer_SetButtonIcon(7, PSP_BUTTON_ICON_DPAD_LR, 120, 199, 16, 16);
 }
 
 void GameOptionsMenu_1_LoadingOptionsScreen(void) {  // 0x82EC11
@@ -4912,8 +4915,11 @@ static int OptionsMenu_GetPspButtonIcon(int binding) {
   case 0: return PSP_BUTTON_ICON_TRIANGLE; /* SNES X */
   case 1: return PSP_BUTTON_ICON_CIRCLE;   /* SNES A */
   case 2: return PSP_BUTTON_ICON_CROSS;    /* SNES B */
+  case 3: return PSP_BUTTON_ICON_SELECT;   /* SNES Select */
   case 4: return PSP_BUTTON_ICON_SQUARE;   /* SNES Y */
-  default: return -1;                     /* Select, L, R */
+  case 5: return PSP_BUTTON_ICON_L;        /* SNES L */
+  case 6: return PSP_BUTTON_ICON_R;        /* SNES R */
+  default: return -1;
   }
 }
 
@@ -4922,9 +4928,11 @@ static void OptionsMenu_UpdateControllerButtonIcons(void) {
   for (int i = 0; i < 7; i++) {
     int icon = OptionsMenu_GetPspButtonIcon(eproj_F[i + 13]);
     if (icon >= 0) {
+      const int wide = icon == PSP_BUTTON_ICON_SELECT ||
+                       icon == PSP_BUTTON_ICON_L || icon == PSP_BUTTON_ICON_R;
       PspRenderer_SetButtonIcon((unsigned)i, (enum PspButtonIcon)icon,
                                 184, 40 + i * 24 - (int)reg_BG1VOFS,
-                                16, 16);
+                                wide ? 32 : 16, 16);
     }
   }
 }
@@ -5127,10 +5135,12 @@ void OptionsMenuFunc6(void) {
     int icon = OptionsMenu_GetPspButtonIcon(eproj_F[v1 + 13]);
 
     if (icon >= 0) {
+      const int wide = icon == PSP_BUTTON_ICON_SELECT ||
+                       icon == PSP_BUTTON_ICON_L || icon == PSP_BUTTON_ICON_R;
+      const int blank_cols = wide ? 4 : 3;
       for (int row = 0; row < 2; row++)
-        for (int col = 0; col < 3; col++)
+        for (int col = 0; col < blank_cols; col++)
           ram3000.pause_menu_map_tilemap[(5 + v1 * 3 + row) * 32 + 23 + col] = 0x000f;
-
     }
 
     v0 = v4 + 2;
