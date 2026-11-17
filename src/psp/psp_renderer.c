@@ -3512,7 +3512,7 @@ extern const uint8_t psp_msg_font_rgba[], psp_msg_grapple_rgba[], psp_msg_missil
 
 enum { kMsgPassGlyphs, kMsgPassIcons, kMsgPassMeasure,
        kMsgMaxLines = 12, kMsgMaxW = 320, kMsgIconH = 16, kMsgIconPad = 2, kMsgDimAlpha = 0xa0 };
-static const float kMsgTitleScale = 0.4f, kMsgBodyScale = 0.32f,
+static const float kMsgTitleScale = 0.5f, kMsgBodyScale = 0.25f,
                    kMsgTextScale = 0.5f, kMsgOptionScale = 0.5f,
                    kMsgTitleGap = 6.0f, kMsgOptGap = 12.0f;
 
