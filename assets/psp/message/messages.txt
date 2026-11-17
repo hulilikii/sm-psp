@@ -12,28 +12,23 @@ Messages 1–19: item/equipment messages
 
 02. Missile [large]
   title: MISSILE
-  body: Select {item:missile} & press the {button:shoot} button.
-  control role: shoot (comment default: A)
+  body: select {item:missile} & press the {button:shoot} button.
 
 03. Super Missile [large]
   title: SUPER MISSILE
-  body: Select {item:super_missile} & press the {button:shoot} button.
-  control role: shoot (comment default: B)
+  body: select {item:super_missile} & press the {button:shoot} button.
 
 04. Power Bomb [large]
   title: POWER BOMB
-  body: Select {item:power_bomb} & set it with the {button:shoot} button.
-  control role: shoot (comment default: R)
+  body: select {item:power_bomb} & set it with the {button:shoot} button.
 
 05. Grappling Beam [large]
   title: GRAPPLING BEAM
-  body: Select {item:grapple_beam} press & hold the {button:shoot} button.
-  control role: shoot (comment default: Y)
+  body: select {item:grapple_beam} & hold the {button:shoot} button.
 
 06. X-Ray Scope [large]
   title: X-RAY SCOPE
-  body: Select {item:xray_scope} press & hold the {button:run} button.
-  control role: run (comment default: X)
+  body: press the {button:run} button twice to use {item:xray_scope}.
 
 07. Varia Suit [small]
   title: VARIA SUIT
@@ -61,8 +56,7 @@ Messages 1–19: item/equipment messages
 
 13. Speed Booster [large]
   title: SPEED BOOSTER
-  body: Press & hold the {button:run} button to run.
-  control role: run (comment default: #)
+  body: press the {button:run} button to use {item:speedbooster}.
 
 14. Charge Beam [small]
   title: CHARGE BEAM
@@ -86,23 +80,24 @@ Messages 1–19: item/equipment messages
 
 19. Bomb [large]
   title: BOMB
-  body: {bomb_animation} & set it with the {button:bomb_set} button.
-  control role: bomb_set (comment default: L)
-  note: The original tilemap contains a three-row bomb graphic/animation; the disassembly comments show the graphic rather than ordinary prose.
+  body: enter morphball & set it with the {button:shoot} button.
 
 Messages 20–28: system and save messages
 
 20. Map Data Access Completed [system]
   line 1: MAP DATA ACCESS
-  line 2: COMPLETED.
+  line 2: (blank)
+  line 3: COMPLETED.
 
 21. Energy Recharge Completed [system]
   line 1: ENERGY RECHARGE
-  line 2: COMPLETED.
+  line 2: (blank)
+  line 3: COMPLETED.
 
 22. Missile Reload Completed [system]
   line 1: MISSILE RELOAD
-  line 2: COMPLETED.
+  line 2: (blank)
+  line 3: COMPLETED.
 
 23. Save Confirmation [interactive]
   line 1: WOULD YOU LIKE
