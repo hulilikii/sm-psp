@@ -155,6 +155,10 @@ $(MOS_GE_STAMP):
 	@touch $@
 src/psp/psp_renderer.o: $(MOS_GE_STAMP)
 
+# build.mak does not track these headers or the embedded textures.
+src/psp/psp_renderer.o: src/psp/psp_message_font.h src/psp/psp_message_text.h
+src/psp/psp_message_assets.o: $(wildcard assets/psp/message/*.rgba)
+
 # Rebuild the EBOOT when an asset changes.
 EBOOT.PBP: $(PSP_ASSET_FILES)
 

@@ -8,188 +8,18 @@ uint16 message_box_das0l_value;
 
 
 #define kMessageBoxDefs ((MsgBoxConfig*)RomFixedPtr(0x85869b))
-static const uint16 kMsgBoxSpecialButtonTilemapOffs[27] = {  // 0x8583D1
-  0, 0x12a, 0x12a, 0x12c, 0x12c, 0x12c, 0, 0, 0, 0, 0, 0, 0x120, 0, 0, 0,
-  0,     0, 0x12a,     0,     0,     0, 0, 0, 0, 0, 0,
-};
-static const uint16 kTileNumbersForButtonLetters[8] = { 0x28e0, 0x3ce1, 0x2cf7, 0x38f8, 0x38d0, 0x38eb, 0x38f1, 0x284e };
 
+// Native PSP message presentation. The original BG3 message tilemap, HDMA, palette and VRAM work is replaced by the renderer's final-composition overlay. Waits, music/SFX servicing, input and save-selection logic are unchanged.
 static void InitializePpuForMessageBoxes(void) {  // 0x858143
   save_confirmation_selection = 0;
-  WriteReg(HDMAEN, 0);
-  WriteReg(CGADD, 0x19);
-  WriteReg(CGDATA, 0xB1);
-  WriteReg(CGDATA, 0xB);
-  WriteReg(CGDATA, 0x1F);
-  WriteReg(CGDATA, 0);
-  ram3000.msgbox.backup_of_enabled_hdma_channels = reg_HDMAEN;
-  ram3000.misc.field_3E8[3] = gameplay_BG3SC;
-  gameplay_BG3SC = 88;
-  gameplay_TM = 23;
-  gameplay_CGWSEL = 0;
-  gameplay_CGADSUB = 0;
-  WriteReg(COLDATA, 0x20);
-  WriteReg(COLDATA, 0x40);
-  WriteReg(COLDATA, 0x80);
-  ReadReg(BG3HOFS);
-  WriteReg(BG3HOFS, 0);
-  WriteReg(BG3HOFS, 0);
-  ReadReg(BG3VOFS);
-  WriteReg(BG3VOFS, 0);
-  WriteReg(BG3VOFS, 0);
-  for (int i = 128; i >= 0; i -= 2)
-    *(unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + (uint16)i) = 0;
-  WriteRegWord(VMADDL, addr_unk_605880);
-  ReadRegWord(RDVRAML);
-  WriteRegWord(DMAP1, 0x3981);
-  WriteRegWord(A1T1L, ADDR16_OF_RAM(ram4000) + 256);
-  WriteRegWord(A1B1, 0x7E);
-  WriteRegWord(DAS1L, 0x700);
-  WriteRegWord(DAS10, 0);
-  WriteRegWord(A2A1H, 0);
-  WriteReg(VMAIN, 0x80);
-  WriteReg(MDMAEN, 2);
 }
 
 static void ClearMessageBoxBg3Tilemap(void) {  // 0x8581F3
-  PspRenderer_ClearButtonIcon(0);
-  int16 v0;
-  v0 = 1790;
-  do {
-    * (unaligned_uint16 *)((uint8 *)ram3800.cinematic_bg_tilemap + (uint16)v0) = 0xe;
-    v0 -= 2;
-  } while (v0 >= 0);
-  WriteRegWord(VMADDL, addr_unk_605880);
-  WriteRegWord(DMAP1, 0x1801);
-  WriteRegWord(A1T1L, ADDR16_OF_RAM(ram3800));
-  WriteRegWord(A1B1, 0x7E);
-  WriteRegWord(DAS1L, 0x700);
-  WriteRegWord(DAS10, 0);
-  WriteRegWord(A2A1H, 0);
-  WriteReg(VMAIN, 0x80);
-  WriteReg(MDMAEN, 2);
-}
-
-static const uint16 kLargeMsgBoxTopBottomBorderTilemap[32] = {  // 0x85825A
-     0xe,    0xe,    0xe, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f,
-  0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x280f, 0x284e, 0x284e,    0xe,    0xe,    0xe,
-};
-static const uint16 kSmallMsgBoxTopBottomBorderTilemap[32] = {
-     0xe,    0xe,    0xe,    0xe,    0xe,    0xe, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e,
-  0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e, 0x284e,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,
-};
-
-static uint16 WriteMessageTilemap(void) {  // 0x8582B8
-  message_box_animation_y1 = 112;
-  message_box_animation_y0 = 124;
-  message_box_animation_y_radius = 0;
-  for (int i = 0; i != 112; ++i)
-    ram3000.pause_menu_map_tilemap[i] = 0;
-  uint16 r0 = kMessageBoxDefs[message_box_index - 1].message_tilemap;
-  uint16 r9 = kMessageBoxDefs[message_box_index].message_tilemap - r0;
-  int n = r9 >> 1;
-  r9 += 128;
-  message_box_das0l_value = r9;
-  uint16 v1 = 32;
-  uint16 v2 = 0;
-  do {
-    ram3000.pause_menu_map_tilemap[v1 + 256] = *(unaligned_uint16 *)&RomPtr_85(r0)[v2];
-    ++v1;
-    v2 += 2;
-  } while (--n);
-  return v1;
-}
-
-static void WriteLargeMessageBoxTilemap(void) {
-  for (int i = 0; i != 32; ++i)
-    ram3000.pause_menu_map_tilemap[i + 256] = kLargeMsgBoxTopBottomBorderTilemap[i];
-  uint16 i = WriteMessageTilemap();
-  int n = 32;
-  uint16 v1 = 0;
-  do {
-    ram3000.pause_menu_map_tilemap[i + 256] = kLargeMsgBoxTopBottomBorderTilemap[v1 >> 1];
-    v1 += 2;
-    ++i;
-  } while (--n);
-}
-
-static void WriteSmallMessageBoxTilemap(void) {  // 0x858289
-  for (int i = 0; i != 32; ++i)
-    ram3000.pause_menu_map_tilemap[i + 256] = kSmallMsgBoxTopBottomBorderTilemap[i];
-  uint16 i = WriteMessageTilemap();
-  int n = 32;
-  uint16 v1 = 0;
-  do {
-    ram3000.pause_menu_map_tilemap[i + 256] = kSmallMsgBoxTopBottomBorderTilemap[v1 >> 1];
-    v1 += 2;
-    ++i;
-  } while (--n);
-}
-
-static void CallMsgBoxDraw(uint32 ea) {
-  switch (ea) {
-  case fnWriteLargeMessageBoxTilemap: WriteLargeMessageBoxTilemap(); return;
-  case fnWriteSmallMessageBoxTilemap: WriteSmallMessageBoxTilemap(); return;
-  default: Unreachable();
-  }
-}
-
-static void MsgBoxMakeHdmaTable(void) {
-  message_box_animation_y2 = (uint16)(31488 - message_box_animation_y_radius) >> 8;
-  message_box_animation_y3 = 99;
-  message_box_animation_y0 = (uint16)(message_box_animation_y_radius + 31744) >> 8;
-  message_box_animation_y1 = 148;
-  uint16 v0 = 123;
-  uint16 v1 = 124;
-  uint16 r20 = 30;
-  do {
-    ram3000.pause_menu_map_tilemap[v0] = message_box_animation_y3 - message_box_animation_y2;
-    --message_box_animation_y3;
-    --message_box_animation_y2;
-    ram3000.pause_menu_map_tilemap[v1] = message_box_animation_y1 - message_box_animation_y0;
-    --v0;
-    ++message_box_animation_y1;
-    ++message_box_animation_y0;
-    ++v1;
-  } while (--r20);
-  uint16 v2 = v1 * 2;
-  do {
-    * (unaligned_uint16 *)((uint8 *)ram3000.pause_menu_map_tilemap + v2) = 0;
-    v2 += 2;
-  } while ((int16)(v2 - 480) < 0);
-}
-
-static void SetupMessageBoxBg3YscrollHdma(void) {  // 0x858363
-  * (unaligned_uint32 *)&ram3000.menu.palette_backup_in_menu[64] = -516947713;
-  ram3000.pause_menu_map_tilemap[450] = 12542;
-  ram3000.msgbox.indirect_hdma[6] = 0;
-  WriteReg(DMAP6, 0x42);
-  WriteReg(BBAD6, 0x12);
-  WriteReg(A1T6L, 0x80);
-  WriteReg(DAS6L, 0x80);
-  WriteReg(A1T6H, 0x33);
-  WriteReg(DAS6H, 0x33);
-  WriteReg(A1B6, 0x7E);
-  WriteReg(DAS60, 0x7E);
-  WriteReg(A2A6L, 0);
-  WriteReg(A2A6H, 0);
-  WriteReg(NTRL6, 0);
-  MsgBoxMakeHdmaTable();
-  WriteReg(HDMAEN, 0x40);
+PspRenderer_ClearMessageBox();
 }
 
 static void SetupPpuForActiveMessageBox(uint16 r52) {  // 0x85831E
-  SetupMessageBoxBg3YscrollHdma();
-  r52 += 22528;
-  WriteRegWord(VMADDL, r52);
-  WriteRegWord(DMAP1, 0x1801);
-  WriteRegWord(A1T1L, ADDR16_OF_RAM(ram3000) + 512);
-  WriteRegWord(A1B1, 0x7E);
-  WriteRegWord(DAS1L, message_box_das0l_value);
-  WriteRegWord(DAS10, 0);
-  WriteRegWord(A2A1H, 0);
-  WriteReg(VMAIN, 0x80);
-  WriteReg(MDMAEN, 2);
+  (void)r52;
 }
 
 static void DrawSpecialButtonAndSetupPpuForLargeMessageBox(uint16 a) {
@@ -214,26 +44,22 @@ static void DrawSpecialButtonAndSetupPpuForLargeMessageBox(uint16 a) {
       }
     }
   }
-  const uint16 offs = kMsgBoxSpecialButtonTilemapOffs[message_box_index - 1];
-  const uint16 tile = kTileNumbersForButtonLetters[v1 >> 1];
+  
   int icon = -1;
+  const char *label = "";
 
   switch (v1) {
   case 0: icon = PSP_BUTTON_ICON_CIRCLE; break;    /* SNES A */
   case 2: icon = PSP_BUTTON_ICON_CROSS; break;     /* SNES B */
   case 4: icon = PSP_BUTTON_ICON_TRIANGLE; break;  /* SNES X */
   case 6: icon = PSP_BUTTON_ICON_SQUARE; break;    /* SNES Y */
-  default: break;                                  /* Select, L, R */
+  case 8: label = "SELECT"; break;
+  case 10: label = "L"; break;
+  case 12: label = "R"; break;
+  default: break;
   }
 
-  PspRenderer_ClearButtonIcon(0);
-  if (offs != 0 && icon >= 0) {
-    int x = offs == 0x12a ? 168 : offs == 0x12c ? 176 : 128;
-    * (unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[256] + offs) = 0xe;
-    PspRenderer_SetButtonIcon(0, (enum PspButtonIcon)icon, x, 96, 8, 8);
-  } else {
-    * (unaligned_uint16 *)((uint8 *)&ram3000.pause_menu_map_tilemap[256] + offs) = tile;
-  }
+  PspRenderer_SetMessageButton(icon, label);
   SetupPpuForActiveMessageBox(416);
 }
 
@@ -265,64 +91,20 @@ static void CallMsgBoxModify(uint32 ea) {
 
 static void InitializeMessageBox(void) {  // 0x858241
   int v0 = message_box_index - 1;
-  CallMsgBoxDraw(kMessageBoxDefs[v0].draw_initial_tilemap | 0x850000);
+  PspRenderer_SetMessageBox(message_box_index, save_confirmation_selection);
   CallMsgBoxModify(kMessageBoxDefs[v0].modify_box_func | 0x850000);
 }
 
-
-static const uint16 kSaveConfirmationSelectionTilemap[96] = {  // 0x858507
-     0xe,    0xe,    0xe,    0xe,    0xe,    0xe, 0x3c4e, 0x3c4e, 0x38cc, 0x38cd, 0x3cf8, 0x3ce4, 0x3cf2, 0x3c4e, 0x3c4e, 0x3c4e,
-  0x3c4e, 0x3c4e, 0x3c4e, 0x2ced, 0x2cee, 0x3c4e, 0x3c4e, 0x3c4e, 0x3c4e,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,
-     0xe,    0xe,    0xe,    0xe,    0xe,    0xe, 0x3c4e, 0x3c4e, 0x38cc, 0x38cd, 0x3cf8, 0x3ce4, 0x3cf2, 0x3c4e, 0x3c4e, 0x3c4e,
-  0x3c4e, 0x3c4e, 0x3c4e, 0x2ced, 0x2cee, 0x3c4e, 0x3c4e, 0x3c4e, 0x3c4e,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,
-     0xe,    0xe,    0xe,    0xe,    0xe,    0xe, 0x3c4e, 0x3c4e, 0x3c4e, 0x3c4e, 0x2cf8, 0x2ce4, 0x2cf2, 0x3c4e, 0x3c4e, 0x3c4e,
-  0x3c4e, 0x38cc, 0x38cd, 0x3ced, 0x3cee, 0x3c4e, 0x3c4e, 0x3c4e, 0x3c4e,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,    0xe,
-};
-
 static void ToggleSaveConfirmationSelection(void) {
   save_confirmation_selection ^= 2;
-  uint16 v0 = 64;
-  if (save_confirmation_selection == 2)
-    v0 = 128;
-  uint16 v1 = 128;
-  int r52 = 32;
-  do {
-    ram3000.pause_menu_map_tilemap[v1 + 256] = kSaveConfirmationSelectionTilemap[v0 >> 1];
-    ++v1;
-    v0 += 2;
-  } while (--r52);
-  WriteRegWord(VMADDL, addr_unk_6059A0);
-  WriteRegWord(DMAP1, 0x1801);
-  WriteRegWord(A1T1L, ADDR16_OF_RAM(ram3000) + 512);
-  WriteRegWord(A1B1, 0x7E);
-  WriteRegWord(DAS1L, 0x180);
-  WriteRegWord(DAS10, 0);
-  WriteRegWord(A2A1H, 0);
-  WriteReg(VMAIN, 0x80);
-  WriteReg(MDMAEN, 2);
+  PspRenderer_SetMessageBoxSelection(save_confirmation_selection);
 }
 
 static void RestorePpuForMessageBox(void) {  // 0x85861A
-  WriteRegWord(VMADDL, addr_unk_605880);
-  WriteRegWord(DMAP1, 0x1801);
-  WriteRegWord(A1T1L, ADDR16_OF_RAM(ram4000) + 256);
-  WriteRegWord(A1B1, 0x7E);
-  WriteRegWord(DAS1L, 0x700);
-  WriteRegWord(DAS10, 0);
-  WriteRegWord(A2A1H, 0);
-  WriteReg(VMAIN, 0x80);
-  WriteReg(MDMAEN, 2);
-  reg_HDMAEN = ram3000.msgbox.backup_of_enabled_hdma_channels;
-  WriteReg(HDMAEN, ram3000.msgbox.backup_of_enabled_hdma_channels);
-  gameplay_BG3SC = ram3000.misc.field_3E8[3];
+// The overlay never touched PPU, VRAM, HDMA, BG3SC or the layer shadows except the three below, which $85:8665-866D restores.
   gameplay_TM = reg_TM;
   gameplay_CGWSEL = next_gameplay_CGWSEL;
   gameplay_CGADSUB = next_gameplay_CGADSUB;
-  WriteReg(CGADD, 0x19);
-  WriteReg(CGDATA, palette_buffer[25]);
-  WriteReg(CGDATA, HIBYTE(palette_buffer[25]));
-  WriteReg(CGDATA, palette_buffer[26]);
-  WriteReg(CGDATA, HIBYTE(palette_buffer[26]));
 }
 
 static CoroutineRet OpenMessageBox_Async(void) {  // 0x85844C
@@ -331,7 +113,7 @@ static CoroutineRet OpenMessageBox_Async(void) {  // 0x85844C
     COROUTINE_AWAIT(1, WaitForNMI_NoUpdate_Async());
     HandleMusicQueue();
     HandleSoundEffects();
-    MsgBoxMakeHdmaTable();
+    PspRenderer_SetMessageFade(message_box_animation_y_radius * 255u / 0x1800u);
     if (message_box_animation_y_radius == 0x1800)
       break;
   }
@@ -343,6 +125,7 @@ static CoroutineRet HandleMessageBoxInteraction_Async(void) {  // 0x85846D
 
   if (message_box_index == 23 || message_box_index == 28) {
     save_confirmation_selection = 0;
+    PspRenderer_SetMessageBoxSelection(save_confirmation_selection);
     while (1) {
       do {
         COROUTINE_AWAIT(1, WaitForNMI_NoUpdate_Async());
@@ -354,6 +137,7 @@ static CoroutineRet HandleMessageBoxInteraction_Async(void) {  // 0x85846D
         break;
       if ((joypad1_newkeys & kButton_B) != 0) {
         save_confirmation_selection = 2;
+        PspRenderer_SetMessageBoxSelection(save_confirmation_selection);
         goto GETOUT;
       }
       if ((joypad1_newkeys & (kButton_Select | kButton_Left | kButton_Right)) != 0) {
@@ -386,7 +170,7 @@ static CoroutineRet CloseMessageBox_Async(void) {  // 0x858589
     COROUTINE_AWAIT(1, WaitForNMI_NoUpdate_Async());
     HandleMusicQueue();
     HandleSoundEffects();
-    MsgBoxMakeHdmaTable();
+    PspRenderer_SetMessageFade(message_box_animation_y_radius * 255u / 0x1800u);
     message_box_animation_y_radius -= 512;
   } while ((message_box_animation_y_radius & 0x8000) == 0);
   COROUTINE_END(0);

@@ -16,6 +16,8 @@
 #include "src/psp/psp_audio_me.h"
 #include "src/psp/psp_hud_icons.h"
 #include "src/psp/psp_button_icons.h"
+#include "src/psp/psp_message_font.h"
+#include "src/psp/psp_message_text.h"
 
 #if SM_PSP_LOG
 #define PROF(...) __VA_ARGS__
@@ -3501,6 +3503,292 @@ static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1,
   w[1] = (TileVert){u0 + (float)dw * sx, v0 + (float)dh * sy, (int16_t)(dx + dw), (int16_t)(dy + dh), 0};
 }
 
+/* ---- Native message overlay ---------------------------------------------------------------------------------
+ * Drawn last in ComposeDraw, so the GE and software paths share it. Text: psp_message_text.h (from messages.txt),
+ * glyph metrics: psp_message_font.h. Textures are RGBA8888 in RAM, written back once (ComposeDraw), never modified.
+ * The dim covers the gameplay rectangle only; the HUD side panels are not touched. */
+extern const uint8_t psp_msg_font_rgba[], psp_msg_grapple_rgba[], psp_msg_missile_rgba[], psp_msg_powerbomb_rgba[],
+    psp_msg_supermissile_rgba[], psp_msg_xray_rgba[];
+
+enum { kMsgPassGlyphs, kMsgPassIcons, kMsgPassMeasure,
+       kMsgMaxLines = 12, kMsgMaxW = 320, kMsgIconH = 20, kMsgIconPad = 2, kMsgDimAlpha = 0xa0 };
+static const float kMsgTitleScale = 0.5f, kMsgBodyScale = 0.4f, kMsgTitleGap = 6.0f, kMsgOptGap = 12.0f;
+
+static uint8_t g_msg_id, g_msg_sel, g_msg_fade;
+static const uint32_t *g_msg_btn_px;
+static const char *g_msg_btn_label;
+
+void PspRenderer_SetMessageBox(unsigned id, unsigned selection) {
+  g_msg_id = (id >= 1 && id <= 29) ? (uint8_t)id : 0;
+  g_msg_sel = selection == 2 ? 2 : 0;
+  g_msg_fade = 0;
+  g_msg_btn_px = NULL;
+  g_msg_btn_label = NULL;
+}
+
+void PspRenderer_SetMessageBoxSelection(unsigned selection) {
+  g_msg_sel = selection == 2 ? 2 : 0;
+}
+
+void PspRenderer_SetMessageFade(unsigned fade) {
+  g_msg_fade = fade > 255 ? 255 : (uint8_t)fade;
+}
+
+void PspRenderer_ClearMessageBox(void) {
+  g_msg_id = g_msg_sel = g_msg_fade = 0;
+  g_msg_btn_px = NULL;
+  g_msg_btn_label = NULL;
+}
+
+void PspRenderer_SetMessageButton(int icon, const char *label) {
+  g_msg_btn_px = NULL;
+  g_msg_btn_label = NULL;
+  switch (icon) {
+  case PSP_BUTTON_ICON_CIRCLE:   g_msg_btn_px = g_psp_button_circle; break;
+  case PSP_BUTTON_ICON_CROSS:    g_msg_btn_px = g_psp_button_cross; break;
+  case PSP_BUTTON_ICON_SQUARE:   g_msg_btn_px = g_psp_button_square; break;
+  case PSP_BUTTON_ICON_TRIANGLE: g_msg_btn_px = g_psp_button_triangle; break;
+  default:
+    if (label && label[0])
+      g_msg_btn_label = label;
+    break;
+  }
+}
+
+typedef struct MsgTok { const void *px; int tw, th, iw, ih; const char *label; } MsgTok;
+static const struct { const char *name; const void *px; int tw, th, iw, ih; } kMsgItem[] = {
+  {"item:missile",       psp_msg_missile_rgba,      32, 16, 24, 16},
+  {"item:super_missile", psp_msg_supermissile_rgba, 16, 16, 16, 16},
+  {"item:power_bomb",    psp_msg_powerbomb_rgba,    16, 16, 16, 16},
+  {"item:grapple_beam",  psp_msg_grapple_rgba,      16, 16, 16, 16},
+  {"item:xray_scope",    psp_msg_xray_rgba,         16, 16, 16, 16},
+  {"item:speedbooster",  g_hud_ico_speed_sel,       16, 16, 16, 16},
+};
+
+static bool MsgTokIs(const char *p, int n, const char *s) {
+  return (int)strlen(s) == n && memcmp(p, s, (size_t)n) == 0;
+}
+
+static bool MsgResolve(const char *p, int n, MsgTok *t) {
+  memset(t, 0, sizeof(*t));
+  for (unsigned i = 0; i < sizeof(kMsgItem) / sizeof(kMsgItem[0]); i++)
+    if (MsgTokIs(p, n, kMsgItem[i].name)) {
+      *t = (MsgTok){kMsgItem[i].px, kMsgItem[i].tw, kMsgItem[i].th, kMsgItem[i].iw, kMsgItem[i].ih, NULL};
+      return true;
+    }
+  if (MsgTokIs(p, n, "button:shoot") || MsgTokIs(p, n, "button:run")) {  /* each message has one button: the game's current binding */
+    if (g_msg_btn_px) {
+      *t = (MsgTok){g_msg_btn_px, 16, 16, 16, 16, NULL};
+      return true;
+    }
+    if (g_msg_btn_label) {
+      t->label = g_msg_btn_label;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Sprite over dest rect (dx,dy,dw,dh) showing source rect (su,sv,sw,sh), texel-centre mapping as in ComposeQuad: the first and last pixel sample the centres of the first and last texel (su + 0.5, su + sw - 0.5), so bilinear filtering never reads outside the rect (the missile art is 24 px inside a 32 px texture). g_uvh: where the GE samples in a pixel. 
+static void MsgQuad(TileVert *w, float su, float sv, float sw, float sh, int dx, int dy, int dw, int dh) {
+  const float stx = dw > 1 ? (sw - 1.0f) / (float)(dw - 1) : 0.0f;
+  const float sty = dh > 1 ? (sh - 1.0f) / (float)(dh - 1) : 0.0f;
+  const float u0 = su + 0.5f - g_uvh[0] * stx;
+  const float v0 = sv + 0.5f - g_uvh[1] * sty;
+  w[0] = (TileVert){u0, v0, (int16_t)dx, (int16_t)dy, 0};
+  w[1] = (TileVert){u0 + (float)dw * stx, v0 + (float)dh * sty,
+                    (int16_t)(dx + dw), (int16_t)(dy + dh), 0};
+}
+
+static void MsgDrawImg(const MsgTok *t, int x, int y, int w, int h, unsigned a) {
+  sceGuColor(((uint32_t)a << 24) | 0x00ffffffu);
+  sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+  sceGuTexImage(0, t->tw, t->th, t->tw, t->px);
+  sceGuTexFlush();
+  TileVert *v = sceGuGetMemory(2 * (int)sizeof(TileVert));
+  MsgQuad(v, 0.0f, 0.0f, (float)t->iw, (float)t->ih, x, y, w, h);
+  GeDraw(kVtTile, 2, v);
+}
+
+/* One walker for all three jobs (same advance maths, so measure and draw always agree): glyph quads into gv, icon
+ * draws, or width only. A run holds plain text and {tokens}; a label token expands to its glyphs. */
+static void MsgWalk(const char *s, const char *e, float *cx, float y, float sc, int pass, TileVert *gv, int *nv,
+                    unsigned a) {
+  for (const char *p = s; p < e;) {
+    if (*p == '{') {
+      const char *c = memchr(p, '}', (size_t)(e - p));
+      if (c) {
+        MsgTok t;
+        if (MsgResolve(p + 1, (int)(c - p - 1), &t)) {
+          if (t.label) {
+            MsgWalk(t.label, t.label + strlen(t.label), cx, y, sc, pass, gv, nv, a);
+          } else {
+            const int w = t.iw * kMsgIconH / t.ih;
+            if (pass == kMsgPassIcons)
+              MsgDrawImg(&t, (int)(*cx + 0.5f) + kMsgIconPad, (int)(y + 30.5f * sc) - kMsgIconH / 2, w, kMsgIconH, a);
+            *cx += (float)(w + 2 * kMsgIconPad);
+          }
+        }
+        p = c + 1;
+        continue;
+      }
+    }
+    unsigned char ch = (unsigned char)*p++;
+    if (ch < 32 || ch > 126)
+      ch = '?';
+    const PspMsgGlyph *g = &g_psp_msg_glyphs[ch - 32];
+    if (pass == kMsgPassGlyphs && ch != ' ' && g->w && g->h) {
+      int dw = (int)((float)g->w * sc + 0.5f), dh = (int)((float)g->h * sc + 0.5f);
+      if (dw < 1) dw = 1;
+      if (dh < 1) dh = 1;
+      MsgQuad(&gv[*nv], (float)g->x, (float)g->y, (float)g->w, (float)g->h,
+              (int)(*cx + (float)g->xoff * sc + 0.5f), (int)(y + (float)g->yoff * sc + 0.5f), dw, dh);
+      *nv += 2;
+    }
+    *cx += (float)g->advance * sc;
+  }
+}
+
+static float MsgWidth(const char *s, const char *e, float sc) {
+  float w = 0.0f;
+  MsgWalk(s, e, &w, 0.0f, sc, kMsgPassMeasure, NULL, NULL, 0);
+  return w;
+}
+
+static void MsgDrawRun(const char *s, const char *e, float x, float y, float sc, uint32_t rgb, unsigned a) {
+  if (e <= s)
+    return;
+  TileVert *gv = sceGuGetMemory((int)(e - s) * 2 * (int)sizeof(TileVert));  /* <= 1 glyph per source char */
+  int nv = 0;
+  float cx = x;
+  MsgWalk(s, e, &cx, y, sc, kMsgPassGlyphs, gv, &nv, a);
+  if (nv) {
+    sceGuColor(((uint32_t)a << 24) | rgb);
+    sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+    sceGuTexImage(0, PSP_MSG_FONT_W, PSP_MSG_FONT_H, PSP_MSG_FONT_W, psp_msg_font_rgba);
+    sceGuTexFlush();
+    GeDraw(kVtTile, nv, gv);
+  }
+  cx = x;
+  MsgWalk(s, e, &cx, y, sc, kMsgPassIcons, NULL, NULL, a);
+}
+
+typedef struct MsgLine { const char *s, *e; float scale; bool gap; } MsgLine;
+
+/* Greedy word wrap of every message line to kMsgMaxW. Returns the line count. */
+static int MsgLayout(const PspMessageText *m, MsgLine *out) {
+  int n = 0;
+  for (int i = 0; i < m->n; i++) {
+    const char *s = m->line[i];
+    const bool title = (m->flags & PSP_MSG_TITLE) && i == 0;
+    const float sc = ((m->flags & PSP_MSG_TITLE) && i > 0) ? kMsgBodyScale : kMsgTitleScale;
+    if (!*s) {
+      if (n < kMsgMaxLines)
+        out[n++] = (MsgLine){s, s, sc, false};
+      continue;
+    }
+    const float sp = (float)g_psp_msg_glyphs[0].advance * sc;
+    const char *ls = s, *last = s, *p = s;
+    float lw = 0.0f;
+    while (*p) {
+      while (*p == ' ')
+        p++;
+      if (!*p)
+        break;
+      const char *q = p;
+      while (*q && *q != ' ') {
+        if (*q == '{') {
+          const char *c = strchr(q, '}');
+          q = c ? c + 1 : q + 1;
+        } else {
+          q++;
+        }
+      }
+      const float pw = MsgWidth(p, q, sc);
+      if (lw > 0.0f && lw + sp + pw > (float)kMsgMaxW) {
+        if (n < kMsgMaxLines)
+          out[n++] = (MsgLine){ls, last, sc, false};
+        ls = p;
+        lw = pw;
+      } else {
+        lw = lw > 0.0f ? lw + sp + pw : pw;
+      }
+      last = q;
+      p = q;
+    }
+    if (n < kMsgMaxLines)
+      out[n++] = (MsgLine){ls, last, sc, title};
+  }
+  return n;
+}
+
+static void MsgDrawStr(const char *s, float x, float y, float sc, uint32_t rgb, unsigned a) {
+  MsgDrawRun(s, s + strlen(s), x, y, sc, rgb, a);
+}
+
+static float MsgStrWidth(const char *s, float sc) {
+  return MsgWidth(s, s + strlen(s), sc);
+}
+
+static void DrawNativeMessage(void) {
+  if (!g_msg_id || !g_msg_fade)
+    return;
+  const PspMessageText *m = &g_psp_message_text[g_msg_id - 1];
+  if (!m->n)
+    return;
+  const unsigned a = g_msg_fade;
+
+  /* dim: gameplay rectangle only */
+  sceGuDisable(GU_TEXTURE_2D);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuEnable(GU_BLEND);
+  sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+  const uint32_t dim = ((uint32_t)kMsgDimAlpha * a / 255u) << 24;
+  ColorVert *dv = sceGuGetMemory(2 * (int)sizeof(ColorVert));
+  dv[0] = (ColorVert){dim, kCompX, kCompY, 0};
+  dv[1] = (ColorVert){dim, kCompX + kCompW, kCompY + kCompH, 0};
+  GeDraw(kVtColor, 2, dv);
+
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuEnable(GU_ALPHA_TEST);
+  sceGuAlphaFunc(GU_GREATER, 0, 0xff);
+  sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_LINEAR, GU_LINEAR);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+
+  MsgLine ln[kMsgMaxLines];
+  const int nl = MsgLayout(m, ln);
+  const bool save = (m->flags & PSP_MSG_SAVE) != 0;
+  const float lh_opt = (float)PSP_MSG_FONT_LINE_HEIGHT * kMsgTitleScale;
+  float total = 0.0f;
+  for (int i = 0; i < nl; i++) {
+    total += (float)PSP_MSG_FONT_LINE_HEIGHT * ln[i].scale;
+    if (ln[i].gap)
+      total += kMsgTitleGap;
+  }
+  if (save)
+    total += kMsgOptGap + lh_opt;
+
+  const float cx = (float)kCompX + (float)kCompW * 0.5f;
+  float y = (float)kCompY + ((float)kCompH - total) * 0.5f;
+  for (int i = 0; i < nl; i++) {
+    const float w = MsgWidth(ln[i].s, ln[i].e, ln[i].scale);
+    MsgDrawRun(ln[i].s, ln[i].e, cx - w * 0.5f, y, ln[i].scale, 0x00ffffffu, a);
+    y += (float)PSP_MSG_FONT_LINE_HEIGHT * ln[i].scale;
+    if (ln[i].gap)
+      y += kMsgTitleGap;
+  }
+  if (save) {  /* current game-owned selection: 0 = YES, 2 = NO */
+    y += kMsgOptGap;
+    const float wy = MsgStrWidth("YES", kMsgTitleScale), wn = MsgStrWidth("NO", kMsgTitleScale), gap = 64.0f;
+    const float yes_x = cx - (wy + gap + wn) * 0.5f, no_x = yes_x + wy + gap;
+    const bool yes = g_msg_sel == 0;
+    MsgDrawStr(">", (yes ? yes_x : no_x) - 20.0f, y, kMsgTitleScale, 0x00ffffffu, a);
+    MsgDrawStr("YES", yes_x, y, kMsgTitleScale, yes ? 0x00ffffffu : 0x00909090u, a);
+    MsgDrawStr("NO", no_x, y, kMsgTitleScale, yes ? 0x00909090u : 0x00ffffffu, a);
+  }
+}
+
 /* Appends the composition of the source image s (256 wide, rows 0-223 valid) to the open list: black panel, then Layout A
  * (HUD present: source rows 32-223 -> 360x270, original HUD elements in the side panels) or Layout B (rows 0-223 -> 360x270,
  * empty margins). The list is open and the source is complete; exactly one Present() follows. */
@@ -3516,6 +3804,12 @@ static void ComposeDraw(const ComposeSrc *s) {
     sceKernelDcacheWritebackRange((void *)g_psp_button_cross, sizeof(g_psp_button_cross));
     sceKernelDcacheWritebackRange((void *)g_psp_button_square, sizeof(g_psp_button_square));
     sceKernelDcacheWritebackRange((void *)g_psp_button_triangle, sizeof(g_psp_button_triangle));
+    sceKernelDcacheWritebackRange((void *)psp_msg_font_rgba, PSP_MSG_FONT_W * PSP_MSG_FONT_H * 4);
+    sceKernelDcacheWritebackRange((void *)psp_msg_grapple_rgba, 16 * 16 * 4);
+    sceKernelDcacheWritebackRange((void *)psp_msg_missile_rgba, 32 * 16 * 4);
+    sceKernelDcacheWritebackRange((void *)psp_msg_powerbomb_rgba, 16 * 16 * 4);
+    sceKernelDcacheWritebackRange((void *)psp_msg_supermissile_rgba, 16 * 16 * 4);
+    sceKernelDcacheWritebackRange((void *)psp_msg_xray_rgba, 16 * 16 * 4);
   }
   int off = 0;
   const int why = HudResolve(&off);
@@ -3700,6 +3994,8 @@ static void ComposeDraw(const ComposeSrc *s) {
       y = run_end;
     }
   }
+
+  DrawNativeMessage();
 
   sceGuColor(0xffffffff);
   sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
