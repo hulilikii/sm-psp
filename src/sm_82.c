@@ -4510,7 +4510,9 @@ static void OptionsMenu_SetSpecialButtonIcon(void) {
   OptionsMenu_BlankButtonCells(19, 25, 2);
   OptionsMenu_BlankButtonCells(2, 25, 2);
   OptionsMenu_BlankButtonCells(15, 25, 2);
+  OptionsMenu_BlankButtonCells(13, 15, 2);
   PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 153, 199, 16, 16);
+  PspRenderer_SetButtonIcon(5, PSP_BUTTON_ICON_DPAD_LR, 105, 119, 16, 16);
   PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 21, 199, 16, 16);
   PspRenderer_SetButtonIcon(7, PSP_BUTTON_ICON_DPAD_LR, 118, 199, 16, 16);
 }
