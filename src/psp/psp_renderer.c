@@ -3517,6 +3517,7 @@ static const float kMsgTitleScale = 0.4f, kMsgBodyScale = 0.32f,
                    kMsgTitleGap = 6.0f, kMsgOptGap = 12.0f;
 
 static uint8_t g_msg_id, g_msg_sel, g_msg_fade;
+static bool g_msg_dim_hold;
 static const uint32_t *g_msg_btn_px;
 static const char *g_msg_btn_label;
 
@@ -3534,6 +3535,10 @@ void PspRenderer_SetMessageBoxSelection(unsigned selection) {
 
 void PspRenderer_SetMessageFade(unsigned fade) {
   g_msg_fade = fade > 255 ? 255 : (uint8_t)fade;
+}
+
+void PspRenderer_SetMessageDimHold(bool hold) {
+  g_msg_dim_hold = hold;
 }
 
 void PspRenderer_ClearMessageBox(void) {
@@ -3737,10 +3742,7 @@ static float MsgStrWidth(const char *s, float sc) {
 }
 
 static void DrawNativeMessage(void) {
-  if (!g_msg_id || !g_msg_fade)
-    return;
-  const PspMessageText *m = &g_psp_message_text[g_msg_id - 1];
-  if (!m->n)
+  if ((!g_msg_id || !g_msg_fade) && !g_msg_dim_hold)
     return;
   const unsigned a = g_msg_fade;
 
@@ -3749,7 +3751,8 @@ static void DrawNativeMessage(void) {
   sceGuDisable(GU_ALPHA_TEST);
   sceGuEnable(GU_BLEND);
   sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
-  const uint32_t dim = ((uint32_t)kMsgDimAlpha * a / 255u) << 24;
+  const unsigned dim_alpha = g_msg_dim_hold ? kMsgDimAlpha : kMsgDimAlpha * a / 255u;
+  const uint32_t dim = (uint32_t)dim_alpha << 24;
   ColorVert *dv = sceGuGetMemory(2 * (int)sizeof(ColorVert));
   dv[0] = (ColorVert){dim, kCompX, kCompY, 0};
   dv[1] = (ColorVert){dim, kCompX + kCompW, kCompY + kCompH, 0};
@@ -3761,6 +3764,13 @@ static void DrawNativeMessage(void) {
   sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
   sceGuTexFilter(GU_LINEAR, GU_LINEAR);
   sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+
+  if (!g_msg_id || !g_msg_fade)
+    return;
+
+  const PspMessageText *m = &g_psp_message_text[g_msg_id - 1];
+  if (!m->n)
+    return;
 
   MsgLine ln[kMsgMaxLines];
   const int nl = MsgLayout(m, ln);

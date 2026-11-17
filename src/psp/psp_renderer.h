@@ -47,4 +47,5 @@ void PspRenderer_SetMessageBox(unsigned id, unsigned selection);  /* selection: 
 void PspRenderer_SetMessageBoxSelection(unsigned selection);
 void PspRenderer_SetMessageButton(int icon, const char *label);   /* icon: enum PspButtonIcon, -1 = show label */
 void PspRenderer_SetMessageFade(unsigned fade);                   /* 0-255 */
+void PspRenderer_SetMessageDimHold(bool hold);
 void PspRenderer_ClearMessageBox(void);

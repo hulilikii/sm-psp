@@ -11,6 +11,7 @@ uint16 message_box_das0l_value;
 
 // Native PSP message presentation. The original BG3 message tilemap, HDMA, palette and VRAM work is replaced by the renderer's final-composition overlay. Waits, music/SFX servicing, input and save-selection logic are unchanged.
 static void InitializePpuForMessageBoxes(void) {  // 0x858143
+  PspRenderer_SetMessageDimHold(false);
   save_confirmation_selection = 0;
 }
 
@@ -185,6 +186,8 @@ CoroutineRet DisplayMessageBox_Async(uint16 a) {  // 0x858080
   InitializeMessageBox();
   COROUTINE_AWAIT(2, OpenMessageBox_Async());
   COROUTINE_AWAIT(3, HandleMessageBoxInteraction_Async());
+  if (message_box_index == 28 && save_confirmation_selection != 2)
+    PspRenderer_SetMessageDimHold(true);
   COROUTINE_AWAIT(4, CloseMessageBox_Async());
 
   if (message_box_index == 28 && save_confirmation_selection != 2) {
@@ -205,6 +208,7 @@ CoroutineRet DisplayMessageBox_Async(uint16 a) {  // 0x858080
     COROUTINE_AWAIT(7, CloseMessageBox_Async());
     message_box_index = 28;
   }
+  PspRenderer_SetMessageDimHold(false);
   ClearMessageBoxBg3Tilemap();
   RestorePpuForMessageBox();
   QueueSamusMovementSfx();
