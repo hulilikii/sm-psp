@@ -71,6 +71,7 @@ ME_LOG_ON := 0
 endif
 
 OBJS := $(SRCS:%.c=%.o)
+OBJS += src/psp/psp_message_assets.o
 
 CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
