@@ -28,8 +28,16 @@ enum PspButtonIcon {
   PSP_BUTTON_ICON_TRIANGLE,
 };
 
+enum PspButtonIconEffect {
+  PSP_BUTTON_ICON_EFFECT_NONE = 0,
+  PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW = 1,
+};
+
 // Button overlays use 256x224 source-frame coordinates.
 void PspRenderer_SetButtonIcon(unsigned slot, enum PspButtonIcon icon,
                                int x, int y, int w, int h);
+void PspRenderer_SetButtonIconEx(unsigned slot, enum PspButtonIcon icon,
+                                 int x, int y, int w, int h,
+                                 unsigned effects);
 void PspRenderer_ClearButtonIcon(unsigned slot);
 void PspRenderer_ClearButtonIcons(void);

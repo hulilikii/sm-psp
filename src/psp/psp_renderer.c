@@ -3373,6 +3373,7 @@ enum { kPspButtonIconSlots = 8 };
 typedef struct ButtonOverlay {
   const uint32_t *pixels;
   int x, y, w, h;
+  unsigned effects;
 } ButtonOverlay;
 
 static ButtonOverlay g_button_overlays[kPspButtonIconSlots];
@@ -3386,11 +3387,13 @@ void PspRenderer_ClearButtonIcons(void) {
   memset(g_button_overlays, 0, sizeof(g_button_overlays));
 }
 
-void PspRenderer_SetButtonIcon(unsigned slot, enum PspButtonIcon icon,
-                               int x, int y, int w, int h) {
+void PspRenderer_SetButtonIconEx(unsigned slot, enum PspButtonIcon icon,
+                                 int x, int y, int w, int h,
+                                 unsigned effects) {
   if (slot >= kPspButtonIconSlots || x < 0 || y < 0 ||
       w <= 0 || h <= 0 || w > 256 || h > 224 ||
-      x > 256 - w || y > 224 - h) {
+      x > 256 - w || y > 224 - h ||
+      (effects & ~(unsigned)PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW) != 0) {
     if (slot < kPspButtonIconSlots)
       PspRenderer_ClearButtonIcon(slot);
     return;
@@ -3407,7 +3410,31 @@ void PspRenderer_SetButtonIcon(unsigned slot, enum PspButtonIcon icon,
     return;
   }
 
-  g_button_overlays[slot] = (ButtonOverlay){pixels, x, y, w, h};
+  g_button_overlays[slot] = (ButtonOverlay){pixels, x, y, w, h, effects};
+}
+
+void PspRenderer_SetButtonIcon(unsigned slot, enum PspButtonIcon icon,
+                               int x, int y, int w, int h) {
+  PspRenderer_SetButtonIconEx(slot, icon, x, y, w, h,
+                              PSP_BUTTON_ICON_EFFECT_NONE);
+}
+
+// Draw state of overlay b on source line y. False: not drawn there (forced blank, brightness 0, or the clip layer, BG2, is not drawn on that line, so its window state is meaningless). wm/wl/wr: BG2 window state as WinSpans takes it.
+static bool OverlayLine(const ButtonOverlay *b, int y, int *bright, int *wm, int *wl, int *wr) {
+  const LineSnap *ls = &g_lines[y];
+  *bright = ls->brightness;
+  *wm = *wl = *wr = 0;
+  if (ls->forced || *bright == 0)
+    return false;
+  if (b->effects & PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW) {
+    const BgSnap *w = &ls->bg[1];
+    if (!(w->flags & 4))
+      return false;
+    *wm = w->wm;
+    *wl = w->wl;
+    *wr = w->wr;
+  }
+  return true;
 }
 
 /* ---- Final composition: one post-pass for the GE scene and for the software frame ------------------------------- */
@@ -3528,7 +3555,7 @@ static void ComposeDraw(const ComposeSrc *s) {
   sceGuTexScale(1.0f, 1.0f);
   sceGuTexOffset(0.0f, 0.0f);
 
-  TileVert *base = sceGuGetMemory((int)((1 + kHudRectN + 2 + kPspButtonIconSlots) * 2 * sizeof(TileVert)));
+  TileVert *base = sceGuGetMemory((int)((1 + kHudRectN + 2) * 2 * sizeof(TileVert)));
   const int srow0 = hud ? 32 : 0;
   ComposeQuad(base, 0.5f, (float)srow0 + 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX, kCompY, kCompW,
               kCompH);
@@ -3599,7 +3626,6 @@ static void ComposeDraw(const ComposeSrc *s) {
    * Face-button overlays. These are drawn after the source composition and
    * HUD, so they work for both HUD and non-HUD frames.
    */
-  TileVert *bv = base + 2 + 2 * kHudRectN + 4;
   const int source_rows = kSrcRows - srow0;
 
   sceGuEnable(GU_BLEND);
@@ -3615,28 +3641,64 @@ static void ComposeDraw(const ComposeSrc *s) {
     if (!b->pixels || b->y < srow0 || b->y + b->h > kSrcRows)
       continue;
 
-    const int brightness_y = b->y + b->h / 2;
-    if (brightness_y >= g_line_count)
-      continue;
-    const unsigned brightness = (unsigned)g_lines[brightness_y].brightness * 17;
-    if (!brightness)
+    const int yend = b->y + b->h < g_line_count ? b->y + b->h : g_line_count;
+    if (yend <= b->y)
       continue;
 
-    const int dx = kCompX + (b->x * kCompW + kGameWidth / 2) / kGameWidth;
-    const int dy = kCompY + ((b->y - srow0) * kCompH + source_rows / 2) / source_rows;
-    const int dw = (b->w * kCompW + kGameWidth / 2) / kGameWidth;
-    const int dh = (b->h * kCompH + source_rows / 2) / source_rows;
-
-    const unsigned tint = 0xff000000u |
-                          (brightness << 16) |
-                          (brightness << 8) |
-                          brightness;
-    sceGuColor(tint);
     sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
     sceGuTexImage(0, 16, 16, 16, b->pixels);
     sceGuTexFlush();
-    ComposeQuad(&bv[2 * i], 0.5f, 0.5f, 15.5f, 15.5f, dx, dy, dw, dh);
-    GeDraw(kVtTile, 2, &bv[2 * i]);
+
+    /* Texel-centre sampling: the icon's first/last pixel hit texel 0.5 / 15.5 (as the original single quad). */
+    const float uscale = b->w > 1 ? 15.0f / (float)(b->w - 1) : 0.0f;
+    const float vscale = b->h > 1 ? 15.0f / (float)(b->h - 1) : 0.0f;
+
+    int y = b->y;
+    while (y < yend) {
+      int bright, wm, wl, wr;
+      if (!OverlayLine(b, y, &bright, &wm, &wl, &wr)) {
+        ++y;
+        continue;
+      }
+      int run_end = y + 1;  /* lines of equal brightness and window state share one draw */
+      while (run_end < yend) {
+        int b2, m2, l2, r2;
+        if (!OverlayLine(b, run_end, &b2, &m2, &l2, &r2) || b2 != bright || m2 != wm || l2 != wl || r2 != wr)
+          break;
+        ++run_end;
+      }
+
+      int sa[2], se[2];
+      const int ns = WinSpans(wm, wl, wr, sa, se);
+      const int dy0 = kCompY + ((y - srow0) * kCompH + source_rows / 2) / source_rows;
+      const int dy1 = kCompY + ((run_end - srow0) * kCompH + source_rows / 2) / source_rows;
+      TileVert verts[4];
+      int nv = 0;
+      if (dy1 > dy0) {
+        for (int k = 0; k < ns; k++) {
+          const int x0 = sa[k] > b->x ? sa[k] : b->x;
+          const int x1 = se[k] < b->x + b->w ? se[k] : b->x + b->w;
+          if (x1 <= x0)
+            continue;
+          const int dx0 = kCompX + (x0 * kCompW + kGameWidth / 2) / kGameWidth;
+          const int dx1 = kCompX + (x1 * kCompW + kGameWidth / 2) / kGameWidth;
+          if (dx1 <= dx0)
+            continue;
+          ComposeQuad(&verts[nv], 0.5f + (float)(x0 - b->x) * uscale, 0.5f + (float)(y - b->y) * vscale,
+                      0.5f + (float)(x1 - 1 - b->x) * uscale, 0.5f + (float)(run_end - 1 - b->y) * vscale,
+                      dx0, dy0, dx1 - dx0, dy1 - dy0);
+          nv += 2;
+        }
+      }
+      if (nv) {  /* own vertex memory per run: earlier draws may still reference the list */
+        TileVert *dst = sceGuGetMemory(nv * (int)sizeof(TileVert));
+        memcpy(dst, verts, (size_t)nv * sizeof(TileVert));
+        const unsigned br = (unsigned)bright * 17;
+        sceGuColor(0xff000000u | (br << 16) | (br << 8) | br);
+        GeDraw(kVtTile, nv, dst);
+      }
+      y = run_end;
+    }
   }
 
   sceGuColor(0xffffffff);

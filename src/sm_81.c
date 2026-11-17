@@ -2084,8 +2084,10 @@ static const uint16 kRoomSelectMapExpandingSquareTimers[6] = { 0x33, 0x35, 0x2d,
 
 void FileSelectMap_7_PrepExpandSquareTransToRoomMap(void) {  // 0x81AAAC
   DrawAreaSelectMapLabels();
-  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 94, 191, 16, 16);
-  PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 166, 191, 16, 16);
+  PspRenderer_SetButtonIconEx(0, PSP_BUTTON_ICON_CIRCLE, 94, 191, 16, 16,
+                              PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
+  PspRenderer_SetButtonIconEx(1, PSP_BUTTON_ICON_CROSS, 166, 191, 16, 16,
+                              PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
   SetupInitialExpandingSquareHDMA();
   reg_TM = 19;
   reg_TMW = 19;
@@ -2298,7 +2300,6 @@ LABEL_25:;
       reg_BG1VOFS = v11;
     }
   } else if ((joypad1_newkeys & 0x8000) != 0) {
-    PspRenderer_ClearButtonIcons();
     menu_index += 5;
     uint16 v0 = 0;
     while (area_index != kFileSelectMap_AreaIndexes[v0 >> 1]) {
@@ -2311,7 +2312,6 @@ LABEL_25:;
     file_select_map_area_index = v0 >> 1;
     QueueSfx1_Max6(0x3C);
   } else if ((joypad1_newkeys & (kButton_Start | kButton_A)) != 0) {
-    PspRenderer_ClearButtonIcons();
     ++menu_index;
     QueueSfx1_Max6(0x38);
   }
@@ -2346,11 +2346,11 @@ void FileSelectMap_11(void) {  // 0x81AF5A
 }
 
 void FileSelectMap_13(void) {  // 0x81AF66
-  PspRenderer_ClearButtonIcons();
   DrawFileSelectMapIcons();
   DisplayMapElevatorDestinations();
   HandleFadeOut();
   if ((reg_INIDISP & 0xF) == 0) {
+    PspRenderer_ClearButtonIcons();
     ++menu_index;
     enemy_data[0].x_pos = 32;
   }
@@ -2443,6 +2443,7 @@ void FileSelectMap_21_MoveExpandingSquare(void) {  // 0x81B0BB
   SetupRoomSelectMapExpandingSquareTransHDMA();
   DrawAreaSelectMapLabels();
   if ((--expand_sq_timer & 0x8000) != 0) {
+    PspRenderer_ClearButtonIcons();
     menu_index -= 15;
     reg_TM = 17;
     reg_TMW = 0;
