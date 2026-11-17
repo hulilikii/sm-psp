@@ -4501,7 +4501,7 @@ static void OptionsMenu_SetMainButtonIcons(void) {
 
   PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 102, 199, 16, 16);
   PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 158, 199, 16, 16);
-  PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 16, 199, 16, 16);
+  PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 14, 199, 16, 16);
 }
 
 static void OptionsMenu_SetSpecialButtonIcon(void) {
@@ -4511,8 +4511,8 @@ static void OptionsMenu_SetSpecialButtonIcon(void) {
   OptionsMenu_BlankButtonCells(2, 25, 2);
   OptionsMenu_BlankButtonCells(15, 25, 2);
   PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 153, 199, 16, 16);
-  PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 16, 199, 16, 16);
-  PspRenderer_SetButtonIcon(7, PSP_BUTTON_ICON_DPAD_LR, 120, 199, 16, 16);
+  PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 21, 199, 16, 16);
+  PspRenderer_SetButtonIcon(7, PSP_BUTTON_ICON_DPAD_LR, 118, 199, 16, 16);
 }
 
 void GameOptionsMenu_1_LoadingOptionsScreen(void) {  // 0x82EC11

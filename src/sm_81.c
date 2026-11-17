@@ -2090,7 +2090,7 @@ void FileSelectMap_7_PrepExpandSquareTransToRoomMap(void) {  // 0x81AAAC
                               PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
   PspRenderer_SetButtonIconEx(1, PSP_BUTTON_ICON_CROSS, 166, 191, 16, 16,
                               PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
-  PspRenderer_SetButtonIconEx(2, PSP_BUTTON_ICON_DPAD_LRUD, 16, 191, 16, 16,
+  PspRenderer_SetButtonIconEx(2, PSP_BUTTON_ICON_DPAD_LRUD, 14, 191, 16, 16,
                               PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
   SetupInitialExpandingSquareHDMA();
   reg_TM = 19;
