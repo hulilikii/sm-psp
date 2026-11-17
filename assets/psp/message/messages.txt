@@ -1,0 +1,143 @@
+Super Metroid US — complete editable message list
+ROM MD5: 21f3e98df4780ee1c667b84e57d88675
+Source: InsaneFirebat/sm_disassembly, src/bank_85.asm
+Text below follows the disassembly's MessageTilemaps comments and message configuration table.
+Tokens: {item:name}, {button:role}, {bomb_animation}, {selection:YES|NO}.
+
+Messages 1–19: item/equipment messages
+
+01. Energy Tank [small]
+  title: ENERGY TANK
+  body: (none; title-only)
+
+02. Missile [large]
+  title: MISSILE
+  body: Select {item:missile} & press the {button:shoot} button.
+  control role: shoot (comment default: A)
+
+03. Super Missile [large]
+  title: SUPER MISSILE
+  body: Select {item:super_missile} & press the {button:shoot} button.
+  control role: shoot (comment default: B)
+
+04. Power Bomb [large]
+  title: POWER BOMB
+  body: Select {item:power_bomb} & set it with the {button:shoot} button.
+  control role: shoot (comment default: R)
+
+05. Grappling Beam [large]
+  title: GRAPPLING BEAM
+  body: Select {item:grapple_beam} press & hold the {button:shoot} button.
+  control role: shoot (comment default: Y)
+
+06. X-Ray Scope [large]
+  title: X-RAY SCOPE
+  body: Select {item:xray_scope} press & hold the {button:run} button.
+  control role: run (comment default: X)
+
+07. Varia Suit [small]
+  title: VARIA SUIT
+  body: (none; title-only)
+
+08. Spring Ball [small]
+  title: SPRING BALL
+  body: (none; title-only)
+
+09. Morphing Ball [small]
+  title: MORPHING BALL
+  body: (none; title-only)
+
+10. Screw Attack [small]
+  title: SCREW ATTACK
+  body: (none; title-only)
+
+11. Hi-Jump Boots [small]
+  title: HI-JUMP BOOTS
+  body: (none; title-only)
+
+12. Space Jump [small]
+  title: SPACE JUMP
+  body: (none; title-only)
+
+13. Speed Booster [large]
+  title: SPEED BOOSTER
+  body: Press & hold the {button:run} button to run.
+  control role: run (comment default: #)
+
+14. Charge Beam [small]
+  title: CHARGE BEAM
+  body: (none; title-only)
+
+15. Ice Beam [small]
+  title: ICE BEAM
+  body: (none; title-only)
+
+16. Wave Beam [small]
+  title: WAVE BEAM
+  body: (none; title-only)
+
+17. Spazer [small]
+  title: SPAZER
+  body: (none; title-only)
+
+18. Plasma Beam [small]
+  title: PLASMA BEAM
+  body: (none; title-only)
+
+19. Bomb [large]
+  title: BOMB
+  body: {bomb_animation} & set it with the {button:bomb_set} button.
+  control role: bomb_set (comment default: L)
+  note: The original tilemap contains a three-row bomb graphic/animation; the disassembly comments show the graphic rather than ordinary prose.
+
+Messages 20–28: system and save messages
+
+20. Map Data Access Completed [system]
+  line 1: MAP DATA ACCESS
+  line 2: COMPLETED.
+
+21. Energy Recharge Completed [system]
+  line 1: ENERGY RECHARGE
+  line 2: COMPLETED.
+
+22. Missile Reload Completed [system]
+  line 1: MISSILE RELOAD
+  line 2: COMPLETED.
+
+23. Save Confirmation [interactive]
+  line 1: WOULD YOU LIKE
+  line 2: TO SAVE?
+  choices: YES / NO
+  initial selection: YES (save_confirmation_selection = 0)
+  toggle: Select, Left, or Right
+  confirm: A
+  cancel: B (sets selection to NO = 2)
+  selection sound effect: $37
+
+24. Save Completed [system]
+  line 1: SAVE COMPLETED.
+
+25. Reserve Tank [title]
+  line 1: RESERVE TANK
+
+26. Gravity Suit [title]
+  line 1: GRAVITY SUIT
+
+27. Terminator [not displayed]
+  Message-table terminator; not a user-facing message.
+
+28. Save Confirmation (Gunship) [interactive]
+  Same displayed text and selection behaviour as message 23.
+  On YES, the original game closes the prompt, waits 160 frames, then displays message 24 (SAVE COMPLETED.).
+  Preserve this transition in game logic; do not duplicate it in the renderer.
+
+29. Terminator (unused save-completed entry) [not displayed]
+  Unused terminator entry following the gunship save prompt.
+
+Implementation notes
+- Messages 2–6, 13 and 19 use dynamically mapped game controls; use the existing PSP button graphic mapping.
+- Speed Booster artwork: use the existing selected Speed Booster HUD icon.
+- The supplied item icons have intentional opaque backgrounds; do not key them out or derive alpha from colour.
+- The font atlas background is transparent. Use the BMFont .fnt metrics for glyph source rectangles, offsets, and advances.
+- Messages 23 and 28 must display the current game-owned YES/NO selection. Do not change the original interaction or timing code.
+- The native overlay dims gameplay only; HUD remains undimmed. This is a renderer presentation rule, not a game-logic change.
