@@ -1,6 +1,6 @@
-/* Generated PSP message textures. Keep each source 16-byte aligned. */
+// Generated PSP message textures. Keep each source cache-line aligned.
 .section .rodata
-.align 4
+.align 6
 .global psp_msg_font_rgba
 .type psp_msg_font_rgba, @object
 psp_msg_font_rgba:
@@ -8,7 +8,7 @@ psp_msg_font_rgba:
 .global psp_msg_font_rgba_end
 psp_msg_font_rgba_end:
 .size psp_msg_font_rgba, psp_msg_font_rgba_end-psp_msg_font_rgba
-.align 4
+.align 6
 .global psp_msg_grapple_rgba
 .type psp_msg_grapple_rgba, @object
 psp_msg_grapple_rgba:
@@ -16,7 +16,7 @@ psp_msg_grapple_rgba:
 .global psp_msg_grapple_rgba_end
 psp_msg_grapple_rgba_end:
 .size psp_msg_grapple_rgba, psp_msg_grapple_rgba_end-psp_msg_grapple_rgba
-.align 4
+.align 6
 .global psp_msg_missile_rgba
 .type psp_msg_missile_rgba, @object
 psp_msg_missile_rgba:
@@ -24,7 +24,7 @@ psp_msg_missile_rgba:
 .global psp_msg_missile_rgba_end
 psp_msg_missile_rgba_end:
 .size psp_msg_missile_rgba, psp_msg_missile_rgba_end-psp_msg_missile_rgba
-.align 4
+.align 6
 .global psp_msg_powerbomb_rgba
 .type psp_msg_powerbomb_rgba, @object
 psp_msg_powerbomb_rgba:
@@ -32,7 +32,7 @@ psp_msg_powerbomb_rgba:
 .global psp_msg_powerbomb_rgba_end
 psp_msg_powerbomb_rgba_end:
 .size psp_msg_powerbomb_rgba, psp_msg_powerbomb_rgba_end-psp_msg_powerbomb_rgba
-.align 4
+.align 6
 .global psp_msg_supermissile_rgba
 .type psp_msg_supermissile_rgba, @object
 psp_msg_supermissile_rgba:
@@ -40,7 +40,7 @@ psp_msg_supermissile_rgba:
 .global psp_msg_supermissile_rgba_end
 psp_msg_supermissile_rgba_end:
 .size psp_msg_supermissile_rgba, psp_msg_supermissile_rgba_end-psp_msg_supermissile_rgba
-.align 4
+.align 6
 .global psp_msg_xray_rgba
 .type psp_msg_xray_rgba, @object
 psp_msg_xray_rgba:
@@ -48,4 +48,4 @@ psp_msg_xray_rgba:
 .global psp_msg_xray_rgba_end
 psp_msg_xray_rgba_end:
 .size psp_msg_xray_rgba, psp_msg_xray_rgba_end-psp_msg_xray_rgba
-.align 4
+.align 6
