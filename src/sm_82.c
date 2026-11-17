@@ -4497,6 +4497,7 @@ static void OptionsMenu_SetMainButtonIcons(void) {
 
   OptionsMenu_BlankButtonCells(12, 25, 2);
   OptionsMenu_BlankButtonCells(20, 25, 2);
+  OptionsMenu_BlankButtonCells(2, 25, 2);
 
   PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 102, 199, 16, 16);
   PspRenderer_SetButtonIcon(1, PSP_BUTTON_ICON_CROSS, 158, 199, 16, 16);
@@ -4507,6 +4508,8 @@ static void OptionsMenu_SetSpecialButtonIcon(void) {
   PspRenderer_ClearButtonIcons();
 
   OptionsMenu_BlankButtonCells(19, 25, 2);
+  OptionsMenu_BlankButtonCells(2, 25, 2);
+  OptionsMenu_BlankButtonCells(15, 25, 2);
   PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_CIRCLE, 153, 199, 16, 16);
   PspRenderer_SetButtonIcon(6, PSP_BUTTON_ICON_DPAD_UD, 16, 199, 16, 16);
   PspRenderer_SetButtonIcon(7, PSP_BUTTON_ICON_DPAD_LR, 120, 199, 16, 16);

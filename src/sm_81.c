@@ -1882,6 +1882,8 @@ void FileSelectMap_5_ExpandingSquare(void) {  // 0x81A725
     // Hide the original SNES A/B glyphs before the first room-select
     // BG2 upload, so they cannot appear during the expanding-square reveal.
     for (int row = 27; row <= 28; row++) {
+      ram4000.xray_tilemaps[row * 32 + 2] = 0x2801;
+      ram4000.xray_tilemaps[row * 32 + 3] = 0x2801;
       ram4000.xray_tilemaps[row * 32 + 12] = 0x2801;
       ram4000.xray_tilemaps[row * 32 + 13] = 0x2801;
       ram4000.xray_tilemaps[row * 32 + 21] = 0x2801;
@@ -2088,6 +2090,8 @@ void FileSelectMap_7_PrepExpandSquareTransToRoomMap(void) {  // 0x81AAAC
                               PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
   PspRenderer_SetButtonIconEx(1, PSP_BUTTON_ICON_CROSS, 166, 191, 16, 16,
                               PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
+  PspRenderer_SetButtonIconEx(2, PSP_BUTTON_ICON_DPAD_LRUD, 16, 191, 16, 16,
+                              PSP_BUTTON_ICON_EFFECT_CLIP_BG2_WINDOW);
   SetupInitialExpandingSquareHDMA();
   reg_TM = 19;
   reg_TMW = 19;
@@ -2240,7 +2244,6 @@ void FileSelectMap_10_RoomSelectMap(void) {  // 0x81AD7F
   int16 v5;
   int16 v8;
 
-  PspRenderer_SetButtonIcon(0, PSP_BUTTON_ICON_DPAD_LRUD, 16, 191, 16, 16);
   DrawFileSelectMapIcons();
   HandleFileSelectMapScrollArrows();
   MapScrolling();
