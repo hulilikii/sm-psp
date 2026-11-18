@@ -1759,8 +1759,9 @@ static void DoorTransitionRelease(void) {
   g_img_skip_ok = g_door_saved_img_skip_ok;
   memset(g_img, 0, sizeof(g_img));  /* slot 0 held the snapshot: rebuild both images */
   ImgMarkAllDirty();
-}
 #endif
+}
+
 
 void PspRenderer_BeginDoorTransition(void) {
 #if SM_PSP_DOOR_GE
