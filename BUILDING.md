@@ -4,7 +4,7 @@
   * python
   * [PSPSDK](https://pspdev.github.io/pspsdk/)
   * [PSP Media Engine Custom Core](https://github.com/mcidclan/psp-media-engine-custom-core) and [PSP Media Engine MIST](https://github.com/mcidclan/psp-media-engine-mist) installed to PSPSDK
-  * Super Metroid repo `git clone --recursive https://github.com/hulilikii/sm-psp`
+  * sm-psp repo `git clone --recursive https://github.com/hulilikii/sm-psp`
 
 
 # PSP
