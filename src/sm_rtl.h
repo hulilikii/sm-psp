@@ -93,6 +93,10 @@ void WriteReg(uint16 reg, uint8 value);
 void WriteRegWord(uint16 reg, uint16 value);
 uint16 ReadRegWord(uint16 reg);
 uint8 ReadReg(uint16 reg);
+/* Gate 5t: bulk VRAM access (direct ppu->vram writes with ppu_write semantics). */
+bool RtlVramBulkBegin(uint16 **vram, uint8 **dirty, uint16 dst_addr);  /* false unless VMAIN is the simple case */
+void RtlVramBulkEnd(uint16 ptr, bool copied, uint16 buf, uint8 openbus);
+void RtlVramFill(uint16 reg, int count, uint8 val);  /* count x WriteReg(reg = VMDATAL/VMDATAH, val) */
 
 typedef void RunFrameFunc(uint16 input, int run_what);
 typedef void SyncAllFunc();

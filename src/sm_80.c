@@ -7,6 +7,10 @@
 #include "enemy_types.h"
 #include "spc_player.h"
 #include "psp/psp_audio_msu.h"
+#if SM_PSP_LOG
+#include <pspthreadman.h>
+extern uint32_t g_vram_bulk, g_dec_us, g_dec_slow;  /* snes.c, log builds: Gate 5t direct VRAM bytes, decompressor time, slow-path calls */
+#endif
 
 
 #define kMusicPointers (*(LongPtr*)RomFixedPtr(0x8fe7e1))
@@ -2575,7 +2579,7 @@ static uint8 ReadPpuByte(uint16 addr) {
   return (addr & 1) ? GET_HIBYTE(data) : data;
 }
 
-void DecompressToVRAM(uint32 src, uint16 dst_addr) {  // 0x80B271
+static void DecompressToVRAM_Slow(uint32 src, uint16 dst_addr) {  // 0x80B271, register-accurate original
   decompress_src = src;
   int src_pos, dst_pos = dst_addr;
   while (1) {
@@ -2638,6 +2642,127 @@ void DecompressToVRAM(uint32 src, uint16 dst_addr) {  // 0x80B271
       }
     }
   }
+}
+
+ /* DecompressToVRAM straight into ppu->vram. The original makes one register write per byte (~0.9 us each on the PSP) and,
+ * for a copy command, a VMADD write plus two RDVRAML word reads. Exactness argument (VMAIN: no remap, increment on the
+ * high byte, step 1, vramPointer == dst >> 1 on entry; RtlVramBulkBegin checks all of it):
+ *  - literal/fill bytes: VMDATAL (even byte, no increment) / VMDATAH (odd byte, increment) keep vramPointer == dst_pos >> 1.
+ *  - copy byte, ReadPpuByte(a): VMADD = a >> 1 loads vramReadBuffer = vram[w]. Read 1 (RDVRAML low: buffer, no increment;
+ *    RDVRAMH: returns buffer, reloads buffer = vram[w], pointer += 1). Read 2 (low: buffer = vram[w]; high: returns
+ *    vram[w], buffer = vram[w + 1], pointer += 1, ppu1openBus = vram[w] >> 8). So the word read is vram[w], w = a >> 1,
+ *    before this byte's write, and ppu1openBus = high byte of it.
+ *  - the VMADD write for dst then sets pointer = dst_pos >> 1 and vramReadBuffer = vram[dst_pos >> 1] (before the data
+ *    write, which does not touch the buffer). Later literal bytes do not touch the buffer either, so the final buffer is
+ *    the one loaded by the last copy byte. Pointer: dst_pos >> 1 again after the data write (odd byte increments).
+ * Anything else (other VMAIN, pointer mismatch, odd dst) returns false before touching any state. */
+static inline void VramPutByte(uint16 *vram, uint8 *dirty, int pos, uint8 b) {
+  uint16 a = (uint16)(pos >> 1) & 0x7fff;
+  uint16 old = vram[a];
+  uint16 nv = (pos & 1) ? (uint16)((old & 0x00ff) | (b << 8)) : (uint16)((old & 0xff00) | b);
+  if (nv != old) {
+    vram[a] = nv;
+    dirty[a >> 8] = 1;
+  }
+}
+
+static bool DecompressToVRAM_Fast(uint32 src, uint16 dst_addr, uint32 *nbytes) {
+  uint16 *vram;
+  uint8 *dirty;
+  if ((dst_addr & 1) || !RtlVramBulkBegin(&vram, &dirty, dst_addr))
+    return false;
+  decompress_src = src;
+  int src_pos, dst_pos = dst_addr;
+  bool copied = false;
+  uint16 buf = 0;
+  uint8 ob = 0;
+  while (1) {
+    int len;
+    uint8 b = DecompNextByte(), cmd;
+    if (b == 0xFF)
+      break;
+    if ((b & 0xE0) == 0xE0) {
+      cmd = (8 * b) & 0xE0;
+      len = ((b & 3) << 8 | DecompNextByte()) + 1;
+    } else {
+      cmd = b & 0xE0;
+      len = (b & 0x1F) + 1;
+    }
+    if (cmd & 0x80) {
+      uint8 want_xor = cmd & 0x20 ? 0xff : 0;
+      if (cmd >= 0xC0) {
+        src_pos = dst_pos - DecompNextByte();
+      } else {
+        src_pos = DecompNextByte();
+        src_pos += DecompNextByte() * 256;
+        src_pos += dst_addr;
+      }
+      do {  /* byte by byte and in order: an overlapping copy reads bytes this loop has just written */
+        uint16 sa = (uint16)src_pos++;  /* ReadPpuByte takes a uint16 byte address */
+        uint16 sw = vram[sa >> 1];
+        b = (uint8)((sa & 1) ? (sw >> 8) : sw) ^ want_xor;
+        buf = vram[(uint16)(dst_pos >> 1) & 0x7fff];
+        ob = (uint8)(sw >> 8);
+        copied = true;
+        VramPutByte(vram, dirty, dst_pos++, b);
+      } while (--len);
+    } else {
+      switch (cmd) {
+      case 0x20:
+        b = DecompNextByte();
+        do {
+          VramPutByte(vram, dirty, dst_pos++, b);
+        } while (--len);
+        break;
+      case 0x40: {
+        b = DecompNextByte();
+        uint8 b2 = DecompNextByte();
+        do {
+          VramPutByte(vram, dirty, dst_pos++, b);
+          if (!--len)
+            break;
+          VramPutByte(vram, dirty, dst_pos++, b2);
+        } while (--len);
+        break;
+      }
+      case 0x60:
+        b = DecompNextByte();
+        do {
+          VramPutByte(vram, dirty, dst_pos++, b++);
+        } while (--len);
+        break;
+      default:
+        do {
+          b = DecompNextByte();
+          VramPutByte(vram, dirty, dst_pos++, b);
+        } while (--len);
+        break;
+      }
+    }
+  }
+  RtlVramBulkEnd((uint16)(dst_pos >> 1), copied, buf, ob);
+  *nbytes = (uint32)(dst_pos - dst_addr);
+  return true;
+}
+
+void DecompressToVRAM(uint32 src, uint16 dst_addr) {
+#if SM_PSP_LOG
+  uint32_t t0 = sceKernelGetSystemTimeLow();
+#endif
+  uint32 n = 0;
+  if (DecompressToVRAM_Fast(src, dst_addr, &n)) {
+#if SM_PSP_LOG
+    g_vram_bulk += n;
+#endif
+  } else {
+    DecompressToVRAM_Slow(src, dst_addr);
+#if SM_PSP_LOG
+    g_dec_slow++;
+#endif
+  }
+#if SM_PSP_LOG
+  g_dec_us += sceKernelGetSystemTimeLow() - t0;
+#endif
 }
 
 

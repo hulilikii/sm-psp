@@ -16,6 +16,7 @@
 #include "psp/psp_log.h"
 #if SM_PSP_LOG
 #include <pspthreadman.h>
+extern uint32_t g_vram_bulk;  /* snes.c: Gate 5t bytes written to VRAM directly */
 /* log builds: time of Memory Stick writes and SPC uploads on the game thread (logged when >= 1 ms) */
 #define IO_T0() uint32_t io_t0 = sceKernelGetSystemTimeLow()
 #define IO_LOG(what) do { uint32_t io_us = sceKernelGetSystemTimeLow() - io_t0; \
@@ -580,6 +581,55 @@ uint16 ReadRegWord(uint16 reg) {
 void WriteRegWord(uint16 reg, uint16 value) {
   WriteReg(reg, (uint8)value);
   WriteReg(reg + 1, value >> 8);
+}
+
+/* Same VRAM semantics as ppu_write 0x18/0x19 (an identical rewrite leaves the page clean). The simple case is the only one
+ * in which the VRAM word pointer after every byte of DecompressToVRAM equals dst_pos >> 1. */
+bool RtlVramBulkBegin(uint16 **vram, uint8 **dirty, uint16 dst_addr) {
+  Ppu *p = g_snes->ppu;
+  if (p->vramRemapMode != 0 || !p->vramIncrementOnHigh || p->vramIncrement != 1 ||
+      p->vramPointer != (uint16)(dst_addr >> 1))
+    return false;
+  *vram = p->vram;
+  *dirty = p->vramDirty;
+  return true;
+}
+
+void RtlVramBulkEnd(uint16 ptr, bool copied, uint16 buf, uint8 openbus) {
+  Ppu *p = g_snes->ppu;
+  p->vramPointer = ptr;
+  if (copied) {  /* only the ReadPpuByte / VMADD sequence of a copy command touches these */
+    p->vramReadBuffer = buf;
+    p->ppu1openBus = openbus;
+  }
+}
+
+/* count x WriteReg(reg, val) for reg = VMDATAL / VMDATAH. Direct only when the register advances the address and there
+ * is no remap (then every write goes to vram[ptr] and ptr += vramIncrement); otherwise the original register loop. */
+void RtlVramFill(uint16 reg, int count, uint8 val) {
+  Ppu *p = g_snes->ppu;
+  bool hi = reg == VMDATAH;
+  if (p->vramRemapMode != 0 || (reg != VMDATAL && !hi) || hi != (bool)p->vramIncrementOnHigh) {
+    while (count-- > 0)
+      WriteReg(reg, val);
+    return;
+  }
+  uint16 *vram = p->vram;
+  uint8 *dirty = p->vramDirty;
+  uint16 ptr = p->vramPointer, inc = p->vramIncrement;
+#if SM_PSP_LOG
+  if (count > 0)
+    g_vram_bulk += (uint32_t)count;
+#endif
+  for (; count > 0; count--, ptr += inc) {
+    uint16 a = ptr & 0x7fff, old = vram[a];
+    uint16 nv = hi ? (uint16)((old & 0x00ff) | (val << 8)) : (uint16)((old & 0xff00) | val);
+    if (nv != old) {
+      vram[a] = nv;
+      dirty[a >> 8] = 1;
+    }
+  }
+  p->vramPointer = ptr;
 }
 
 // Maintain a queue cause the snes and audio callback are not in sync.

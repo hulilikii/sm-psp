@@ -1699,8 +1699,6 @@ void CinematicFunctionOpening(void) {  // 0x8B9B68
 }
 
 void LoadTitleSequenceGraphics(void) {  // 0x8B9B87
-  int16 v1;
-
   SetupPpuForTitleSequence();
   cur_irq_handler = 0;
   irqhandler_next_handler = 0;
@@ -1722,11 +1720,7 @@ void LoadTitleSequenceGraphics(void) {  // 0x8B9B87
   WriteReg(VMAIN, 0);
   WriteReg(VMADDL, 0);
   WriteReg(VMADDH, 0);
-  v1 = 0x4000;
-  do {
-    WriteReg(VMDATAL, 0xFF);
-    --v1;
-  } while (v1);
+  RtlVramFill(VMDATAL, 0x4000, 0xFF);
   WriteReg(VMADDL, 0);
   WriteReg(VMADDH, 0);
   WriteReg(VMAIN, 0);
@@ -3488,8 +3482,6 @@ void RevertButtonConfig(void) {  // 0x8BBC75
 }
 
 void CinematicFunction_Intro_Func54(void) {  // 0x8BBCA0
-  int16 v1;
-
   SetupPpu_3_Mode7();
   ClearCinematicSprites();
   cur_irq_handler = 0;
@@ -3510,11 +3502,7 @@ void CinematicFunction_Intro_Func54(void) {  // 0x8BBCA0
 
   WriteReg(VMAIN, 0);
   WriteRegWord(VMADDL, 0);
-  v1 = 0x4000;
-  do {
-    WriteReg(VMDATAL, 0x8C);
-    --v1;
-  } while (v1);
+  RtlVramFill(VMDATAL, 0x4000, 0x8C);
 
   WriteRegWord(VMADDL, 0);
   WriteReg(VMAIN, 0);
@@ -3754,7 +3742,6 @@ void CinematicFunction_Intro_Func73(void) {  // 0x8BC100
 
 void CinematicFunctionBlackoutFromCeres(void) {  // 0x8BC11B
   int16 j;
-  int16 v3;
 
   SetupPpu_3_Mode7();
   for (j = 656; j >= 0; j -= 2)
@@ -3779,11 +3766,7 @@ void CinematicFunctionBlackoutFromCeres(void) {  // 0x8BC11B
   WriteReg(VMAIN, 0);
   WriteReg(VMADDL, 0);
   WriteReg(VMADDH, 0);
-  v3 = 0x4000;
-  do {
-    WriteReg(VMDATAL, 0x8C);
-    --v3;
-  } while (v3);
+  RtlVramFill(VMDATAL, 0x4000, 0x8C);
   WriteReg(VMADDL, 0);
   WriteReg(VMADDH, 0);
   WriteReg(VMAIN, 0);
