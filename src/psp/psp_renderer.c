@@ -1709,6 +1709,10 @@ static uint8_t *g_img_tex[kImgSlots];                   /* uncached VRAM */
 static bool g_img_ok = SM_PSP_LAYER_IMG;                /* cleared if the first verified frames differ from software */
 static bool g_imgh_ok = SM_PSP_LAYER_IMG >= 2;          /* gate 5m: 32x64 tilemaps; cleared if the first verified such frames differ */
 static bool g_img_skip_ok = SM_PSP_LAYER_IMG >= 3;      /* gate 5m: no written page in map or tiles since the last scan: skip it */
+// Door transition: old-room snapshot (256x192 RGB565) lives in layer-image slot 0 while the layer images are off.
+static bool g_door_ok, g_door_reserved, g_door_capture_pending, g_door_snapshot_valid, g_door_wipe_active;
+static bool g_door_saved_img_ok, g_door_saved_imgh_ok, g_door_saved_img_skip_ok;
+static unsigned g_door_direction, g_door_frame;
 static uint8_t g_img_dirty[kImgSlots][kVramPages];      /* VRAM pages written since this image's last scan (SnapshotVram) */
 static uint8_t g_img_tpg[kImgSlots][kVramPages];        /* gate 5n: VRAM pages holding tile data that a cell of the image uses (set by the scan) */
 static bool g_img_on[kLayers], g_img_frame, g_imgh_frame;
@@ -1741,6 +1745,41 @@ static void ImgMarkDirty(int pg0, int pg1) {
 
 static void ImgMarkAllDirty(void) {
   ImgMarkDirty(0, kVramPages);
+}
+
+static void DoorTransitionRelease(void) {
+  if (!g_door_reserved)
+    return;
+  g_door_reserved = g_door_capture_pending = g_door_snapshot_valid = g_door_wipe_active = false;
+  g_img_ok = g_door_saved_img_ok;
+  g_imgh_ok = g_door_saved_imgh_ok;
+  g_img_skip_ok = g_door_saved_img_skip_ok;
+  memset(g_img, 0, sizeof(g_img));  /* slot 0 held the snapshot: rebuild both images */
+  ImgMarkAllDirty();
+}
+
+void PspRenderer_BeginDoorTransition(void) {
+  if (!g_door_ok || g_door_reserved)
+    return;
+  g_door_saved_img_ok = g_img_ok;
+  g_door_saved_imgh_ok = g_imgh_ok;
+  g_door_saved_img_skip_ok = g_img_skip_ok;
+  g_img_ok = g_imgh_ok = g_img_skip_ok = false;  /* no layer image (main or subscreen) may use slot 0 */
+  g_door_reserved = g_door_capture_pending = true;
+  g_door_snapshot_valid = g_door_wipe_active = false;
+  g_door_frame = 0;
+}
+
+void PspRenderer_StartDoorTransitionWipe(unsigned direction) {
+  if (!g_door_reserved || !g_door_snapshot_valid || direction > 3)
+    return;
+  g_door_direction = direction;
+  g_door_frame = 0;
+  g_door_wipe_active = true;
+}
+
+void PspRenderer_EndDoorTransition(void) {
+  DoorTransitionRelease();  /* always: the original fade-in is done */
 }
 
 /* True if a VRAM page of [word0, word0 + nwords) (modulo the 32 K words) was written since the last scan of slot. */
@@ -3599,6 +3638,39 @@ static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1,
   w[1] = (TileVert){u0 + (float)dw * sx, v0 + (float)dh * sy, (int16_t)(dx + dw), (int16_t)(dy + dh), 0};
 }
 
+// Old gameplay image slid over the new room. Rect is clipped on the CPU to the gameplay viewport (no scissor needed); the image maps 256x192 -> 360x270 exactly like the normal composition.
+static void DrawDoorTransition(const ComposeSrc *s) {
+  enum { kDoorFrames = 13, kDoorRows = 192 };
+  const unsigned frame = ++g_door_frame;
+  const int extent = g_door_direction < 2 ? kCompW : kCompH;
+  const int shift = (extent * (int)frame + kDoorFrames / 2) / kDoorFrames;
+  int dx = kCompX, dy = kCompY;  /* where the old image's top-left corner is */
+  switch (g_door_direction) {
+  case 0: dx -= shift; break;  /* right: old room moves left */
+  case 1: dx += shift; break;  /* left: moves right */
+  case 2: dy -= shift; break;  /* down: moves up */
+  default: dy += shift; break; /* up: moves down */
+  }
+  const int x0 = dx > kCompX ? dx : kCompX, x1 = dx + kCompW < kCompX + kCompW ? dx + kCompW : kCompX + kCompW;
+  const int y0 = dy > kCompY ? dy : kCompY, y1 = dy + kCompH < kCompY + kCompH ? dy + kCompH : kCompY + kCompH;
+  if (x1 > x0 && y1 > y0) {
+    const float ku = (float)(kGameWidth - 1) / (float)(kCompW - 1), kv = (float)(kDoorRows - 1) / (float)(kCompH - 1);
+    sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+    sceGuTexImage(0, 256, 256, 256, g_img_tex[0]);
+    sceGuTexFlush();
+    TileVert *v = sceGuGetMemory(2 * (int)sizeof(TileVert));
+    ComposeQuad(v, 0.5f + (float)(x0 - dx) * ku, 0.5f + (float)(y0 - dy) * kv,
+                0.5f + (float)(x1 - 1 - dx) * ku, 0.5f + (float)(y1 - 1 - dy) * kv, x0, y0, x1 - x0, y1 - y0);
+    GeDraw(kVtTile, 2, v);
+    /* the HUD pass samples the composition source again */
+    sceGuTexMode(s->psm, 0, 0, GU_FALSE);
+    sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
+    sceGuTexFlush();
+  }
+  if (frame >= kDoorFrames)
+    DoorTransitionRelease();
+}
+
 /* ---- Native message overlay ---------------------------------------------------------------------------------
  * Drawn last in ComposeDraw, so the GE and software paths share it. Text: psp_message_text.h (from messages.txt),
  * glyph metrics: psp_message_font.h. Textures are RGBA8888 in RAM, written back once (ComposeDraw), never modified.
@@ -3979,12 +4051,25 @@ static void ComposeDraw(const ComposeSrc *s) {
   sceGuTexScale(1.0f, 1.0f);
   sceGuTexOffset(0.0f, 0.0f);
 
+  if (g_door_capture_pending && hud && s->psm == GU_PSM_5650) {
+    /* gameplay rows 32-223 -> slot 0 (VRAM to VRAM); sync before it is sampled */
+    sceGuCopyImage(GU_PSM_5650, 0, 32, kGameWidth, 192, s->stride,
+                   (void *)(0x04000000u | ((uintptr_t)s->ptr & 0x001fffffu)), 0, 0, 256,
+                   (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramImg0));
+    sceGuTexSync();
+    g_door_capture_pending = false;
+    g_door_snapshot_valid = true;
+    PspLog("door: snapshot captured f=%u", (unsigned)g_frame);
+  }
+
   TileVert *base = sceGuGetMemory((int)((1 + kHudRectN + 2) * 2 * sizeof(TileVert)));
   const int srow0 = hud ? 32 : 0;
   ComposeQuad(base, 0.5f, (float)srow0 + 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX, kCompY, kCompW,
               kCompH);
   sceGuTexFilter(GU_LINEAR, GU_LINEAR);
   GeDraw(kVtTile, 2, base);
+  if (g_door_wipe_active && g_door_snapshot_valid && hud)
+    DrawDoorTransition(s);
   if (hud) {
     TileVert *w = base + 2;
     int nv = 0;
@@ -5817,6 +5902,7 @@ bool PspRenderer_GeActive(void) {
 /* After a sleep VRAM is not trusted: forget what the atlases hold so every tile used is decoded again, and let
  * the software PPU draw the next frames until the GE streak is rebuilt. Main thread, between frames. */
 void PspRenderer_Resume(void) {
+  DoorTransitionRelease();  /* VRAM (the snapshot) is not trusted after sleep */
   memset(g_hash2, 0xff, sizeof(g_hash2));
   memset(g_hash4, 0xff, sizeof(g_hash4));
   memset(g_hash7, 0xff, sizeof(g_hash7));
@@ -6432,6 +6518,7 @@ static bool PspRenderer_Initialize(void) {
   g_img_skip_ok = g_img_ok && SM_PSP_LAYER_IMG >= 3;
   for (int i = 0; i < kImgSlots; i++)
     g_img_tex[i] = (uint8_t *)(vram + kVramImg0 + (uintptr_t)i * kImgBytes);
+  g_door_ok = g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)(kVramImg0 + kImgBytes);
   PspLog("layer images: %d high=%d skip=%d (needs %u of %u)", (int)g_img_ok, (int)g_imgh_ok, (int)g_img_skip_ok, (unsigned)kVramImgEnd,
          (unsigned)sceGeEdramGetSize());
 
@@ -6510,6 +6597,7 @@ static bool PspRenderer_Initialize(void) {
 }
 
 static void PspRenderer_Destroy(void) {
+  DoorTransitionRelease();
   g_ppu_line_hook = NULL;
   g_ppu_draw_begin = g_ppu_draw_end = NULL;
   g_ppu_skip_draw = false;
@@ -6590,6 +6678,8 @@ static void PspRenderer_EndDraw(void) {
     g_streak = 0;
     g_t_draw_start = Now();
     int swpath = g_swpath >= 0 ? g_swpath : (int)((g_cal_frames / kSwCalFrames) % kSwPaths);
+    if (g_door_capture_pending)
+      swpath = 0;  /* the capture copies a 5650 source */
     if (swpath == 0)
       PspRenderer_Convert();
     sceKernelDcacheWritebackRange(g_framebuffer, sizeof(g_framebuffer));

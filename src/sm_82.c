@@ -3789,6 +3789,8 @@ CoroutineRet CallDoorTransitionFunction_Async(uint32 ea) {
 }
 
 CoroutineRet GameState_9_HitDoorBlock(void) {  // 0x82E169
+  if ((get_DoorDef(door_def_ptr)->door_bitflags & 0x80) == 0)
+    PspRenderer_BeginDoorTransition();
   return CallDoorTransitionFunction_Async(door_transition_function | 0x820000);
 }
 
@@ -4160,6 +4162,7 @@ CoroutineRet DoorTransition_HandleTransition(void) {  // 0x82E6A2
       CallSomeSamusCode(0);
   }
   SetLiquidPhysicsType();
+  PspRenderer_StartDoorTransitionWipe(door_direction & 3);  // no-op unless Begin reserved it
   door_transition_function = FUNC16(DoorTransition_FadeInScreenAndFinish);
   *(unaligned_uint16 *)&reg_INIDISP |= 0x1F;
   return kCoroutineNone;
@@ -4174,6 +4177,7 @@ CoroutineRet DoorTransition_FadeInScreenAndFinish(void) {  // 0x82E737
   EnsureSamusDrawnEachFrame();
   QueueEnemyBG2TilemapTransfers();
   if (AdvancePaletteFadeForAllPalettes_0xc()) {
+    PspRenderer_EndDoorTransition();
     debug_disable_sounds = 0;
     PlaySpinJumpSoundIfSpinJumping();
     door_transition_flag_elevator_zebetites = 0;

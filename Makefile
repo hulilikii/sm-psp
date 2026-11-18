@@ -45,7 +45,7 @@ PSP_MOS_GE ?= 1
 # 0: tile quads. 1: Gate 5l (32x32 / 64x32 maps). 2: also 32x64 maps (Gate 5m). 3: also skip the image scan when no VRAM page of the map or tiles was written (Gate 5m).
 PSP_LAYER_IMG ?= 3
 # PSP_TILE_GEN=1: EnsureTile skips the hash of a tile whose VRAM page generation is unchanged since its last hash. 0: hash every tile as before.
-PSP_TILE_GEN ?= 1
+PSP_TILE_GEN ?= 0
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
