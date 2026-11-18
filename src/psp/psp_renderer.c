@@ -1779,7 +1779,9 @@ void PspRenderer_StartDoorTransitionWipe(unsigned direction) {
 }
 
 void PspRenderer_EndDoorTransition(void) {
-  DoorTransitionRelease();  /* always: the original fade-in is done */
+  /* The wipe owns the snapshot until its final rendered frame. */
+  if (!g_door_wipe_active)
+    DoorTransitionRelease();
 }
 
 /* True if a VRAM page of [word0, word0 + nwords) (modulo the 32 K words) was written since the last scan of slot. */
@@ -3639,9 +3641,9 @@ static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1,
 }
 
 // Old gameplay image slid over the new room. Rect is clipped on the CPU to the gameplay viewport (no scissor needed); the image maps 256x192 -> 360x270 exactly like the normal composition.
-static void DrawDoorTransition(const ComposeSrc *s) {
+static void DrawDoorTransition(const ComposeSrc *s, bool animate) {
   enum { kDoorFrames = 13, kDoorRows = 192 };
-  const unsigned frame = ++g_door_frame;
+  const unsigned frame = animate ? ++g_door_frame : 0;
   const int extent = g_door_direction < 2 ? kCompW : kCompH;
   const int shift = (extent * (int)frame + kDoorFrames / 2) / kDoorFrames;
   int dx = kCompX, dy = kCompY;  /* where the old image's top-left corner is */
@@ -3667,7 +3669,7 @@ static void DrawDoorTransition(const ComposeSrc *s) {
     sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
     sceGuTexFlush();
   }
-  if (frame >= kDoorFrames)
+  if (animate && frame >= kDoorFrames)
     DoorTransitionRelease();
 }
 
@@ -4068,8 +4070,8 @@ static void ComposeDraw(const ComposeSrc *s) {
               kCompH);
   sceGuTexFilter(GU_LINEAR, GU_LINEAR);
   GeDraw(kVtTile, 2, base);
-  if (g_door_wipe_active && g_door_snapshot_valid && hud)
-    DrawDoorTransition(s);
+  if (g_door_reserved && g_door_snapshot_valid)
+    DrawDoorTransition(s, g_door_wipe_active);
   if (hud) {
     TileVert *w = base + 2;
     int nv = 0;
