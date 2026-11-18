@@ -153,6 +153,9 @@ static volatile bool g_fatal;      // the ME finished a job but its output/state
 static volatile bool g_pending;    // a rendered block waits in g_me_output for ring space
 static bool g_disabled;            // ME audio is off for the session (unresolved ping)
 static volatile bool g_suspended;  // Suspend returned OK and no Init has engaged since (changed under the APU lock)
+/* HOME pause is not power suspend: retain ME ownership and all queued audio. */
+static volatile int g_home_pause_requested;
+static volatile int g_home_pause_ack;
 static bool g_injected;
 static SceUID g_thread = -1;
 static uint32_t g_seq, g_outstanding;
@@ -395,6 +398,8 @@ static void PaintSharedBuffers(void) {
   g_seq = g_outstanding = 0;
   g_pending = false;
   g_refusals = 0;
+  __sync_lock_test_and_set(&g_home_pause_requested, 0);
+  __sync_lock_test_and_set(&g_home_pause_ack, 0);
   g_state = PSPME_IDLE;
 }
 
@@ -446,7 +451,7 @@ static void Disengage_Locked(void) {
 
 static void ProduceOne(void) {
   RtlApuLockRaw();
-  if (g_stop || !g_accepting || !g_engaged || g_unknown || g_fatal) {
+  if (g_stop || g_home_pause_requested || !g_accepting || !g_engaged || g_unknown || g_fatal) {
     RtlApuUnlockRaw();
     return;
   }
@@ -514,10 +519,27 @@ static int ProducerThread(SceSize args, void *argp) {
   (void)args; (void)argp;
   while (!g_stop) {
     if (g_unknown) {
+      /* Recovery only observes the outstanding task; it never submits another. */
       RecoveryStep();
-      sceKernelDelayThread(ME_RECOVER_POLL_US);
+      if (g_home_pause_requested) {
+        __sync_lock_test_and_set(&g_home_pause_ack, 1);
+        if (!__sync_fetch_and_add(&g_home_pause_requested, 0))
+          __sync_lock_test_and_set(&g_home_pause_ack, 0);
+        sceKernelDelayThread(ME_PARK_POLL_US);
+      } else {
+        __sync_lock_test_and_set(&g_home_pause_ack, 0);
+        sceKernelDelayThread(ME_RECOVER_POLL_US);
+      }
       continue;
     }
+    if (g_home_pause_requested) {
+      __sync_lock_test_and_set(&g_home_pause_ack, 1);
+      if (!__sync_fetch_and_add(&g_home_pause_requested, 0))
+        __sync_lock_test_and_set(&g_home_pause_ack, 0);
+      sceKernelDelayThread(ME_PARK_POLL_US);
+      continue;
+    }
+    __sync_lock_test_and_set(&g_home_pause_ack, 0);
     if (!PublishPending()) {
       sceKernelDelayThread(1000);
       continue;
@@ -532,6 +554,7 @@ static int ProducerThread(SceSize args, void *argp) {
     }
     ProduceOne();
   }
+  __sync_lock_test_and_set(&g_home_pause_ack, 0);
   return 0;
 }
 
@@ -706,6 +729,25 @@ PspAudioMeInit PspAudioMe_Resume(SpcPlayer *player) {
       return PSPME_INIT_UNRESOLVED;
   }
   return PspAudioMe_Init(player);
+}
+
+/* HOME dialog pause preserves the live ME stream. The producer completes any
+ * current job (or parks in recovery if completion is ambiguous), then stops
+ * submitting jobs without discarding pending PCM. */
+void PspAudioMe_HomePauseRequest(void) {
+  if (g_engaged)
+    __sync_lock_test_and_set(&g_home_pause_requested, 1);
+}
+
+bool PspAudioMe_HomePauseReady(void) {
+  if (!g_engaged || g_thread < 0)
+    return true;
+  return __sync_fetch_and_add(&g_home_pause_ack, 0) != 0;
+}
+
+void PspAudioMe_HomeResume(void) {
+  __sync_lock_test_and_set(&g_home_pause_requested, 0);
+  __sync_lock_test_and_set(&g_home_pause_ack, 0);
 }
 
 PspAudioMeShutdown PspAudioMe_Shutdown(void) {

@@ -84,6 +84,12 @@ PspAudioMeInit PspAudioMe_Init(struct SpcPlayer *player);
 PspAudioMeSuspend PspAudioMe_Suspend(void);
 // After a sleep (main thread, not with the APU lock held). Re-runs Suspend first if the stream is still ME-owned (duplicate/missed/unresolved suspend), and only calls Init when the state is back with the CPU. A sleep reset of the ME is not accepted as proof that a task stopped.
 PspAudioMeInit PspAudioMe_Resume(struct SpcPlayer *player);
+/* HOME dialog pause: stop submitting new render jobs but retain ME ownership,
+ * queued PCM, pending PCM, and resampler state. They do not restart the ME.
+ * Ready means the producer is parked; it does not prove an ambiguous ME task stopped. */
+void PspAudioMe_HomePauseRequest(void);
+bool PspAudioMe_HomePauseReady(void);
+void PspAudioMe_HomeResume(void);
 // Exit paths (also Die). Idempotent. Blocks up to ~3 s. Never reports a "clean" ME: see PspAudioMeShutdown.
 PspAudioMeShutdown PspAudioMe_Shutdown(void);
 

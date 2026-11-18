@@ -48,6 +48,8 @@ int g_got_mismatch_count;
 static uint8_t g_my_pixels[256 * 4 * 240] __attribute__((aligned(16)));
 static struct RendererFuncs g_renderer_funcs;
 static volatile bool g_running = true;
+static bool g_home_dialog_paused;
+static bool g_home_resume_wait_release;
 static bool g_turbo;
 static uint8 g_replay_turbo = true;
 static int g_ppu_render_flags;
@@ -205,10 +207,20 @@ void RtlApuQueueUnlock(void) {
 #define SM_AUDIO_BLOCK_FRAMES 735
 static int16_t g_audio_block[SM_AUDIO_BLOCK_FRAMES * 2] __attribute__((aligned(64)));
 static unsigned g_audio_block_pos = SM_AUDIO_BLOCK_FRAMES;
+/* The callback owns audio state while active. HOME pause silences it without
+ * consuming PCM or changing the partial-block position. */
+static volatile int g_audio_home_paused;
+static volatile int g_audio_callback_active;
 
 static void AudioCallback(void *buf, unsigned int reqn, void *pdata) {
   (void)pdata;
   int16_t *out = (int16_t *)buf;
+  __sync_add_and_fetch(&g_audio_callback_active, 1);
+  if (__sync_fetch_and_add(&g_audio_home_paused, 0)) {
+    memset(out, 0, (size_t)reqn * 2 * sizeof(int16_t));
+    __sync_sub_and_fetch(&g_audio_callback_active, 1);
+    return;
+  }
   while (reqn != 0) {
     if (g_audio_block_pos >= SM_AUDIO_BLOCK_FRAMES) {
       RtlRenderAudio(g_audio_block, SM_AUDIO_BLOCK_FRAMES, 2);
@@ -222,6 +234,7 @@ static void AudioCallback(void *buf, unsigned int reqn, void *pdata) {
     g_audio_block_pos += n;
     reqn -= n;
   }
+  __sync_sub_and_fetch(&g_audio_callback_active, 1);
 }
 
 static void Audio_Init(void) {
@@ -360,6 +373,38 @@ static void Audio_PowerResume(void) {
 
 #endif
 
+/* HOME pause is separate from power suspend: it preserves the ME producer, its
+ * queued PCM, the CPU callback's partial block, and the MSU consumer position. */
+static void Audio_HomePauseBegin(void) {
+#if PSP_AUDIO_ENABLED
+  __sync_lock_test_and_set(&g_audio_home_paused, 1);
+#endif
+#if PSP_AUDIO_ME
+  PspAudioMe_HomePauseRequest();
+#endif
+}
+
+static bool Audio_HomePauseReady(void) {
+#if PSP_AUDIO_ENABLED
+  if (__sync_fetch_and_add(&g_audio_callback_active, 0) != 0)
+    return false;
+#endif
+#if PSP_AUDIO_ME
+  if (!PspAudioMe_HomePauseReady())
+    return false;
+#endif
+  return true;
+}
+
+static void Audio_HomeResume(void) {
+#if PSP_AUDIO_ME
+  PspAudioMe_HomeResume();
+#endif
+#if PSP_AUDIO_ENABLED
+  __sync_lock_test_and_set(&g_audio_home_paused, 0);
+#endif
+}
+
 /* Callback thread. Suspend: park ME audio. Resume: only raise a flag, the main loop does the work. */
 static int PowerCallback(int unused, int flags, void *common) {
   (void)unused; (void)common;
@@ -380,6 +425,9 @@ static void Power_Resume(void) {
   g_power_suspended = false;
   PspRenderer_Resume();
   Audio_PowerResume();
+  /* Power resume can restart the ME producer while the HOME dialog is still open. */
+  if (g_home_dialog_paused)
+    Audio_HomePauseBegin();
   PspLog_Flush();
 }
 
@@ -510,6 +558,27 @@ int main(int argc, char **argv) {
     }
     sceCtrlPeekBufferPositive(&pad, 1);
 
+    /* PSP_CTRL_HOME is the system-intercepted input bit set while the HOME/exit
+     * UI is visible. Do not advance game logic, input, diagnostics, or rendering. */
+    if (pad.Buttons & PSP_CTRL_HOME) {
+      if (!g_home_dialog_paused) {
+        g_home_dialog_paused = true;
+        Audio_HomePauseBegin();
+      }
+      sceKernelDelayThread(10000);
+      continue;
+    }
+    if (g_home_dialog_paused) {
+      /* Wait for the CPU callback to exit and the ME producer to stop submitting jobs. */
+      if (!Audio_HomePauseReady()) {
+        sceKernelDelayThread(1000);
+        continue;
+      }
+      Audio_HomeResume();
+      g_home_dialog_paused = false;
+      g_home_resume_wait_release = true;
+    }
+
     /* Renderer toggle (software <-> GE): NOTE or SCREEN button, or L+R+SELECT.
      * Edge-triggered. NOTE/SCREEN are not forwarded to the game. */
     {
@@ -525,6 +594,15 @@ int main(int argc, char **argv) {
     }
 
     uint16 inputs = PspInput_Read();
+    if (g_home_resume_wait_release) {
+      /* The dialog-dismiss button may remain held after HOME closes. */
+      const unsigned hold = PSP_CTRL_CROSS | PSP_CTRL_CIRCLE | PSP_CTRL_SQUARE | PSP_CTRL_TRIANGLE |
+                            PSP_CTRL_START | PSP_CTRL_SELECT | PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER;
+      if (pad.Buttons & hold)
+        inputs = 0;
+      else
+        g_home_resume_wait_release = false;
+    }
     LOG_DMA_RESET();
     uint32_t t_logic = sceKernelGetSystemTimeLow();
     uint8 is_replay = RtlRunFrame(inputs);
