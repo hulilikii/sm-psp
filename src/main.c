@@ -426,28 +426,6 @@ static void DrawPpuFrame(void) {
   g_renderer_funcs.EndDraw();
 }
 
-static void HandleCommand(uint32 j, bool pressed) {
-  if (j <= kKeys_Controls_Last) {
-    static const uint8 kRemap[] = { 0, 4, 5, 6, 7, 2, 3, 8, 0, 9, 1, 10, 11 };
-    if (pressed)
-      return;
-    (void)kRemap;
-    return;
-  }
-  if (!pressed)
-    return;
-  if (j <= kKeys_Load_Last)
-    RtlSaveLoad(kSaveLoad_Load, j - kKeys_Load);
-  else if (j <= kKeys_Save_Last)
-    RtlSaveLoad(kSaveLoad_Save, j - kKeys_Save);
-  else if (j <= kKeys_Replay_Last)
-    RtlSaveLoad(kSaveLoad_Replay, j - kKeys_Replay);
-  else if (j <= kKeys_LoadRef_Last)
-    RtlSaveLoad(kSaveLoad_Load, 256 + j - kKeys_LoadRef);
-  else if (j <= kKeys_ReplayRef_Last)
-    RtlSaveLoad(kSaveLoad_Replay, 256 + j - kKeys_ReplayRef);
-}
-
 static void SetupFilesystem(const char *argv0) {
   const char *last_slash = argv0 ? strrchr(argv0, '/') : NULL;
 
@@ -494,7 +472,6 @@ int main(int argc, char **argv) {
   PspLog_Init();
   PspLog("clock cpu=%d bus=%d", scePowerGetCpuClockFrequency(), scePowerGetBusClockFrequency());
   PspInput_Init();
-  ParseConfigFile(NULL);
 
   /* The PSP renderer is fixed at the native 256x240 software-PPU size. */
   g_snes_width = 256;
@@ -523,9 +500,6 @@ int main(int argc, char **argv) {
   #endif
 
   RtlReadSram();
-  if (g_config.autosave)
-    HandleCommand(kKeys_Load, true);
-
   while (g_running) {
     SceCtrlData pad;
     if (g_power_resumed) {
@@ -564,9 +538,6 @@ int main(int argc, char **argv) {
     if (!g_snes->disableRender)
       DrawPpuFrame();
   }
-
-  if (g_config.autosave)
-    HandleCommand(kKeys_Save, true);
 
   #if PSP_AUDIO_ENABLED
   Audio_Shutdown();

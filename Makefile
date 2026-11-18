@@ -135,7 +135,7 @@ $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
 	@touch $@
-$(OBJS)): $(BUILD_STAMP)
+$(OBJS): $(BUILD_STAMP)
 
 # Its own stamp (not flags_*, which the main stamp rule deletes): toggling PSP_BENCH_M7 rebuilds the renderer.
 BENCH_M7_STAMP := build/bench_m7_$(PSP_BENCH_M7).stamp

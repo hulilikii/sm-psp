@@ -492,11 +492,7 @@ bool PspMsu_Init(const char *app_dir) {
   g_request_loop = false;
   g_stop = 0;
 
-  g_volume = g_config.msuvolume;
-  if (g_volume < 0)
-    g_volume = 0;
-  if (g_volume > 100)
-    g_volume = 100;
+  g_volume = 100;
 
   g_thread = sceKernelCreateThread(
       "sm-msu-reader", ReaderThread,
