@@ -768,6 +768,31 @@ static uint16_t M7Line(const Ppu *p, LineSnap *s) {
  * ppu_write) switches to full copies for good. */
 enum { kVramPages = 128, kVramPageWords = 256 };
 static bool g_vd_ok = SM_PSP_VRAM_DIRTY;
+/* Persistent VRAM page generations (SM_PSP_TILE_GEN). A page's generation is bumped whenever SnapshotVram copies it (or
+ * refreshes everything), so a tile whose recorded generation equals its page's has had unchanged source words in g_vram
+ * since it was last hashed, however many frames ago: EnsureTile then skips the hash. 0 = unknown. When a page counter
+ * would wrap, every tile record is cleared and all pages restart at 1. */
+#ifndef SM_PSP_TILE_GEN
+#define SM_PSP_TILE_GEN 1
+#endif
+#if SM_PSP_TILE_GEN
+static uint16_t g_pgen[kVramPages];
+static uint16_t g_tgen2[4096], g_tgen4[2048];
+static bool g_tgen_ok = SM_PSP_TILE_GEN;
+#if SM_PSP_LOG
+static uint32_t g_tg_skip, g_tg_audit, g_tg_bad, g_tg_n;
+#endif
+static void VramGenBump(int pg0, int pg1) {
+  for (int pg = pg0; pg < pg1; pg++)
+    if (++g_pgen[pg] == 0xffffu) {
+      memset(g_tgen2, 0, sizeof(g_tgen2));
+      memset(g_tgen4, 0, sizeof(g_tgen4));
+      for (int i = 0; i < kVramPages; i++)
+        g_pgen[i] = 1;
+    }
+}
+#endif
+
 static void ImgMarkDirty(int pg0, int pg1);  /* gate 5m: layer images learn which pages were written */
 static void ImgMarkAllDirty(void);
 static void SnapshotVram(const Ppu *p) {
@@ -776,6 +801,9 @@ static void SnapshotVram(const Ppu *p) {
     memcpy(g_vram, p->vram, sizeof(g_vram));
     memset(dirty, 0, kVramPages);
     ImgMarkAllDirty();
+#if SM_PSP_TILE_GEN
+    VramGenBump(0, kVramPages);
+#endif
     return;
   }
   for (int pg = 0; pg < kVramPages;) {
@@ -788,6 +816,9 @@ static void SnapshotVram(const Ppu *p) {
       e++;
     memcpy(&g_vram[pg * kVramPageWords], &p->vram[pg * kVramPageWords], (size_t)(e - pg) * kVramPageWords * 2);
     ImgMarkDirty(pg, e);
+#if SM_PSP_TILE_GEN
+    VramGenBump(pg, e);
+#endif
     memset(&dirty[pg], 0, (size_t)(e - pg));
     pg = e;
   }
@@ -795,6 +826,9 @@ static void SnapshotVram(const Ppu *p) {
     g_vd_ok = false;
     memcpy(g_vram, p->vram, sizeof(g_vram));
     ImgMarkAllDirty();
+#if SM_PSP_TILE_GEN
+    VramGenBump(0, kVramPages);
+#endif
     PspLog("vramdirty: snapshot differs from VRAM, dirty tracking disabled");
   }
 }
@@ -1482,7 +1516,7 @@ void PspRenderer_CaptureLine(const Ppu *p, int line) {
 /* Decodes (if changed this frame) physical tile pt and returns true if empty.
  * bpp4: 16 words/tile, atlas 32 tiles wide. 2bpp: 8 words/tile, 64 wide.
  * One 32-bit store per tile row into the uncached VRAM mirror. */
-static bool EnsureTile(bool bpp4, int pt) {
+static bool EnsureTileHash(bool bpp4, int pt) {
   uint16_t *seen = bpp4 ? g_seen4 : g_seen2;
   uint32_t *hash = bpp4 ? g_hash4 : g_hash2;
   uint8_t *empty = bpp4 ? g_empty4 : g_empty2;
@@ -1497,6 +1531,7 @@ static bool EnsureTile(bool bpp4, int pt) {
     h = (h ^ src[i]) * 16777619u;
   if (hash[pt] == h)
     return empty[pt];
+  }
   hash[pt] = h;
   (bpp4 ? g_ver4 : g_ver2)[pt]++;
   PROF(g_c_tdec++;)
@@ -1527,6 +1562,47 @@ static bool EnsureTile(bool bpp4, int pt) {
   (bpp4 ? g_mask4 : g_mask2)[pt] = (uint16_t)used;
   return empty[pt];
 }
+
+#if SM_PSP_TILE_GEN
+/* Gate: a tile whose page generation has not moved since the tile was last hashed needs no hash. */
+static bool EnsureTile(bool bpp4, int pt) {
+  uint16_t *seen = bpp4 ? g_seen4 : g_seen2;
+  uint8_t *empty = bpp4 ? g_empty4 : g_empty2;
+  if (seen[pt] == g_stamp)
+    return empty[pt];
+  uint16_t *tg = &(bpp4 ? g_tgen4 : g_tgen2)[pt];
+  const uint16_t pgen = g_pgen[((unsigned)pt * (bpp4 ? 16u : 8u)) >> 8];
+  bool audit = false;
+  if (g_tgen_ok && *tg != 0 && *tg == pgen) {
+#if SM_PSP_LOG
+    audit = (++g_tg_n & 63) == 0;  /* every 64th skip is hashed anyway and must match */
+#endif
+    if (!audit) {
+      seen[pt] = g_stamp;
+      PROF(g_c_tseen++; g_tg_skip++;)
+      return empty[pt];
+    }
+  }
+#if SM_PSP_LOG
+  const uint32_t ver0 = (bpp4 ? g_ver4 : g_ver2)[pt];
+#endif
+  const bool e = EnsureTileHash(bpp4, pt);
+#if SM_PSP_LOG
+  if (audit) {
+    g_tg_audit++;
+    if ((bpp4 ? g_ver4 : g_ver2)[pt] != ver0) {  /* the tile changed although its page generation did not */
+      g_tgen_ok = false;
+      g_tg_bad++;
+      PspLog("tilegen: stale %s tile %d (page gen %u), tile generations disabled", bpp4 ? "4bpp" : "2bpp", pt, (unsigned)pgen);
+    }
+  }
+#endif
+  *tg = pgen;
+  return e;
+}
+#else
+#define EnsureTile EnsureTileHash
+#endif
 
 static void BuildClut2(int b) {
   if (g_clut2_stamp[b] == g_stamp)
@@ -5746,6 +5822,10 @@ void PspRenderer_Resume(void) {
   memset(g_hash4, 0xff, sizeof(g_hash4));
   memset(g_hash7, 0xff, sizeof(g_hash7));
   memset(g_img, 0, sizeof(g_img));  /* gate 5l: VRAM is not trusted after a sleep: rebuild the layer images */
+#if SM_PSP_TILE_GEN
+  memset(g_tgen2, 0, sizeof(g_tgen2));  /* every tile is hashed (and decoded) again */
+  memset(g_tgen4, 0, sizeof(g_tgen4));
+#endif
   g_line_count = 0;
   g_streak = 0;
   g_ppu_skip_draw = false;
@@ -6673,6 +6753,10 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  subimg: frames=%u ok=%d%d%d audited=%u,%u,%u", (unsigned)g_frames_simg, (int)g_simg_ok[0], (int)g_simg_ok[1],
            (int)g_simg_ok[2], (unsigned)g_simg_vn[0], (unsigned)g_simg_vn[1], (unsigned)g_simg_vn[2]);
     PspLog("  m7wrap: frames=%u ok=%d audited=%u", (unsigned)g_frames_m7w, (int)g_m7w_ok, (unsigned)g_m7w_vn);
+#if SM_PSP_TILE_GEN
+    PspLog("  tilegen: on=%d skipped=%u audited=%u bad=%u", (int)g_tgen_ok, (unsigned)g_tg_skip, (unsigned)g_tg_audit, (unsigned)g_tg_bad);
+    g_tg_skip = g_tg_audit = 0;
+#endif    
     S5I_LOG();
   }
   if ((g_frame % 300) == 0) {
