@@ -13,7 +13,6 @@
 // A task without such a marker is "ambiguous": the ME may still own the shared memory forever.
 #include <stdbool.h>
 #include <stdint.h>
-
 #include "../config.h"
 #include "psp_log.h"
 
