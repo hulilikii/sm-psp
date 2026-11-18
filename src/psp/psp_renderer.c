@@ -3540,6 +3540,7 @@ static const float kMsgTitleScale = 0.5f, kMsgBodyScale = 0.25f,
 static uint8_t g_msg_id, g_msg_sel, g_msg_fade;
 static bool g_msg_dim_hold;
 static const uint32_t *g_msg_btn_px;
+static int g_msg_btn_tw, g_msg_btn_th, g_msg_btn_iw, g_msg_btn_ih;
 static const char *g_msg_btn_label;
 
 void PspRenderer_SetMessageBox(unsigned id, unsigned selection) {
@@ -3547,6 +3548,7 @@ void PspRenderer_SetMessageBox(unsigned id, unsigned selection) {
   g_msg_sel = selection == 2 ? 2 : 0;
   g_msg_fade = 0;
   g_msg_btn_px = NULL;
+  g_msg_btn_tw = g_msg_btn_th = g_msg_btn_iw = g_msg_btn_ih = 0;
   g_msg_btn_label = NULL;
 }
 
@@ -3565,17 +3567,22 @@ void PspRenderer_SetMessageDimHold(bool hold) {
 void PspRenderer_ClearMessageBox(void) {
   g_msg_id = g_msg_sel = g_msg_fade = 0;
   g_msg_btn_px = NULL;
+  g_msg_btn_tw = g_msg_btn_th = g_msg_btn_iw = g_msg_btn_ih = 0;
   g_msg_btn_label = NULL;
 }
 
 void PspRenderer_SetMessageButton(int icon, const char *label) {
   g_msg_btn_px = NULL;
+  g_msg_btn_tw = g_msg_btn_th = g_msg_btn_iw = g_msg_btn_ih = 0;
   g_msg_btn_label = NULL;
   switch (icon) {
-  case PSP_BUTTON_ICON_CIRCLE:   g_msg_btn_px = g_psp_button_circle; break;
-  case PSP_BUTTON_ICON_CROSS:    g_msg_btn_px = g_psp_button_cross; break;
-  case PSP_BUTTON_ICON_SQUARE:   g_msg_btn_px = g_psp_button_square; break;
-  case PSP_BUTTON_ICON_TRIANGLE: g_msg_btn_px = g_psp_button_triangle; break;
+  case PSP_BUTTON_ICON_CIRCLE:   g_msg_btn_px = g_psp_button_circle; g_msg_btn_tw = g_msg_btn_th = g_msg_btn_iw = g_msg_btn_ih = 16; break;
+  case PSP_BUTTON_ICON_CROSS:    g_msg_btn_px = g_psp_button_cross; g_msg_btn_tw = g_msg_btn_th = g_msg_btn_iw = g_msg_btn_ih = 16; break;
+  case PSP_BUTTON_ICON_SQUARE:   g_msg_btn_px = g_psp_button_square; g_msg_btn_tw = g_msg_btn_th = g_msg_btn_iw = g_msg_btn_ih = 16; break;
+  case PSP_BUTTON_ICON_TRIANGLE: g_msg_btn_px = g_psp_button_triangle; g_msg_btn_tw = g_msg_btn_th = g_msg_btn_iw = g_msg_btn_ih = 16; break;
+  case PSP_BUTTON_ICON_L:       g_msg_btn_px = g_psp_button_l; g_msg_btn_tw = g_msg_btn_iw = 32; g_msg_btn_th = g_msg_btn_ih = 16; break;
+  case PSP_BUTTON_ICON_R:       g_msg_btn_px = g_psp_button_r; g_msg_btn_tw = g_msg_btn_iw = 32; g_msg_btn_th = g_msg_btn_ih = 16; break;
+  case PSP_BUTTON_ICON_SELECT:  g_msg_btn_px = g_psp_button_select; g_msg_btn_tw = g_msg_btn_iw = 32; g_msg_btn_th = g_msg_btn_ih = 16; break;
   default:
     if (label && label[0])
       g_msg_btn_label = label;
@@ -3606,7 +3613,7 @@ static bool MsgResolve(const char *p, int n, MsgTok *t) {
     }
   if (MsgTokIs(p, n, "button:shoot") || MsgTokIs(p, n, "button:run")) {  /* each message has one button: the game's current binding */
     if (g_msg_btn_px) {
-      *t = (MsgTok){g_msg_btn_px, 16, 16, 16, 16, NULL};
+      *t = (MsgTok){g_msg_btn_px, g_msg_btn_tw, g_msg_btn_th, g_msg_btn_iw, g_msg_btn_ih, NULL};
       return true;
     }
     if (g_msg_btn_label) {
@@ -3846,6 +3853,12 @@ static void ComposeDraw(const ComposeSrc *s) {
     sceKernelDcacheWritebackRange((void *)g_psp_button_cross, sizeof(g_psp_button_cross));
     sceKernelDcacheWritebackRange((void *)g_psp_button_square, sizeof(g_psp_button_square));
     sceKernelDcacheWritebackRange((void *)g_psp_button_triangle, sizeof(g_psp_button_triangle));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_l, sizeof(g_psp_button_l));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_r, sizeof(g_psp_button_r));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_select, sizeof(g_psp_button_select));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_dpad_ud, sizeof(g_psp_button_dpad_ud));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_dpad_lr, sizeof(g_psp_button_dpad_lr));
+    sceKernelDcacheWritebackRange((void *)g_psp_button_dpad_lrud, sizeof(g_psp_button_dpad_lrud));
     sceKernelDcacheWritebackRange((void *)psp_msg_font_rgba, PSP_MSG_FONT_W * PSP_MSG_FONT_H * 4);
     sceKernelDcacheWritebackRange((void *)psp_msg_grapple_rgba, 16 * 16 * 4);
     sceKernelDcacheWritebackRange((void *)psp_msg_missile_rgba, 32 * 16 * 4);

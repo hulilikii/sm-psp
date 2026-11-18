@@ -73,7 +73,7 @@ endif
 OBJS := $(SRCS:%.c=%.o)
 OBJS += src/psp/psp_message_assets.o
 
-CFLAGS := -O2 -G0 -fno-strict-aliasing -I.
+CFLAGS := -O2 -G0 -fno-strict-aliasing -Ibuild/generated -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 CFLAGS += -DSM_PSP_LOG=$(PSP_LOG) -DSM_PSP_LOG_FLUSH_FRAMES=$(PSP_LOG_FLUSH_FRAMES)
 CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS) -DSM_PSP_SW_PATH=$(PSP_SW_PATH) -DSM_PSP_GE_WIN=$(PSP_GE_WIN)
@@ -145,6 +145,20 @@ $(BENCH_M7_STAMP):
 	@touch $@
 src/psp/psp_renderer.o: $(BENCH_M7_STAMP)
 
+# Compile-time PNG texture pipeline. Generated headers are searched before src/.
+PYTHON ?= python3
+PSP_TEXTURE_DIR := assets/psp/textures
+PSP_TEXTURE_PNGS := $(wildcard $(PSP_TEXTURE_DIR)/buttons/*.png) \
+                    $(wildcard $(PSP_TEXTURE_DIR)/hud/*.png) \
+                    $(wildcard $(PSP_TEXTURE_DIR)/message/*.png)
+PSP_TEXTURE_STAMP := build/psp_textures.stamp
+$(PSP_TEXTURE_STAMP): tools/gen_psp_textures.py $(PSP_TEXTURE_PNGS)
+	@mkdir -p build
+	@$(PYTHON) tools/gen_psp_textures.py --source $(PSP_TEXTURE_DIR) --output build/generated
+	@touch $@
+
+src/psp/psp_renderer.o src/psp/psp_message_assets.o: $(PSP_TEXTURE_STAMP)
+
 include $(PSPSDK)/lib/build.mak
 
 # Its own stamp (like BENCH_M7_STAMP): toggling PSP_MOS_GE rebuilds the renderer.
@@ -155,9 +169,8 @@ $(MOS_GE_STAMP):
 	@touch $@
 src/psp/psp_renderer.o: $(MOS_GE_STAMP)
 
-# build.mak does not track these headers or the embedded textures.
-src/psp/psp_renderer.o: src/psp/psp_message_font.h src/psp/psp_message_text.h
-src/psp/psp_message_assets.o: $(wildcard assets/psp/message/*.rgba)
+# build.mak does not track these headers or generated texture payloads.
+src/psp/psp_renderer.o: src/psp/psp_message_font.h src/psp/psp_message_text.h $(PSP_TEXTURE_STAMP)
 
 # Rebuild the EBOOT when an asset changes.
 EBOOT.PBP: $(PSP_ASSET_FILES)

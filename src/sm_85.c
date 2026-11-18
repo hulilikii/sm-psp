@@ -54,9 +54,9 @@ static void DrawSpecialButtonAndSetupPpuForLargeMessageBox(uint16 a) {
   case 2: icon = PSP_BUTTON_ICON_CROSS; break;     /* SNES B */
   case 4: icon = PSP_BUTTON_ICON_TRIANGLE; break;  /* SNES X */
   case 6: icon = PSP_BUTTON_ICON_SQUARE; break;    /* SNES Y */
-  case 8: label = "SELECT"; break;
-  case 10: label = "L"; break;
-  case 12: label = "R"; break;
+  case 8: icon = PSP_BUTTON_ICON_SELECT; break;
+  case 10: icon = PSP_BUTTON_ICON_L; break;
+  case 12: icon = PSP_BUTTON_ICON_R; break;
   default: break;
   }
 
