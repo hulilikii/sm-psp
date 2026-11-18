@@ -1531,7 +1531,6 @@ static bool EnsureTileHash(bool bpp4, int pt) {
     h = (h ^ src[i]) * 16777619u;
   if (hash[pt] == h)
     return empty[pt];
-  }
   hash[pt] = h;
   (bpp4 ? g_ver4 : g_ver2)[pt]++;
   PROF(g_c_tdec++;)
