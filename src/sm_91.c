@@ -321,12 +321,11 @@ Pair_R18_R20 TranslateCustomControllerBindingsToDefault(void) {  // 0x9181F4
     r18 |= kButton_B;
   if ((button_config_itemcancel_y & v0) != 0)
     r18 |= kButton_Y;
-  if ((button_config_aim_up_R & v0) != 0) {
-    if ((button_config_aim_up_R & (kButton_L | kButton_R)) != 0)
-      r18 |= kButton_R;
-  }
-  if ((button_config_aim_down_L & v0) != 0 && (button_config_aim_down_L & (kButton_L | kButton_R)) != 0)
+  if ((button_config_aim_up_R & v0) != 0)
+    r18 |= kButton_R;
+  if ((button_config_aim_down_L & v0) != 0)
     r18 |= kButton_L;
+    
   uint16 v1 = joypad1_lastkeys;
   if ((button_config_shoot_x & joypad1_lastkeys) != 0)
     r20 |= kButton_X;
@@ -336,12 +335,11 @@ Pair_R18_R20 TranslateCustomControllerBindingsToDefault(void) {  // 0x9181F4
     r20 |= kButton_B;
   if ((button_config_itemcancel_y & v1) != 0)
     r20 |= kButton_Y;
-  if ((button_config_aim_up_R & v1) != 0) {
-    if ((button_config_aim_up_R & (kButton_L | kButton_R)) != 0)
-      r20 |= kButton_R;
-  }
-  if ((button_config_aim_down_L & v1) != 0 && (button_config_aim_down_L & (kButton_L | kButton_R)) != 0)
+  if ((button_config_aim_up_R & v1) != 0)
+    r20 |= kButton_R;
+  if ((button_config_aim_down_L & v1) != 0)
     r20 |= kButton_L;
+    
   return (Pair_R18_R20) { ~r18, ~r20 };
 }
 
