@@ -5122,14 +5122,6 @@ uint8 OptionsMenuFunc8(void) {
   } while (v2 < 12);
   return 0;
 }
-static const uint16 g_word_82F6AD[6] = {  // 0x82F587
-  0,
-  0xe,
-  0xe,
-  0x10,
-  0x1f,
-  0x1f,
-};
 
 void OptionsMenuFunc6(void) {
   uint16 v0 = 0, v4;
@@ -5161,18 +5153,6 @@ void OptionsMenuFunc6(void) {
   
   OptionsMenu_UpdateControllerButtonIcons();
   
-  if (eproj_instr_list_ptr[0] != 5 && eproj_instr_list_ptr[0] != 6) {
-    *(unaligned_uint32 *)&ram3000.menu.backup_of_io_registers_in_gameover[46] = *(unaligned_uint32 *)g_word_82F6AD;
-    ram3000.pause_menu_map_tilemap[665] = g_word_82F6AD[2];
-    *(unaligned_uint32 *)&ram3000.menu.field_536[56] = *(unaligned_uint32 *)&g_word_82F6AD[3];
-    ram3000.pause_menu_map_tilemap[697] = g_word_82F6AD[5];
-  }
-  if (eproj_instr_list_ptr[1] != 5 && eproj_instr_list_ptr[1] != 6) {
-    *(unaligned_uint32 *)&ram3000.menu.field_536[184] = *(unaligned_uint32 *)g_word_82F6AD;
-    ram3000.pause_menu_map_tilemap[761] = g_word_82F6AD[2];
-    *(unaligned_uint32 *)&ram3000.menu.menu_tilemap[46] = *(unaligned_uint32 *)&g_word_82F6AD[3];
-    ram3000.pause_menu_map_tilemap[793] = g_word_82F6AD[5];
-  }
 }
 
 void OptionsMenuControllerFunc_0(void) {  // 0x82F6B9
