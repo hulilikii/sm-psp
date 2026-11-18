@@ -41,6 +41,9 @@ PSP_BENCH ?= 0
 PSP_BENCH_M7 ?= 0
 # PSP_MOS_GE=1: Gate 5s: the mosaic source image is rendered by the GE (no CPU pixels). 0: previous CPU-built image (MosBuild).
 PSP_MOS_GE ?= 1
+# PSP_DOOR_GE=1 enables the experimental GE door transition.
+# 0 preserves the original SNES palette-fade transition.
+PSP_DOOR_GE ?= 0
 # PSP_LAYER_IMG: BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run).
 # 0: tile quads. 1: Gate 5l (32x32 / 64x32 maps). 2: also 32x64 maps (Gate 5m). 3: also skip the image scan when no VRAM page of the map or tiles was written (Gate 5m).
 PSP_LAYER_IMG ?= 3
@@ -88,6 +91,7 @@ CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
 CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7)
 CFLAGS += -DSM_PSP_MOS_GE=$(PSP_MOS_GE)
+CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
 CFLAGS += -DSM_PSP_TILE_GEN=$(PSP_TILE_GEN)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
@@ -133,7 +137,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
