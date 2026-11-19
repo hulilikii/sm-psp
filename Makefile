@@ -52,6 +52,8 @@ PSP_DOOR_GE ?= 0
 PSP_LAYER_IMG ?= 3
 # PSP_TILE_GEN=1: EnsureTile skips the hash of a tile whose VRAM page generation is unchanged since its last hash. 0: hash every tile as before.
 PSP_TILE_GEN ?= 0
+# PSP_M7_REUSE=1 (Gate 5t): a mode 7 image row whose matrix/flags are unchanged since it was built and whose plane (VRAM pages 0-63) was not written keeps its pixels (exact; log builds re-render every 16th reusing frame and compare). 0: every row is rendered every frame.
+PSP_M7_REUSE ?= 1
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
@@ -94,6 +96,7 @@ CFLAGS += -DSM_PSP_VTX16=$(PSP_VTX16)
 CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
 CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7)
+CFLAGS += -DSM_PSP_M7_REUSE=$(PSP_M7_REUSE)
 CFLAGS += -DSM_PSP_MOS_GE=$(PSP_MOS_GE)
 CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
@@ -141,7 +144,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_m7r$(PSP_M7_REUSE)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp

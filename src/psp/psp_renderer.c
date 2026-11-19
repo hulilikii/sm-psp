@@ -403,6 +403,22 @@ static int g_m7_nrng;              /* row ranges drawn from it */
 static uint16_t g_m7rng[kMaxLines][2];
 static uint32_t g_m7i_vn, g_m7i_vbad, g_frames_m7i;
 enum { kM7IVerify = 8 };
+/* Gate 5t: row reuse for the mode 7 image. Row r of g_m7img is a pure function of the row number, the row's mode 7 state
+ * (matrix, flags, and mosaic size/start when the mosaic flag is set) and g_vram words 0..0x3fff (tile map in the low
+ * bytes, tile pixels in the high bytes; tile * 64 + 63 <= 0x3fff), which are the first kM7Pages VRAM pages. A row whose key
+ * equals the one it was built with, with no write to those pages since (g_m7i_stale), keeps its pixels. Exact by
+ * construction; log builds re-render every 16th reusing frame and compare. PSP_M7_REUSE=0 renders every row every frame. */
+#ifndef SM_PSP_M7_REUSE
+#define SM_PSP_M7_REUSE 1
+#endif
+enum { kM7Pages = 64 };
+typedef struct M7RowKey { uint8_t on, fl, ms, mt; int16_t m[8]; } M7RowKey;
+static M7RowKey g_m7ikey[kMaxLines];
+static bool g_m7i_stale = true;  /* a page mode 7 reads was copied since the keys were stored: no stored row is valid */
+static bool g_m7i_reuse_ok = SM_PSP_M7_REUSE;
+#if SM_PSP_LOG
+static uint32_t g_m7i_built, g_m7i_kept, g_m7i_audits, g_m7i_bad, g_m7i_auditn;
+#endif
 static uint16_t g_seen2[4096], g_seen4[2048];
 static uint8_t g_empty2[4096], g_empty4[2048];
 static uint16_t g_mask2[4096], g_mask4[2048];  /* bit i set: tile uses pixel value i */
@@ -819,6 +835,7 @@ static void SnapshotVram(const Ppu *p) {
     memcpy(g_vram, p->vram, sizeof(g_vram));
     memset(dirty, 0, kVramPages);
     ImgMarkAllDirty();
+    g_m7i_stale = true;
 #if SM_PSP_TILE_GEN
     VramGenBump(0, kVramPages);
 #endif
@@ -834,6 +851,8 @@ static void SnapshotVram(const Ppu *p) {
       e++;
     memcpy(&g_vram[pg * kVramPageWords], &p->vram[pg * kVramPageWords], (size_t)(e - pg) * kVramPageWords * 2);
     ImgMarkDirty(pg, e);
+    if (pg < kM7Pages)
+      g_m7i_stale = true;
 #if SM_PSP_TILE_GEN
     VramGenBump(pg, e);
 #endif
@@ -844,6 +863,7 @@ static void SnapshotVram(const Ppu *p) {
     g_vd_ok = false;
     memcpy(g_vram, p->vram, sizeof(g_vram));
     ImgMarkAllDirty();
+    g_m7i_stale = true;
 #if SM_PSP_TILE_GEN
     VramGenBump(0, kVramPages);
 #endif
@@ -2992,18 +3012,69 @@ static void M7RenderRow(const LineSnap *ls, int y, uint8_t *dst) {
   }
 }
 
-/* Gate 4r: renders every mode 7 row (BG1 on) into g_m7img and records the row ranges to draw. CPU only, before
- * the list is opened; the written rows are written back for the GE. */
+/* The part of a row's state that M7RenderRow reads (see Gate 5t above). Rows without mode 7 all have the zero key, which
+ * never equals the key of a mode 7 row (on = 1). */
+static void M7KeyOf(const LineSnap *s, M7RowKey *k) {
+  memset(k, 0, sizeof(*k));
+  k->on = s->m7on;
+  if (!s->m7on)
+    return;
+  k->fl = s->m7fl;
+  if (s->m7fl & 32) {  /* the mosaic size and start line are only read with the mosaic flag */
+    k->ms = s->mossize;
+    k->mt = s->mosstart;
+  }
+  memcpy(k->m, s->m7m, sizeof(k->m));
+}
+
+/* Gate 4r: renders the mode 7 rows (BG1 on) into g_m7img and records the row ranges to draw. CPU only, before
+ * the list is opened; the rows that were rendered are written back for the GE. Gate 5t: a row whose key is unchanged
+ * and whose plane (VRAM pages 0..kM7Pages-1) was not written keeps the pixels of the last frame; the GE only reads
+ * g_m7img, so nothing else needs doing for them. */
 static void M7PrepareImg(void) {
-  int nr = 0, rmin = -1, rmax = -1;
-  PROF(uint32_t t0 = Now();)
+  int nr = 0, bmin = -1, bmax = -1;
+  PROF(uint32_t t0 = Now(); uint32_t taud = 0;)
+  if (g_m7i_stale || !g_m7i_reuse_ok) {  /* no stored row is valid (rows that are not drawn now would be reused stale later) */
+    memset(g_m7ikey, 0, sizeof(g_m7ikey));
+    g_m7i_stale = false;
+  }
+#if SM_PSP_LOG
+  const bool audit = g_m7i_reuse_ok && (++g_m7i_auditn & 15) == 0;
+#endif
   for (int r = 0; r < g_line_count; r++) {
     if (!g_lines[r].m7on)
       continue;
-    M7RenderRow(&g_lines[r], r + 1, g_m7img + r * 256);
-    if (rmin < 0)
-      rmin = r;
-    rmax = r;
+    M7RowKey k;
+    M7KeyOf(&g_lines[r], &k);
+    bool render = memcmp(&g_m7ikey[r], &k, sizeof(k)) != 0;
+    if (render) {
+      M7RenderRow(&g_lines[r], r + 1, g_m7img + r * 256);
+      g_m7ikey[r] = k;
+      PROF(g_m7i_built++;)
+    } else {
+      PROF(g_m7i_kept++;)
+#if SM_PSP_LOG
+      if (audit) {  /* log builds: the kept row must equal a fresh render */
+        uint32_t ta = Now();
+        uint8_t fresh[256] __attribute__((aligned(16)));
+        M7RenderRow(&g_lines[r], r + 1, fresh);
+        g_m7i_audits++;
+        if (memcmp(fresh, g_m7img + r * 256, 256) != 0) {
+          memcpy(g_m7img + r * 256, fresh, 256);
+          render = true;
+          g_m7i_bad++;
+          g_m7i_reuse_ok = false;
+          PspLog("m7reuse: row %d differs from a fresh render, row reuse disabled", r);
+        }
+        taud += Now() - ta;
+      }
+#endif
+    }
+    if (render) {
+      if (bmin < 0)
+        bmin = r;
+      bmax = r;
+    }
     if (nr && g_m7rng[nr - 1][1] == r) {
       g_m7rng[nr - 1][1] = (uint16_t)(r + 1);
     } else {
@@ -3012,11 +3083,11 @@ static void M7PrepareImg(void) {
       nr++;
     }
   }
-  if (rmin >= 0)
-    sceKernelDcacheWritebackRange(g_m7img + rmin * 256, (unsigned)(rmax - rmin + 1) * 256);
+  if (bmin >= 0)  /* rows between bmin and bmax that were kept are clean: writing them back costs nothing visible */
+    sceKernelDcacheWritebackRange(g_m7img + bmin * 256, (unsigned)(bmax - bmin + 1) * 256);
   g_m7_nrng = nr;
   g_m7_img = nr > 0;
-  PROF(g_m7i_us = Now() - t0;)
+  PROF(g_m7i_us = Now() - t0 - taud;)
 }
 
 /* Mode 7 frame as textured quads. With b = c = 0 the screen maps to the plane by
@@ -6610,6 +6681,8 @@ static void Bench5r(void) {
   B7Scenario("-again", 0);  /* A/B/A: the first scenario once more */
   memset(g_vram, 0, sizeof(g_vram));  /* back to the state before the first frame (the first snapshot copies every page) */
   memset(g_m7img, 0, sizeof(g_m7img));
+  memset(g_m7ikey, 0, sizeof(g_m7ikey));  /* gate 5t: the image and the VRAM snapshot were overwritten */
+  g_m7i_stale = true;
   sceGuStart(GU_DIRECT, g_gu_list);  /* leave the draw buffer black */
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuClearColor(0xff000000);
@@ -6963,6 +7036,9 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  subimg: frames=%u ok=%d%d%d audited=%u,%u,%u", (unsigned)g_frames_simg, (int)g_simg_ok[0], (int)g_simg_ok[1],
            (int)g_simg_ok[2], (unsigned)g_simg_vn[0], (unsigned)g_simg_vn[1], (unsigned)g_simg_vn[2]);
     PspLog("  m7wrap: frames=%u ok=%d audited=%u", (unsigned)g_frames_m7w, (int)g_m7w_ok, (unsigned)g_m7w_vn);
+    PspLog("  m7reuse: on=%d rows built=%u kept=%u audited=%u bad=%u", (int)g_m7i_reuse_ok, (unsigned)g_m7i_built,
+           (unsigned)g_m7i_kept, (unsigned)g_m7i_audits, (unsigned)g_m7i_bad);
+    g_m7i_built = g_m7i_kept = g_m7i_audits = 0;
 #if SM_PSP_TILE_GEN
     PspLog("  tilegen: on=%d skipped=%u audited=%u bad=%u", (int)g_tgen_ok, (unsigned)g_tg_skip, (unsigned)g_tg_audit, (unsigned)g_tg_bad);
     g_tg_skip = g_tg_audit = 0;
