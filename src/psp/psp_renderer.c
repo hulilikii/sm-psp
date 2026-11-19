@@ -37,6 +37,10 @@
 #define SM_PSP_GE_STRIPS 0
 #endif
 
+#ifndef SM_PSP_GE_SMOOTH_TINT
+#define SM_PSP_GE_SMOOTH_TINT 1
+#endif
+
 #ifndef SM_PSP_MOS_GE
 #define SM_PSP_MOS_GE 1  /* Gate 5s: 1 = mosaic source image rendered by the GE, 0 = previous CPU-built image (MosBuild) */
 #endif
@@ -127,6 +131,8 @@ typedef struct LineSnap {
 
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
 typedef struct ColorVert { uint32_t color; int16_t x, y, z; } ColorVert;
+typedef struct ColorVertF { uint32_t color; float x, y, z; } ColorVertF;
+ CASSERT(sizeof(ColorVertF) == 16);
 typedef struct Run { uint16_t r0, r1, first; } Run;
 /* Gate 5h-c: BG and sprite quads (two vertices each) use a 10-byte vertex with 16-bit texture coordinates (texel units in
  * through mode, always integers here) and are written as five 32-bit words per quad instead of ten 16/32-bit stores
@@ -531,6 +537,18 @@ static uint32_t BakeColor(uint16_t c, int brightness, bool transparent) {
   uint32_t g = (uint32_t)(((g5 << 3) | (g5 >> 2)) * brightness / 15);
   uint32_t b = (uint32_t)(((b5 << 3) | (b5 >> 2)) * brightness / 15);
   return (transparent ? 0u : 0xff000000u) | b << 16 | g << 8 | r;
+}
+
+static inline uint32_t TintMidColor(uint32_t a, uint32_t b) {
+  uint32_t r = (((a >> 0) & 255) + ((b >> 0) & 255)) >> 1;
+  uint32_t g = (((a >> 8) & 255) + ((b >> 8) & 255)) >> 1;
+  uint32_t bl = (((a >> 16) & 255) + ((b >> 16) & 255)) >> 1;
+  return 0xff000000u | bl << 16 | g << 8 | r;
+}
+
+static inline void TintAddPair(ColorVertF *v, uint32_t color, float y) {
+  v[0] = (ColorVertF){color, (float)kLeft, y, 0.0f};
+  v[1] = (ColorVertF){color, (float)(kLeft + kGameWidth), y, 0.0f};
 }
 
  //software patch
@@ -3505,6 +3523,7 @@ static void CountReasons(int mask) {
 enum { kVtTile = GU_TEXTURE_32BITF | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
        kVtBg = (SM_PSP_VTX16 ? GU_TEXTURE_16BIT : GU_TEXTURE_32BITF) | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
        kVtColor = GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+       kVtColorF = GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D,
        kVtTexF = GU_TEXTURE_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_2D };
 
 static inline void GeDraw(int vtype, int n, const void *v) {
@@ -4621,7 +4640,11 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
   geom += (uint32_t)g_line_count * (kMaxStrips * 2 + 2) * sizeof(ColorVert);  /* backdrop + brightness rects */
   if (blend)  /* subscreen composite quads + subscreen window masks, per row */
     geom += (uint32_t)g_line_count * (4 * sizeof(TileVert) + 18 * sizeof(ColorVert));
+#if SM_PSP_GE_SMOOTH_TINT
+  geom += (uint32_t)g_ntint * 6 * sizeof(ColorVertF);
+#else
   geom += (uint32_t)g_ntint * 4 * sizeof(ColorVert);
+#endif
   uint32_t passes = 1 + (blend ? (g_nbband > 1 ? (uint32_t)g_nbband : 1u) : 0u) + (tint ? (uint32_t)g_ntr : 0u);
   uint32_t per_pass = 2 * kLayers * 8 + 2 + mos_draws + (uint32_t)g_nspr * (uint32_t)obj_np;  /* BG, M7 + backdrop, OBJ segments */
   uint32_t draws = passes * per_pass + 48 + (sobj ? (uint32_t)g_nspr : 0u) + (uint32_t)g_ntint + 16;
@@ -5606,10 +5629,75 @@ static bool DrawGe(void) {
 
   VTX_FLUSH();  /* every pool vertex is written: make it visible to the GE before any draw that reads it */
   PROF(g_pc_emit = Now() - g_t_list_start;)
-  /* Tint overlay: one rectangle per span of each run of rows with the same fixed colour and colour-window state
-   * (gate 4t-b: 0, 1 or 2 spans where the colour window lets the math apply; unlimited rows: the full width). */
+// Smooth tint is valid when no colour window clips the tint. Windowed rows retain the original rectangle path. The original fixed-colour values remain the control points; only the GE interpolation between them changes.
+  bool smooth_tint = false;
+#if SM_PSP_GE_SMOOTH_TINT
+  smooth_tint = tint;
+  for (int i = 0; i < g_ntint; i++) {
+    if (g_tint[i].cwm != 0) {
+      smooth_tint = false;
+      break;
+    }
+  }
+#endif
+
   ColorVert *tv = NULL;
-  if (tint) {
+  ColorVertF *gtv = NULL;
+
+  if (smooth_tint) {
+    int nv = 0;
+
+    /* Allocate six vertices for the first run of each half-colour group,
+     * then four for each following run. Adjacent runs share their boundary. */
+    for (int k = 0; k < g_ntr; k++) {
+      int end = g_trange[k].first + g_trange[k].n;
+      for (int i = g_trange[k].first; i < end;) {
+        int j = i + 1;
+        while (j < end && g_tint[j].half == g_tint[i].half)
+          j++;
+
+        for (int q = i; q < j; q++) {
+          g_tint[q].v0 = (uint16_t)nv;
+          g_tint[q].vn = (uint8_t)(q == i ? 6 : 4);
+          nv += g_tint[q].vn;
+        }
+        i = j;
+      }
+    }
+
+    gtv = nv ? sceGuGetMemory(nv * sizeof(ColorVertF)) : NULL;
+
+    for (int k = 0; k < g_ntr; k++) {
+      int end = g_trange[k].first + g_trange[k].n;
+      for (int i = g_trange[k].first; i < end;) {
+        int j = i + 1;
+        while (j < end && g_tint[j].half == g_tint[i].half)
+          j++;
+
+        for (int q = i; q < j; q++) {
+          TintRun *tr = &g_tint[q];
+          uint32_t col = BakeColor(tr->fix, 15, false);
+          uint32_t next = q + 1 < j ? BakeColor(g_tint[q + 1].fix, 15, false) : col;
+          ColorVertF *v = gtv + tr->v0;
+          int r0 = tr->r0;
+          int r1 = tr->r1;
+          float ym = (float)kTop + ((float)r0 + (float)r1) * 0.5f;
+
+          int n = 0;
+          if (q == i) {
+            TintAddPair(v + n, col, (float)(kTop + r0));
+            n += 2;
+          }
+
+          TintAddPair(v + n, col, ym);
+          n += 2;
+
+          TintAddPair(v + n, TintMidColor(col, next), (float)(kTop + r1));
+        }
+        i = j;
+      }
+    }
+  } else if (tint) {
     int nv = 0;
     for (int i = 0; i < g_ntint; i++) {
       int wa[2], we[2];
@@ -5618,7 +5706,9 @@ static bool DrawGe(void) {
       g_tint[i].vn = (uint8_t)(ns * 2);
       nv += ns * 2;
     }
+
     tv = nv ? sceGuGetMemory(nv * sizeof(ColorVert)) : NULL;
+
     for (int i = 0; i < g_ntint; i++) {
       uint32_t col = BakeColor(g_tint[i].fix, 15, false);
       int wa[2], we[2];
@@ -5783,7 +5873,13 @@ static bool DrawGe(void) {
         if (nvert > 0) {
           unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
           sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
-          GeDraw(kVtColor, nvert, tv + g_tint[i].v0);
+          if (smooth_tint) {
+            sceGuShadeModel(GU_SMOOTH);
+            sceGuDrawArray(GU_TRIANGLE_STRIP, kVtColorF, nvert, NULL, gtv + g_tint[i].v0);
+            sceGuShadeModel(GU_FLAT);
+          } else {
+            GeDraw(kVtColor, nvert, tv + g_tint[i].v0);
+          }
         }
         i = j;
       }

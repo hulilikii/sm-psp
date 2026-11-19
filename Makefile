@@ -20,6 +20,9 @@ PSP_SW_PATH ?= 1
 PSP_GE_WIN ?= 1
 # PSP_VTX_POOL=1: big vertex buffers are built in a cached pool and written back once. 0: inside the display list.
 # Gate 5f hardware A/B: the pool was ~20% slower per vertex (0.45 vs 0.37 us), so it is off by default.
+# PSP_GE_SMOOTH_TINT=1 interpolates GE fixed-colour tint changes vertically using Gouraud-shaded strips.
+# 0 retains the original constant-colour tint rectangles.
+PSP_GE_SMOOTH_TINT ?= 1
 PSP_VTX_POOL ?= 0
 # PSP_TRIPLE=1: three frame buffers. Below 60 fps the vblank wait is skipped, so the next frame must not draw into the buffer still on screen. 0: libgu double buffering.
 PSP_TRIPLE ?= 1
@@ -82,6 +85,7 @@ CFLAGS := -O2 -G0 -fno-strict-aliasing -Ibuild/generated -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 CFLAGS += -DSM_PSP_LOG=$(PSP_LOG) -DSM_PSP_LOG_FLUSH_FRAMES=$(PSP_LOG_FLUSH_FRAMES)
 CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS) -DSM_PSP_SW_PATH=$(PSP_SW_PATH) -DSM_PSP_GE_WIN=$(PSP_GE_WIN)
+CFLAGS += -DSM_PSP_GE_SMOOTH_TINT=$(PSP_GE_SMOOTH_TINT)
 CFLAGS += -DSM_PSP_VTX_POOL=$(PSP_VTX_POOL)
 CFLAGS += -DSM_PSP_TRIPLE=$(PSP_TRIPLE)
 CFLAGS += -DSM_PSP_PROBES=$(PSP_PROBES) -DSM_PSP_VRAM_DIRTY=$(PSP_VRAM_DIRTY)
@@ -137,7 +141,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
