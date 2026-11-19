@@ -30,7 +30,18 @@
 #define g_off_93A1A1 ((unaligned_uint16*)RomFixedPtr(0x93a1a1))
 #define kExpandingSquareVels ((ExpandingSquareVels*)RomFixedPtr(0x81aa34))
 
+static uint8_t g_psp_menu_mosaic_size = 1;
 
+static void PspMenuMosaicReset(void) {
+  g_psp_menu_mosaic_size = 1;
+  PspRenderer_SetMosaicTransition(1);
+}
+
+static void PspMenuMosaicStepOut(void) {
+  if (g_psp_menu_mosaic_size < 16)
+    ++g_psp_menu_mosaic_size;
+  PspRenderer_SetMosaicTransition(g_psp_menu_mosaic_size);
+}
 
 static const uint16 kFileSelectMap_AreaIndexes[6] = { 0, 3, 5, 1, 4, 2 };
 
@@ -506,6 +517,7 @@ void GameOverMenu_5_FadeOutToGameMap(void) {  // 0x8190E7
   HandleGameOverBabyMetroid();
   DrawMenuSelectionMissile();
   HandleFadeOut();
+  PspMenuMosaicStepOut();
   if ((reg_INIDISP & 0xF) == 0)
     ++menu_index;
 }
@@ -514,11 +526,15 @@ void GameOverMenu_7_FadeOutToSoftReset(void) {  // 0x8190FE
   DrawMenuSelectionMissile();
   HandleGameOverBabyMetroid();
   HandleFadeOut();
-  if ((reg_INIDISP & 0xF) == 0)
+  PspMenuMosaicStepOut();
+  if ((reg_INIDISP & 0xF) == 0) {
+    PspMenuMosaicReset();
     SoftReset();
+  }
 }
 
 void GameOverMenu_6_LoadGameMapView(void) {  // 0x819116
+  PspMenuMosaicReset();
   DisableHdmaObjects();
   WaitUntilEndOfVblankAndClearHdma();
   game_state = kGameState_5_FileSelectMap;
@@ -526,6 +542,7 @@ void GameOverMenu_6_LoadGameMapView(void) {  // 0x819116
 }
 
 void GameOverMenu_4_Main(void) {  // 0x81912B
+  PspMenuMosaicReset();
   HandleGameOverBabyMetroid();
   DrawMenuSelectionMissile();
   if ((joypad1_newkeys & kButton_Select) != 0
@@ -684,7 +701,7 @@ void FileSelectMenu_32_FadeOutToOptions(void) {  // 0x8194A3
   DrawBorderAroundSamusData();
   DrawFileSelectSamusHelmets();
   HandleFadeOut();
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
+  PspMenuMosaicStepOut();
   if ((reg_INIDISP & 0xF) == 0) {
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
@@ -700,8 +717,11 @@ void FileSelectMenu_33_FadeOutToTitle(void) {  // 0x8194D5
   DrawBorderAroundSamusData();
   DrawFileSelectSamusHelmets();
   HandleFadeOut();
-  if ((reg_INIDISP & 0xF) == 0)
+  PspMenuMosaicStepOut();
+  if ((reg_INIDISP & 0xF) == 0) {
+    PspMenuMosaicReset();
     SoftReset();
+  }
 }
 
 void FileSelectMenu_5_FadeOutFromMain(void) {  // 0x8194EE
@@ -1377,6 +1397,7 @@ void FileSelectMap(void) {
 void FileSelectMap_22(void) {  // 0x819E7B
   DrawAreaSelectMapLabels();
   HandleFadeOut();
+  PspMenuMosaicStepOut();
   if ((reg_INIDISP & 0xF) == 0) {
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
@@ -1555,7 +1576,7 @@ void FileSelectMenu_4_Main(void) {  // 0x81A1C2
   int v3;
 
   reg_MOSAIC &= 0x0F;  /* PSP: the transition mosaic is a final-frame pass, not an emulated-PPU effect */
-  PspRenderer_SetMosaicTransition(1);
+  PspMenuMosaicReset();
 
   DrawBorderAroundSamusData();
   DrawMenuSelectionMissile();
@@ -1920,6 +1941,7 @@ void FileSelectMap_5_ExpandingSquare(void) {  // 0x81A725
 void FileSelectMap_6_AreaSelectMap(void) {  // 0x81A800
   int16 v0;
 
+  PspMenuMosaicReset();
   v0 = joypad1_newkeys;
   if ((joypad1_newkeys & (kButton_Up | kButton_Left)) != 0) {
     v0 = enable_debug;

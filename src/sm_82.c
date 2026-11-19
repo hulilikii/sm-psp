@@ -4589,6 +4589,15 @@ void OptionsMenuFunc5(uint16 a, uint16 k, uint16 j) {  // 0x82ED28
     j -= 2;
   } while (j);
 }
+
+static uint8 g_psp_options_mosaic_size = 1;  /* options dissolve ($82:EF18 / $82:EFDB): size as the old reg_MOSAIC +-16 stepped it */
+
+static void GameOptionsMenu_MosaicStepOut(void) {
+  if (g_psp_options_mosaic_size < 16)
+    ++g_psp_options_mosaic_size;
+  PspRenderer_SetMosaicTransition(g_psp_options_mosaic_size);
+}
+
 static Func_V *const kGameOptionsMenuItemFuncs[5] = {  // 0x82ED42
   GameOptionsMenuItemFunc_0,
   GameOptionsMenuItemFunc_2_ToggleJapanese,
@@ -4607,6 +4616,8 @@ void GameOptionsMenu_3_OptionsScreen(void) {
       menu_option_index = 0;
   }
   if ((joypad1_newkeys & 0x8000) != 0) {
+    g_psp_options_mosaic_size = 1;
+    PspRenderer_SetMosaicTransition(1);
     game_options_screen_index = 11;
   } else if ((joypad1_newkeys & kButton_A) != 0 || (joypad1_newkeys & kButton_Start) != 0) {
     QueueSfx1_Max6(0x38);
@@ -4615,6 +4626,8 @@ void GameOptionsMenu_3_OptionsScreen(void) {
 }
 
 void GameOptionsMenuItemFunc_0(void) {  // 0x82EDB1
+  g_psp_options_mosaic_size = 1;
+  PspRenderer_SetMosaicTransition(1);
   if (enable_debug && (joypad1_lastkeys & kButton_L) == 0 || loading_game_state == kGameState_5_FileSelectMap) {
     game_options_screen_index = 4;
   } else {
@@ -4644,8 +4657,6 @@ void OptionsMenuFunc4(void) {  // 0x82EDED
   }
 }
 
-static uint8 g_psp_options_mosaic_size = 1;  /* options dissolve ($82:EF18 / $82:EFDB): size as the old reg_MOSAIC +-16 stepped it */
-
 void GameOptionsMenuItemFunc_4(void) {  // 0x82EE55
   reg_MOSAIC = 3;
   g_psp_options_mosaic_size = 1;
@@ -4657,8 +4668,11 @@ void GameOptionsMenuItemFunc_4(void) {  // 0x82EE55
 
 void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
   HandleFadeOut();
+  GameOptionsMenu_MosaicStepOut();
   if (reg_INIDISP == 0x80) {
     PspRenderer_ClearButtonIcons();
+    g_psp_options_mosaic_size = 1;
+    PspRenderer_SetMosaicTransition(1);
     EnableNMI();
     screen_fade_delay = 0;
     screen_fade_counter = 0;
@@ -4670,7 +4684,7 @@ void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
 
 void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
   HandleFadeOut();
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
+  GameOptionsMenu_MosaicStepOut();
   if (reg_INIDISP == 0x80) {
     PspRenderer_ClearButtonIcons();
     EnableNMI();
@@ -4682,6 +4696,7 @@ void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
 
 void GameOptionsMenu_4_StartGame(void) {  // 0x82EEB4
   PspRenderer_ClearButtonIcons();
+  g_psp_options_mosaic_size = 1;
   PspRenderer_SetMosaicTransition(1);
   game_options_screen_index = 0;
   if (enable_debug && (joypad1_lastkeys & 0x20) == 0) {
