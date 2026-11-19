@@ -455,7 +455,7 @@ static void LogLogicHitch(uint32_t us) {
   if (!g_ppu_skip_draw ||
       (us < 15000 && g_dec_us < 500 && g_dma_us < 1000 &&
        !g_vram_fill_bytes && !g_dec_fast_calls && !g_dec_slow) ||
-      logged >= 192)
+      logged >= 2000)
     return;
   logged++;
   PspLog("LOGIC f=%u us=%u dma_us=%u dma_b=%u dma_n=%u dma_v=%u dma_h=%u dma_w=%u cpurd=%u ppuw=%u gs=%04x room=%04x door=%04x area=%02x apu617=%04x mus=%04x/%04x vram_fill_bytes=%u dec_fast_calls=%u dec_fast_bytes=%u dec_us=%u dec_slow=%u",
