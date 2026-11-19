@@ -3973,11 +3973,24 @@ void CinematicFunction_Intro_Func84(void) {  // 0x8BC610
   if (!cinematic_var4 || v0) {
     screen_fade_delay = 1;
     screen_fade_counter = 1;
+    g_ceres_zebes_mosaic = 1;  /* start of the Ceres -> Zebes mosaic ramp (unused for the Samus-death path) */
     cinematic_function = FUNC16(CinematicFunction_Intro_Func85);
   }
 }
 
 void CinematicFunction_Intro_Func85(void) {  // 0x8BC627
+  if (game_state != kGameState_37_CeresGoesBoomWithSamus) {
+// Ceres -> Zebes: mosaic the Ceres scene up to size 16 instead of fading to black (INIDISP stays 15). Same 4-frame cadence as Func88, mirrored: 2, 4, ... 16. At 16 Func86 loads Zebes under the mosaic.
+    if ((cinematic_var12 & 3) == 0) {
+      g_ceres_zebes_mosaic = g_ceres_zebes_mosaic < 2 ? 2 : g_ceres_zebes_mosaic + 2;
+      if (g_ceres_zebes_mosaic > 16)
+        g_ceres_zebes_mosaic = 16;
+      PspRenderer_SetMosaicTransition(g_ceres_zebes_mosaic);
+      if (g_ceres_zebes_mosaic == 16)
+        cinematic_function = FUNC16(CinematicFunction_Intro_Func86);
+    }
+    return;
+  }
   HandleFadeOut();
   if (reg_INIDISP == 0x80) {
     EnableNMI();
