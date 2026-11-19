@@ -509,6 +509,7 @@ void GameOverMenu_3_FadeIn(void) {  // 0x8190CD
   HandleGameOverBabyMetroid();
   DrawMenuSelectionMissile();
   HandleFadeIn();
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
   if ((reg_INIDISP & 0xF) == 15)
     ++menu_index;
 }
@@ -667,8 +668,11 @@ void FileSelectMenu(void) {
 
 void FileSelectMenu_0_FadeOutConfigGfx(void) {  // 0x81944E
   HandleFadeOut();
-  if ((reg_INIDISP & 0xF) != 0)
+  if ((reg_INIDISP & 0xF) != 0) {
+    PspMenuMosaicStepOut();
     return;
+  }
+  PspMenuMosaicReset();
   ScreenOff();
   QueueSfx3_Max6(1);
   DisableHdmaObjects();
@@ -703,6 +707,7 @@ void FileSelectMenu_32_FadeOutToOptions(void) {  // 0x8194A3
   HandleFadeOut();
   PspMenuMosaicStepOut();
   if ((reg_INIDISP & 0xF) == 0) {
+    PspMenuMosaicReset();
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
     int v0 = 0;
@@ -1365,13 +1370,14 @@ void DrawFileSelectSlotSamusHelmet(uint16 k) {  // 0x819DE4
   static const uint16 kDrawFileSlotHelmet_Spritemaps[9] = { 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x33 };
   DrawMenuSpritemap(kDrawFileSlotHelmet_Spritemaps[v6 >> 1], eproj_id[v5 + 5], eproj_id[v5 + 10], 3584);
 }
+static void FileSelectMap_5_AreaMapFadeIn(void);
 static Func_V *const kFileSelectMapFuncs[23] = {  // 0x819E3E
   FileSelectMap_0,
   FileSelectMap_1,
   FileSelectMap_2_LoadAreaSelectForegroundTilemap,
   FileSelectMap_3_LoadAreaSelectBackgroundTilemap,
   FileSelectMap_4_SetupExpandingSquareTransition,
-  FileSelectMap_5_ExpandingSquare,
+  FileSelectMap_5_AreaMapFadeIn,
   FileSelectMap_6_AreaSelectMap,
   FileSelectMap_7_PrepExpandSquareTransToRoomMap,
   FileSelectMap_8_ExpandSquareTransToRoomSelectMap,
@@ -1399,6 +1405,7 @@ void FileSelectMap_22(void) {  // 0x819E7B
   HandleFadeOut();
   PspMenuMosaicStepOut();
   if ((reg_INIDISP & 0xF) == 0) {
+    PspMenuMosaicReset();
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
   }
@@ -1510,6 +1517,7 @@ void FileSelectMenu_3_FadeInToMain(void) {  // 0x81A058
   DrawMenuSelectionMissile();
   DrawBorderAroundSamusData();
   HandleFadeIn();
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
   if ((reg_INIDISP & 0xF) == 15)
     ++menu_index;
 }
@@ -1767,6 +1775,11 @@ void FileSelectMap_2_LoadAreaSelectForegroundTilemap(void) {  // 0x81A546
   v1->vram_dst = (reg_BG1SC & 0xFC) << 8;
   vram_write_queue_tail = v0 + 7;
   *(unaligned_uint16 *)&reg_INIDISP = (reg_OBSEL << 8) | 0xF;
+  if (menu_index == 2) {  /* first entry only (17 is the room-map return): the map fades in from black, state 5 */
+    reg_INIDISP = 0x80;
+    screen_fade_delay = 0;
+    screen_fade_counter = 0;
+  }
   ++menu_index;
 }
 
@@ -1808,6 +1821,11 @@ void FileSelectMap_4_SetupExpandingSquareTransition(void) {  // 0x81A5B3
   ConfigureWindow1ForExpandingSquare();
   hdma_objects_enable_flag = 0;
   LOBYTE(menu_index) = menu_index + 1;
+  if (menu_index == 5) {  /* first entry; 19 -> 20 (room map back to area map) keeps its box */
+    hdma_window_1_left_pos[0].field_0 = 3;  /* last value the box reaches: state 5's final frame runs now ... */
+    FileSelectMap_5_ExpandingSquare();      /* ... (BG2 off, windows off, room-map tilemap upload), menu_index -> 6 */
+    menu_index = 5;                         /* state 5 is the mosaic fade-in */
+  }
 }
 
 void ConfigureWindow1ForExpandingSquare(void) {  // 0x81A5F6
@@ -1935,6 +1953,18 @@ void FileSelectMap_5_ExpandingSquare(void) {  // 0x81A725
     hdma_window_1_right_pos[2].field_0 = hdma_window_1_left_pos[1].field_0;
     LOBYTE(expand_sq_left_pos) = expand_sq_left_pos - kExpandingSquareTransitionSpeed;
     LOBYTE(expand_sq_right_pos) = kExpandingSquareTransitionSpeed + expand_sq_right_pos;
+  }
+}
+
+// PSP: the area-select map is not revealed by the expanding box (see FileSelectMap_4): it fades in under the mosaic, as the options screen does. The reveal itself was already done by state 4.
+static void FileSelectMap_5_AreaMapFadeIn(void) {
+  DrawAreaSelectMapLabels();
+  HandleFadeIn();
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
+  if ((reg_INIDISP & 0xF) == 15) {
+    screen_fade_delay = 0;
+    screen_fade_counter = 0;
+    ++menu_index;
   }
 }
 
