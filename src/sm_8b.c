@@ -3,7 +3,10 @@
 #include "ida_types.h"
 #include "funcs.h"
 #include "variables.h"
+#include "src/psp/psp_renderer.h"
 
+//Ceres -> Zebes handoff: current PSP post-composition mosaic size (16 .. 1).
+static uint8 g_ceres_zebes_mosaic;
 
 #define kPalettes_Intro ((unaligned_uint16*)RomFixedPtr(0x8ce3e9))
 #define kPalettes_Intro2 ((unaligned_uint16*)RomFixedPtr(0x8ce5e9))
@@ -4051,46 +4054,43 @@ void CinematicFunction_Intro_Func86(void) {  // 0x8BC699
   WaitUntilEndOfVblankAndClearHdma();
   ClearPaletteFXObjects();
   EnablePaletteFx();
-  reg_MOSAIC = -127;
+  reg_MOSAIC = 0;  /* the SNES BG1 mosaic is replaced by the PSP mosaic */
   SpawnPalfxObject(addr_kPalfx_E1A8);
   cinematic_function = FUNC16(CinematicFunction_Intro_Func87);
   EnableNMI();
-  screen_fade_delay = 1;
-  screen_fade_counter = 1;
+  screen_fade_delay = 0;
+  screen_fade_counter = 0;
+  reg_INIDISP = 15;  /* full brightness at once: no fade-in */
+  g_ceres_zebes_mosaic = 16;
+  PspRenderer_SetMosaicTransition(16);
 }
 
 void CinematicFunction_Intro_Func87(void) {  // 0x8BC79C
-  if ((cinematic_var12 & 3) == 0)
-    reg_MOSAIC -= 16;
-  HandleFadeIn();
-  if (reg_INIDISP == 15) {
-    screen_fade_delay = 0;
-    screen_fade_counter = 0;
-    cinematic_function = FUNC16(CinematicFunction_Intro_Func88);
-  }
+// Switch to Zebes Mode 7 scene while the PSP mosaic is still at its maximum (set in Func86).
+  reg_BGMODE = 7;
+  reg_M7SEL = 0x80;
+  reg_BG1SC = 0;
+  reg_BG12NBA = 0;
+  reg_TM = 17;
+  cinematic_var8 = 128;
+  cinematic_var10 = -104;
+  cinematic_var5 = 32;
+  cinematic_var6 = 256;
+  SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEA3, 0);
+  SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEF7, 0);
+  SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEFD, 0);
+  SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF03, 0);
+  SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF09, 0);
+  SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEAF, 0);
+  cinematic_function = FUNC16(CinematicFunction_Intro_Func88);
 }
 
 void CinematicFunction_Intro_Func88(void) {  // 0x8BC7CA
-  if ((cinematic_var12 & 3) == 0) {
-    reg_MOSAIC -= 16;
-    if ((reg_MOSAIC & 0xF0) == 0) {
-      reg_BGMODE = 7;
-      reg_M7SEL = 0x80;
-      reg_BG1SC = 0;
-      reg_BG12NBA = 0;
-      reg_TM = 17;
-      cinematic_var8 = 128;
-      cinematic_var10 = -104;
-      cinematic_var5 = 32;
-      cinematic_var6 = 256;
-      SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEA3, 0);
-      SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEF7, 0);
-      SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEFD, 0);
-      SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF03, 0);
-      SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCF09, 0);
-      SpawnCinematicSpriteObject(addr_kCinematicSpriteObjectDef_8BCEAF, 0);
+  if ((cinematic_var12 & 3) == 0) {  /* same 4-frame cadence as the SNES mosaic */
+    g_ceres_zebes_mosaic = g_ceres_zebes_mosaic > 2 ? g_ceres_zebes_mosaic - 2 : 1;
+    PspRenderer_SetMosaicTransition(g_ceres_zebes_mosaic);
+    if (g_ceres_zebes_mosaic == 1)
       cinematic_function = FUNC16(nullsub_120);
-    }
   }
 }
 
@@ -4206,6 +4206,7 @@ uint16 CinematicSprInstr_C9BD(uint16 k, uint16 j) {  // 0x8BC9BD
 }
 
 uint16 CinematicSprInstr_C9C7(uint16 k, uint16 j) {  // 0x8BC9C7
+  PspRenderer_SetMosaicTransition(1);  /* safeguard: Func105 overwrites cinematic_function, so never leave the mosaic on */
   cinematic_var8 = 62;
   cinematic_var10 = -112;
   cinematic_var5 = 32;
