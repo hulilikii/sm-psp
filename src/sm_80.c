@@ -9,7 +9,7 @@
 #include "psp/psp_audio_msu.h"
 #if SM_PSP_LOG
 #include <pspthreadman.h>
-extern uint32_t g_vram_bulk, g_dec_us, g_dec_slow;  /* snes.c, log builds: Gate 5t direct VRAM bytes, decompressor time, slow-path calls */
+extern uint32_t g_dec_fast_calls, g_dec_fast_bytes, g_dec_us, g_dec_slow;
 #endif
 
 
@@ -2752,7 +2752,8 @@ void DecompressToVRAM(uint32 src, uint16 dst_addr) {
   uint32 n = 0;
   if (DecompressToVRAM_Fast(src, dst_addr, &n)) {
 #if SM_PSP_LOG
-    g_vram_bulk += n;
+    g_dec_fast_calls++;
+    g_dec_fast_bytes += n;
 #endif
   } else {
     DecompressToVRAM_Slow(src, dst_addr);

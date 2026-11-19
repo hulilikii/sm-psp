@@ -16,7 +16,7 @@
 #include "psp/psp_log.h"
 #if SM_PSP_LOG
 #include <pspthreadman.h>
-extern uint32_t g_vram_bulk;  /* snes.c: Gate 5t bytes written to VRAM directly */
+extern uint32_t g_vram_fill_bytes;  /* snes.c: direct RtlVramFill output bytes */
 /* log builds: time of Memory Stick writes and SPC uploads on the game thread (logged when >= 1 ms) */
 #define IO_T0() uint32_t io_t0 = sceKernelGetSystemTimeLow()
 #define IO_LOG(what) do { uint32_t io_us = sceKernelGetSystemTimeLow() - io_t0; \
@@ -619,7 +619,7 @@ void RtlVramFill(uint16 reg, int count, uint8 val) {
   uint16 ptr = p->vramPointer, inc = p->vramIncrement;
 #if SM_PSP_LOG
   if (count > 0)
-    g_vram_bulk += (uint32_t)count;
+    g_vram_fill_bytes += (uint32_t)count;
 #endif
   for (; count > 0; count--, ptr += inc) {
     uint16 a = ptr & 0x7fff, old = vram[a];

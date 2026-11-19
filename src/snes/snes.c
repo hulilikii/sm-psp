@@ -19,7 +19,9 @@
 #include <pspkernel.h>
 uint32_t g_dma_us, g_dma_bytes, g_dma_n, g_dma_vram, g_dma_wram;  /* log builds: $420B DMA cost of the current frame, read by main.c */
 uint32_t g_dma_h, g_cpu_rd, g_ppu_wr;  /* log builds: bytes to $2119, interpreter reads, CPU-driven PPU register writes this frame */
-uint32_t g_vram_bulk, g_dec_us, g_dec_slow;  /* log builds, Gate 5t: bytes written straight to ppu->vram (not in ppuw), DecompressToVRAM time, calls that took the register path */
+uint32_t g_vram_fill_bytes;  /* bytes written by RtlVramFill's direct path */
+uint32_t g_dec_fast_calls, g_dec_fast_bytes, g_dec_us, g_dec_slow;
+/* DecompressToVRAM: successful fast calls, fast output bytes, total time, slow-path calls. */
 #endif
 
 extern bool g_is_turbo;
