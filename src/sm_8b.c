@@ -8,6 +8,42 @@
 //Ceres -> Zebes handoff: current PSP post-composition mosaic size (16 .. 1).
 static uint8 g_ceres_zebes_mosaic;
 
+// PSP title-screen fades. The original fade routines still run (same step timing, same completion) but on this shadow of INIDISP; the real register stays at full brightness while a fade runs, so the visible transition is only the GE mosaic (size = 16 - shadow brightness) and the renderer does no brightness work.
+static uint8 g_title_inidisp;
+
+static uint8 TitleFade(uint8 (*step)(void)) {
+  reg_INIDISP = g_title_inidisp;
+  uint8 done = step() & 1;
+  g_title_inidisp = reg_INIDISP;
+  if (done) {  /* reg_INIDISP keeps the original end state: 0x80 after a fade-out, 15 after a fade-in */
+    PspRenderer_SetMosaicTransition(1);
+  } else {
+    PspRenderer_SetMosaicTransition(16 - (g_title_inidisp & 0xF));
+    reg_INIDISP = 15;
+  }
+  return done;
+}
+
+// The title is switched on instantly at boot (sub_8B9CCF); this ramps the mosaic 16 -> 1, one step per 2 frames. Visual only: no game state depends on it.
+static uint8 g_title_in_size, g_title_in_div;
+
+static void TitleMosaicInTick(void) {
+  if (!g_title_in_size)
+    return;
+  if (cinematic_var18) {  /* the skip fade-out took over the mosaic */
+    g_title_in_size = 0;
+    return;
+  }
+  if (++g_title_in_div & 1)
+    return;
+  if (--g_title_in_size <= 1) {
+    g_title_in_size = 0;
+    PspRenderer_SetMosaicTransition(1);
+  } else {
+    PspRenderer_SetMosaicTransition(g_title_in_size);
+  }
+}
+
 #define kPalettes_Intro ((unaligned_uint16*)RomFixedPtr(0x8ce3e9))
 #define kPalettes_Intro2 ((unaligned_uint16*)RomFixedPtr(0x8ce5e9))
 #define kPalettes_Intro4 ((unaligned_uint16*)RomFixedPtr(0x8ce7e9))
@@ -1595,6 +1631,7 @@ CoroutineRet GameState_1_OpeningCinematic_(void) {  // 0x8B9A22
   DrawCinematicSpriteObjects_Intro();
   MaybeSkipCinematics();
   HandleCinematicsTransitions();
+  TitleMosaicInTick();
   HandleMode7TransformationNoRotation();
   return kCoroutineNone;
 }
@@ -1610,11 +1647,12 @@ void MaybeSkipCinematics(void) {  // 0x8B9A48
     cinematic_var18 = 1;
     screen_fade_delay = 0;
     screen_fade_counter = 2;
+    g_title_inidisp = reg_INIDISP;
   }
 }
 
 void HandleCinematicsTransitions_1(void) {  // 0x8B9A83
-  if (AdvanceFastScreenFadeOut() & 1) {
+  if (TitleFade(AdvanceFastScreenFadeOut) & 1) {
     cinematic_var18 = 2;
     cinematic_function = FUNC16(nullsub_117);
     QueueMusic_Delayed8(6);
@@ -1637,6 +1675,7 @@ void HandleCinematicsTransitions_2(void) {  // 0x8B9A9C
   g_word_7E199F = 0;
   g_word_7E199D = 0;
   cinematic_var18 = 3;
+  g_title_inidisp = 0x80;  /* forced blank until the first fade-in step */
   uint16 v2 = 256;
   do {
     palette_buffer[v2 >> 1] = g_word_8CE1E9[v2 >> 1];
@@ -1674,7 +1713,7 @@ void CinematicSpriteInit_9(uint16 j) {  // 0x8B9B40
 }
 
 void HandleCinematicsTransitions_3(void) {  // 0x8B9B53
-  if (AdvanceFastScreenFadeIn() & 1) {
+  if (TitleFade(AdvanceFastScreenFadeIn) & 1) {
     cinematic_var18 = 0;
     demo_timer = 900;
     cinematic_function = FUNC16(CinematicFunc_Func1);
@@ -1769,6 +1808,9 @@ void CinematicSpriteInit_0(uint16 j) {  // 0x8B9CBC
 
 void sub_8B9CCF(uint16 k) {  // 0x8B9CCF
   reg_INIDISP = 15;
+  g_title_in_size = 16;
+  g_title_in_div = 0;
+  PspRenderer_SetMosaicTransition(16);
   cinematicspr_preinstr_func[k >> 1] = FUNC16(CinematicFunction_nullsub_116);
 }
 
@@ -1951,6 +1993,7 @@ void CinematicFunc_Func1(void) {  // 0x8B9F29
 LABEL_6:
     screen_fade_delay = 2;
     screen_fade_counter = 2;
+    g_title_inidisp = reg_INIDISP;
     goto LABEL_7;
   }
   if ((joypad1_newkeys & (uint16)(kButton_B | kButton_Start | kButton_A)) != 0) {
@@ -1963,7 +2006,7 @@ LABEL_7:;
 void CinematicFunc_Func10(void) {  // 0x8B9F52
   uint16 j;
 
-  if (AdvanceSlowScreenFadeOut() & 1) {
+  if (TitleFade(AdvanceSlowScreenFadeOut) & 1) {
     EnableNMI();
     reg_BGMODE = 1;
     screen_fade_delay = 0;
@@ -1988,7 +2031,7 @@ void CinematicFunc_Func10(void) {  // 0x8B9F52
 void CinematicFunc_Func9(void) {  // 0x8B9FAE
   uint16 j;
 
-  if (AdvanceSlowScreenFadeOut() & 1) {
+  if (TitleFade(AdvanceSlowScreenFadeOut) & 1) {
     EnableNMI();
     reg_BGMODE = 1;
     screen_fade_delay = 0;
