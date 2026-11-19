@@ -4563,6 +4563,7 @@ void GameOptionsMenu_1_LoadingOptionsScreen(void) {  // 0x82EC11
 
 void GameOptionsMenu_2_FadeInOptionsScreen(void) {  // 0x82ECE4
   HandleFadeIn();
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
   if (reg_INIDISP == 15) {
     screen_fade_delay = 0;
     screen_fade_counter = 0;
@@ -4669,6 +4670,7 @@ void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
 
 void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
   HandleFadeOut();
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
   if (reg_INIDISP == 0x80) {
     PspRenderer_ClearButtonIcons();
     EnableNMI();
@@ -4680,6 +4682,7 @@ void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
 
 void GameOptionsMenu_4_StartGame(void) {  // 0x82EEB4
   PspRenderer_ClearButtonIcons();
+  PspRenderer_SetMosaicTransition(1);
   game_options_screen_index = 0;
   if (enable_debug && (joypad1_lastkeys & 0x20) == 0) {
     game_state = kGameState_5_FileSelectMap;

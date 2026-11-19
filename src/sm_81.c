@@ -684,6 +684,7 @@ void FileSelectMenu_32_FadeOutToOptions(void) {  // 0x8194A3
   DrawBorderAroundSamusData();
   DrawFileSelectSamusHelmets();
   HandleFadeOut();
+  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
   if ((reg_INIDISP & 0xF) == 0) {
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
