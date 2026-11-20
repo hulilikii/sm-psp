@@ -61,6 +61,8 @@ PSP_SWIZZLE ?= 0
 PSP_M7_PROBE ?= 0
 # PSP_M7_ROW4=1 (Gate 5v): the mode 7 image row loop renders four pixels per step (exact; tools/test_m7_row4.sh). 0: one pixel per step.
 PSP_M7_ROW4 ?= 1
+# PSP_M7_BLK=1 (Gate 5w, experimental): mode 7 frames with one matrix, no flips/fill/mosaic whose block windows fit are drawn from a swizzled 1 MB plane with one bind per 64x16 block instead of the CPU image (hardware bench: 2-3 ms GE vs 9-11 ms CPU at 222 MHz). Log builds check the first 24 frames against the software PPU. 0 (default): CPU image only, none of the code is built.
+PSP_M7_BLK ?= 0
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
@@ -103,7 +105,7 @@ CFLAGS += -DSM_PSP_VTX16=$(PSP_VTX16)
 CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
 CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7)
-CFLAGS += -DSM_PSP_M7_REUSE=$(PSP_M7_REUSE) -DSM_PSP_SWIZZLE=$(PSP_SWIZZLE) -DSM_PSP_M7_PROBE=$(PSP_M7_PROBE) -DSM_PSP_M7_ROW4=$(PSP_M7_ROW4)
+CFLAGS += -DSM_PSP_M7_REUSE=$(PSP_M7_REUSE) -DSM_PSP_SWIZZLE=$(PSP_SWIZZLE) -DSM_PSP_M7_PROBE=$(PSP_M7_PROBE) -DSM_PSP_M7_ROW4=$(PSP_M7_ROW4) -DSM_PSP_M7_BLK=$(PSP_M7_BLK)
 CFLAGS += -DSM_PSP_MOS_GE=$(PSP_MOS_GE)
 CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
@@ -151,7 +153,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
