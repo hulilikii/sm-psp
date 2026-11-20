@@ -6898,9 +6898,10 @@ static bool B7PrepareBlocks(const int16_t *m, int bw, int bh, float uvh, bool ta
   *maxext = 0;
   for (int by0 = 0; by0 < kGameHeight; by0 += bh) {
     for (int bx0 = 0; bx0 < kGameWidth; bx0 += bw) {
-      if (g_b7_nblk >= kB7MaxBlk || g_b7_nseg + bh > kB7MaxSegs)
+      const int first = g_b7_nseg;
+      const int rows = IntMin(bh, kGameHeight - by0);
+      if (g_b7_nblk >= kB7MaxBlk || g_b7_nseg + rows > kB7MaxSegs)
         return false;
-      const int first = g_b7_nseg, rows = IntMin(bh, kGameHeight - by0);
       int gminx = kB7Plane, gminy = kB7Plane, gmaxx = 0, gmaxy = 0;
       for (int r = by0; r < by0 + rows; r++) {
         int32_t X0, Y0;
@@ -7023,6 +7024,11 @@ static void B7RunBlk(const char *tag, int sc, int bw, int bh, bool swz) {
   ok = B7PrepareBlocks(g_b7_m, bw, bh, 0.5f, true, &ext);
   const uint32_t tabus = Now() - t;
   const bool tabok = ok && memcmp(ref, g_b7_seg, (size_t)g_b7_nseg * sizeof(B7Seg)) == 0;
+  if (!tabok) {
+    PspLog("b7%s: %d deg %d%% blk-%s %dx%d table verification failed; skipping benchmark",
+           tag, kB7Deg[sc], kB7Pct[sc], swz ? "swz" : "lin", bw, bh);
+    return;
+  }  
   uint32_t sb = 0, st = 0, mt = 0;
   for (int i = 0; i <= kB7Iters; i++) {
     uint32_t b, tt;
