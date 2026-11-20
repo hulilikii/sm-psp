@@ -23,6 +23,7 @@ void PspRenderer_Resume(void);
 
 // Post-composition mosaic over the complete PSP frame (GE only). Size 1 disables it, 16 is the maximum.
 void PspRenderer_SetMosaicTransition(unsigned size);
+unsigned PspRenderer_GetMosaicTransition(void);
 
 // Gameplay-only room transition. Direction = door_direction & 3: 0 right, 1 left, 2 down, 3 up.
 void PspRenderer_BeginDoorTransition(void);
