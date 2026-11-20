@@ -6,6 +6,7 @@
 #include "funcs.h"
 #include "enemy_types.h"
 #include "src/psp/psp_renderer.h"
+#include "src/psp/psp_mosaic_fade.h"
 
 
 #define kOffsetToSaveSlot ((unaligned_uint16*)RomFixedPtr(0x81812b))
@@ -30,17 +31,8 @@
 #define g_off_93A1A1 ((unaligned_uint16*)RomFixedPtr(0x93a1a1))
 #define kExpandingSquareVels ((ExpandingSquareVels*)RomFixedPtr(0x81aa34))
 
-static uint8_t g_psp_menu_mosaic_size = 1;
-
 static void PspMenuMosaicReset(void) {
-  g_psp_menu_mosaic_size = 1;
   PspRenderer_SetMosaicTransition(1);
-}
-
-static void PspMenuMosaicStepOut(void) {
-  if (g_psp_menu_mosaic_size < 16)
-    ++g_psp_menu_mosaic_size;
-  PspRenderer_SetMosaicTransition(g_psp_menu_mosaic_size);
 }
 
 static const uint16 kFileSelectMap_AreaIndexes[6] = { 0, 3, 5, 1, 4, 2 };
@@ -508,27 +500,21 @@ void GameOverMenu(void) {
 void GameOverMenu_3_FadeIn(void) {  // 0x8190CD
   HandleGameOverBabyMetroid();
   DrawMenuSelectionMissile();
-  HandleFadeIn();
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
-  if ((reg_INIDISP & 0xF) == 15)
+  if (PspMosaicFadeIn())
     ++menu_index;
 }
 
 void GameOverMenu_5_FadeOutToGameMap(void) {  // 0x8190E7
   HandleGameOverBabyMetroid();
   DrawMenuSelectionMissile();
-  HandleFadeOut();
-  PspMenuMosaicStepOut();
-  if ((reg_INIDISP & 0xF) == 0)
+  if (PspMosaicFadeOut())
     ++menu_index;
 }
 
 void GameOverMenu_7_FadeOutToSoftReset(void) {  // 0x8190FE
   DrawMenuSelectionMissile();
   HandleGameOverBabyMetroid();
-  HandleFadeOut();
-  PspMenuMosaicStepOut();
-  if ((reg_INIDISP & 0xF) == 0) {
+  if (PspMosaicFadeOut()) {
     PspMenuMosaicReset();
     SoftReset();
   }
@@ -608,6 +594,7 @@ void GameOverMenu_1_Init(void) {  // 0x8191A4
   static const SpawnHdmaObject_Args unk_81925C = { 0x00, 0x31, 0x928d };
   SpawnHdmaObject(0x81, &unk_819254);
   SpawnHdmaObject(0x81, &unk_81925C);
+  PspRenderer_SetMosaicTransition(16);  /* the fade-in starts at the peak */
   ScreenOn();
   ++menu_index;
   screen_fade_delay = 0;
@@ -666,11 +653,8 @@ void FileSelectMenu(void) {
 }
 
 void FileSelectMenu_0_FadeOutConfigGfx(void) {  // 0x81944E
-  HandleFadeOut();
-  if ((reg_INIDISP & 0xF) != 0) {
-    PspMenuMosaicStepOut();
+  if (!PspMosaicFadeOut())
     return;
-  }
   ScreenOff();
   QueueSfx3_Max6(1);
   DisableHdmaObjects();
@@ -702,9 +686,7 @@ void FileSelectMenu_32_FadeOutToOptions(void) {  // 0x8194A3
   DrawMenuSelectionMissile();
   DrawBorderAroundSamusData();
   DrawFileSelectSamusHelmets();
-  HandleFadeOut();
-  PspMenuMosaicStepOut();
-  if ((reg_INIDISP & 0xF) == 0) {
+  if (PspMosaicFadeOut()) {
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
     int v0 = 0;
@@ -718,9 +700,7 @@ void FileSelectMenu_32_FadeOutToOptions(void) {  // 0x8194A3
 void FileSelectMenu_33_FadeOutToTitle(void) {  // 0x8194D5
   DrawBorderAroundSamusData();
   DrawFileSelectSamusHelmets();
-  HandleFadeOut();
-  PspMenuMosaicStepOut();
-  if ((reg_INIDISP & 0xF) == 0) {
+  if (PspMosaicFadeOut()) {
     PspMenuMosaicReset();
     SoftReset();
   }
@@ -732,10 +712,8 @@ void FileSelectMenu_5_FadeOutFromMain(void) {  // 0x8194EE
 }
 
 void FileSelectMenu_15_FadeOutToMain(void) {  // 0x8194F4
-  HandleFadeOut();
   reg_MOSAIC &= 0x0F;  /* size nibble stays 0: the mosaic is applied to the final frame */
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
-  if ((reg_INIDISP & 0xF) == 0) {
+  if (PspMosaicFadeOut()) {
     ScreenOff();
     ++menu_index;
   }
@@ -759,10 +737,8 @@ void FileSelectMenu_17_FadeInToMain(void) {
 
 void FileSelectMenu_7_FadeInFromMain(void) {  // 0x819532
   DrawMenuSelectionMissile();
-  HandleFadeIn();
   reg_MOSAIC &= 0x0F;
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
-  if ((reg_INIDISP & 0xF) == 15)
+  if (PspMosaicFadeIn())
     ++menu_index;
 }
 
@@ -1399,9 +1375,7 @@ void FileSelectMap(void) {
 
 void FileSelectMap_22(void) {  // 0x819E7B
   DrawAreaSelectMapLabels();
-  HandleFadeOut();
-  PspMenuMosaicStepOut();
-  if ((reg_INIDISP & 0xF) == 0) {
+  if (PspMosaicFadeOut()) {
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
   }
@@ -1494,6 +1468,7 @@ void FileSelectMenu_16(void) {  // 0x819EF3
   eproj_id[14] = 127;
   screen_fade_delay = 1;
   screen_fade_counter = 1;
+  PspRenderer_SetMosaicTransition(16);  /* the fade-in starts at the peak */
   ScreenOn();
   ++menu_index;
   eproj_id[15] = 0;
@@ -1512,9 +1487,7 @@ void FileSelectMenu_3_FadeInToMain(void) {  // 0x81A058
   eproj_id[5] = kMenuSelectionMissileXY[v0 + 1];
   DrawMenuSelectionMissile();
   DrawBorderAroundSamusData();
-  HandleFadeIn();
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
-  if ((reg_INIDISP & 0xF) == 15)
+  if (PspMosaicFadeIn())
     ++menu_index;
 }
 
@@ -1775,6 +1748,7 @@ void FileSelectMap_2_LoadAreaSelectForegroundTilemap(void) {  // 0x81A546
     reg_INIDISP = 0x80;
     screen_fade_delay = 0;
     screen_fade_counter = 0;
+    PspRenderer_SetMosaicTransition(16);
   }
   ++menu_index;
 }
@@ -1955,9 +1929,7 @@ void FileSelectMap_5_ExpandingSquare(void) {  // 0x81A725
 // PSP: the area-select map is not revealed by the expanding box (see FileSelectMap_4): it fades in under the mosaic, as the options screen does. The reveal itself was already done by state 4.
 static void FileSelectMap_5_AreaMapFadeIn(void) {
   DrawAreaSelectMapLabels();
-  HandleFadeIn();
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
-  if ((reg_INIDISP & 0xF) == 15) {
+  if (PspMosaicFadeIn()) {
     screen_fade_delay = 0;
     screen_fade_counter = 0;
     ++menu_index;

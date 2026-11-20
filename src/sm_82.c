@@ -5,6 +5,7 @@
 #include "funcs.h"
 #include "enemy_types.h"
 #include "src/psp/psp_renderer.h"
+#include "src/psp/psp_mosaic_fade.h"
 
 #define kDemoRoomData ((unaligned_uint16*)RomFixedPtr(0x82876c))
 #define kPauseScreenSpriteAnimationData_0 (*(PauseScreenSpriteAnimationData*)RomFixedPtr(0x82c0b2))
@@ -4523,6 +4524,7 @@ static void OptionsMenu_SetSpecialButtonIcon(void) {
 
 void GameOptionsMenu_1_LoadingOptionsScreen(void) {  // 0x82EC11
   uint16 j;
+  PspRenderer_SetMosaicTransition(16);  /* the fade-in starts at the peak */
   reg_BG12NBA = 0;
   reg_TM = 19;
   reg_TS = 0;
@@ -4562,9 +4564,7 @@ void GameOptionsMenu_1_LoadingOptionsScreen(void) {  // 0x82EC11
 }
 
 void GameOptionsMenu_2_FadeInOptionsScreen(void) {  // 0x82ECE4
-  HandleFadeIn();
-  PspRenderer_SetMosaicTransition(16 - (reg_INIDISP & 0xF));
-  if (reg_INIDISP == 15) {
+  if (PspMosaicFadeIn()) {
     screen_fade_delay = 0;
     screen_fade_counter = 0;
     ++game_options_screen_index;
@@ -4590,14 +4590,6 @@ void OptionsMenuFunc5(uint16 a, uint16 k, uint16 j) {  // 0x82ED28
   } while (j);
 }
 
-static uint8 g_psp_options_mosaic_size = 1;  /* options dissolve ($82:EF18 / $82:EFDB): size as the old reg_MOSAIC +-16 stepped it */
-
-static void GameOptionsMenu_MosaicStepOut(void) {
-  if (g_psp_options_mosaic_size < 16)
-    ++g_psp_options_mosaic_size;
-  PspRenderer_SetMosaicTransition(g_psp_options_mosaic_size);
-}
-
 static Func_V *const kGameOptionsMenuItemFuncs[5] = {  // 0x82ED42
   GameOptionsMenuItemFunc_0,
   GameOptionsMenuItemFunc_2_ToggleJapanese,
@@ -4616,7 +4608,6 @@ void GameOptionsMenu_3_OptionsScreen(void) {
       menu_option_index = 0;
   }
   if ((joypad1_newkeys & 0x8000) != 0) {
-    g_psp_options_mosaic_size = 1;
     PspRenderer_SetMosaicTransition(1);
     game_options_screen_index = 11;
   } else if ((joypad1_newkeys & kButton_A) != 0 || (joypad1_newkeys & kButton_Start) != 0) {
@@ -4626,7 +4617,6 @@ void GameOptionsMenu_3_OptionsScreen(void) {
 }
 
 void GameOptionsMenuItemFunc_0(void) {  // 0x82EDB1
-  g_psp_options_mosaic_size = 1;
   PspRenderer_SetMosaicTransition(1);
   screen_fade_delay = 0;
   screen_fade_counter = 0;
@@ -4655,7 +4645,6 @@ void OptionsMenuFunc4(void) {  // 0x82EDED
 
 void GameOptionsMenuItemFunc_4(void) {  // 0x82EE55
   reg_MOSAIC = 3;
-  g_psp_options_mosaic_size = 1;
   PspRenderer_SetMosaicTransition(1);
   screen_fade_delay = 0;
   screen_fade_counter = 0;
@@ -4663,9 +4652,7 @@ void GameOptionsMenuItemFunc_4(void) {  // 0x82EE55
 }
 
 void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
-  HandleFadeOut();
-  GameOptionsMenu_MosaicStepOut();
-  if (reg_INIDISP == 0x80) {
+  if (PspMosaicFadeOut()) {
     PspRenderer_ClearButtonIcons();
     EnableNMI();
     screen_fade_delay = 0;
@@ -4677,9 +4664,7 @@ void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
 }
 
 void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
-  HandleFadeOut();
-  GameOptionsMenu_MosaicStepOut();
-  if (reg_INIDISP == 0x80) {
+  if (PspMosaicFadeOut()) {
     PspRenderer_ClearButtonIcons();
     EnableNMI();
     screen_fade_delay = 0;
@@ -4693,7 +4678,6 @@ void GameOptionsMenu_4_StartGame(void) {  // 0x82EEB4
 // Going to the area map: keep the peak mosaic so the renderer holds the last image through the load frames and the map's mosaic fade-in continues from it. Any other destination ends the transition here.
   const bool to_map = (enable_debug && (joypad1_lastkeys & kButton_L) == 0) ||
                       loading_game_state == kGameState_5_FileSelectMap;
-  g_psp_options_mosaic_size = 1;
   if (!to_map)
     PspRenderer_SetMosaicTransition(1);
   game_options_screen_index = 0;
@@ -4725,11 +4709,7 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
   uint16 n;
   uint16 v1;
 
-  HandleFadeOut();
-  if (g_psp_options_mosaic_size < 16)
-    ++g_psp_options_mosaic_size;
-  PspRenderer_SetMosaicTransition(g_psp_options_mosaic_size);
-  if (reg_INIDISP == 0x80) {
+  if (PspMosaicFadeOut()) {
     PspRenderer_ClearButtonIcons();
     EnableNMI();
     screen_fade_delay = 0;
@@ -4780,14 +4760,8 @@ void GameOptionsMenu_5_DissolveOutScreen(void) {  // 0x82EF18
 }
 
 void GameOptionsMenu_6_DissolveInScreen(void) {  // 0x82EFDB
-  HandleFadeIn();
-  if (g_psp_options_mosaic_size > 1)
-    --g_psp_options_mosaic_size;
-  PspRenderer_SetMosaicTransition(g_psp_options_mosaic_size);
-  if (reg_INIDISP == 15) {
+  if (PspMosaicFadeIn()) {
     reg_MOSAIC = 0;
-    g_psp_options_mosaic_size = 1;
-    PspRenderer_SetMosaicTransition(1);
     screen_fade_delay = 0;
     screen_fade_counter = 0;
     if (menu_option_index) {

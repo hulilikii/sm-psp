@@ -305,6 +305,11 @@ static void SelectDrawBuffer(void) {
 void PspRenderer_SetMosaicTransition(unsigned size) {
   g_mosaic_size = (uint8_t)(size < 1 ? 1 : size > 16 ? 16 : size);
 }
+
+unsigned PspRenderer_GetMosaicTransition(void) {
+  return g_mosaic_size;
+}
+
 /* Mode 7 (GE path): matrix and flags are snapshotted per row (LineSnap). Frames with one constant matrix, b = c = 0,
  * a, d > 0, large field only (no flips/charfill/mosaic) are drawn as tile quads (M7Prepare). Everything else
  * (rotation, HDMA matrix, flips, charfill, mosaic, small field) is sampled on the CPU into an 8-bit image (gate 4r). */
@@ -1106,9 +1111,6 @@ static void CaptureImpl(const Ppu *p, int line) {
       LayerWin(p, l, 1, &b->sm, &b->sl, &b->sr);  /* unsupported setups are flagged through subwin */
   }
   s->brightness = p->brightness & 15;
-// A mosaic transition replaces the brightness fade: the scene stays at full brightness under it. Applied in the full capture only, so line reuse and the log-build recheck agree. 
-  if (g_mosaic_size > 1)
-    s->brightness = 15;
   s->bg3prio = p->bg3priority ? 1 : 0;
   s->cg0 = p->cgram[0];
   s->forced = forced ? 1 : 0;
@@ -6244,8 +6246,6 @@ static bool DrawGe(void) {
   if (g_m7w_frame)
     g_frames_m7w++;
   g_audit_now = false;
-  if (g_mosaic_size > 1)  /* transition frames are brightness-free by design: the software image would differ */
-    g_verify_now = false;
   Present(true);
   return true;
 }
