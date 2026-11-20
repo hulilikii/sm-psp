@@ -20,9 +20,10 @@ PSP_SW_PATH ?= 1
 PSP_GE_WIN ?= 1
 # PSP_VTX_POOL=1: big vertex buffers are built in a cached pool and written back once. 0: inside the display list.
 # Gate 5f hardware A/B: the pool was ~20% slower per vertex (0.45 vs 0.37 us), so it is off by default.
-# PSP_GE_SMOOTH_TINT=1 interpolates GE fixed-colour tint changes vertically using Gouraud-shaded strips.
-# 0 retains the original constant-colour tint rectangles.
-PSP_GE_SMOOTH_TINT ?= 0
+# PSP_GE_SMOOTH_TINT=1 smooths GE fixed-colour tint changes (HDMA colour bands) vertically: an 8x256 dithered strip texture
+# built from the per-row fixed colour is added instead of constant-colour rectangles. Tints clipped by a colour window keep
+# the rectangles. 0 retains the original constant-colour tint rectangles for every frame.
+PSP_GE_SMOOTH_TINT ?= 1
 PSP_VTX_POOL ?= 0
 # PSP_TRIPLE=1: three frame buffers. Below 60 fps the vblank wait is skipped, so the next frame must not draw into the buffer still on screen. 0: libgu double buffering.
 PSP_TRIPLE ?= 1

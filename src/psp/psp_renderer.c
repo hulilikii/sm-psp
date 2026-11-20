@@ -5638,6 +5638,11 @@ static bool DrawGe(void) {
     }
   if (smooth_tint)
     tint_groups = TintStripBuild();
+  } else if (tint) {
+    static int flat_logged;
+    if (flat_logged++ < 4)
+      PspLog("tintflat: colour-window rows (runs=%d ranges=%d)", g_ntint, g_ntr);
+  }
 #endif
 
   sceKernelDcacheWritebackRange(g_clut2[kClutBright], sizeof(g_clut2[0]));
