@@ -130,6 +130,10 @@ void RtlPushApuState();
 bool RtlRunFrame(int inputs);
 void RtlReadSram();
 void RtlWriteSram();
+void RtlSramInit(const char *app_dir);   // before RtlReadSram; saves go to <app_dir>/saves (NULL or ".": relative)
+bool RtlSramFlush(uint32_t timeout_us);  // true: newest RtlWriteSram snapshot is on the card; false: still pending
+void RtlSramKick(void);                  // retry a pending save now (e.g. after resume)
+bool RtlSramShutdown(void);              // exit: persist, stop the writer; false: a snapshot is still pending
 void RtlSaveSnapshot(const char *filename, bool saving_with_bug);
 void RtlUpdateSnesPatchForBugfix();
 extern uint16 currently_installed_bug_fix_counter;

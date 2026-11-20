@@ -14,8 +14,10 @@
 #include "psp/psp_audio_me.h"
 #endif
 #include "psp/psp_log.h"
-#if SM_PSP_LOG
+#include <pspiofilemgr.h>
 #include <pspthreadman.h>
+#include <psppower.h>
+#if SM_PSP_LOG
 extern uint32_t g_vram_fill_bytes;  /* snes.c: direct RtlVramFill output bytes */
 /* log builds: time of Memory Stick writes and SPC uploads on the game thread (logged when >= 1 ms) */
 #define IO_T0() uint32_t io_t0 = sceKernelGetSystemTimeLow()
@@ -892,17 +894,392 @@ void RtlCheat(char c) {
   }
 }
 
+// ---- SRAM persistence (begin) ----
+/* The game only reads and writes g_sram (RAM), like the cart's battery RAM ($70:xxxx, plain STA in $81:8000). The
+ * Memory Stick files are a persistent mirror. A synchronous save cost 77-459 ms on the game thread (log: IO sram
+ * write), so a low-priority thread commits the newest snapshot instead. Files (saves/ in the application directory):
+ *   sm.srm      current save (read by earlier builds too)       sm.srm.bak  previous valid save
+ *   sm.srm.new  complete, verified newest snapshot, not yet promoted
+ *   sm.srm.tmp  snapshot being written; never trusted
+ * File format: the 8192 SRAM bytes, then an 8-byte trailer (magic "SMS2", CRC-32 of the SRAM bytes; little endian).
+ * Older builds and legacy files are the bare 8192 bytes: still loaded (no CRC to check), and an older build that
+ * reads only the first 8192 bytes of a new file loads it unchanged. A CRC catches data that did not reach the card
+ * although the size and name did (the read-back below may be served from a cache, so it cannot prove that).
+ * Commit: write .tmp, close, best-effort sceIoSync, read back and verify, rename .tmp -> .new, rotate
+ * .srm -> .bak (only if .srm validates), rename .new -> .srm. The renames are the commit points and each step
+ * leaves a usable file, so an interrupted commit costs at most the newest snapshot. Load order is .new (must carry
+ * a valid trailer), .srm, .bak (trailer valid, or a legacy file of exactly 8192 or over 8200 bytes).
+ * Only sceIo* is used (sceIoRename cannot overwrite, hence the removes): newlib remove() is a stub in older PSPSDKs,
+ * and stdio would resolve "saves/" through newlib's cwd instead of the explicit path used here.
+ * Durability: sceIoSync is documented only as "Synchronise the file data on the device"; its result and its effect
+ * on a Memory Stick are not documented, so it is best effort and a power cut can still lose the newest snapshot. */
+enum { kSramBytes = 8192, kSramFileBytes = kSramBytes + 8, kSramThreadPrio = 0x30, kSramThreadStack = 0x4000 };
+enum { kSramMagic = 0x32534D53 };  /* "SMS2" */
+enum { kSramBackoffMinUs = 250000, kSramBackoffMaxUs = 2000000, kSramJoinUs = 3000000, kSramShutdownUs = 3000000 };
+enum { kPathMain, kPathBak, kPathNew, kPathTmp, kPathCount };
+enum { kStepNone, kStepOpenTmp, kStepWriteTmp, kStepCloseTmp, kStepVerify, kStepPublish, kStepRotate, kStepPromote };
+
+static char g_sram_path[kPathCount][320];
+static char g_sram_dev[16];  /* "ms0:" / "ef0:" from the application path; empty: no sceIoSync */
+static uint8 g_sram_pending[kSramBytes] __attribute__((aligned(64)));  /* newest snapshot; g_sram_lock */
+static uint8 g_sram_local[kSramBytes] __attribute__((aligned(64)));    /* committer's copy */
+static uint8 g_sram_verify[kSramFileBytes] __attribute__((aligned(64)));  /* read-back buffer */
+static SceUID g_sram_lock = -1, g_sram_wake = -1, g_sram_thread = -1;
+static uint32_t g_sram_req, g_sram_done;  /* g_sram_lock: newest queued / newest committed; equal = persisted */
+static bool g_sram_alive, g_sram_quit;    /* g_sram_lock: worker running / asked to stop once nothing is pending */
+static bool g_sram_inited, g_sram_stopped;  /* game thread */
+static int g_sram_io_busy;                  /* try-lock: one committer at a time */
+static int g_sram_queue_error;              /* __sync_*: a snapshot could not be queued and is lost, see SramQueueSnapshot */
+/* diagnostics, g_sram_lock */
+static uint32_t g_sram_commits, g_sram_fails, g_sram_us_max, g_sram_sync_errs, g_sram_plock_errs;
+static int g_sram_last_step, g_sram_last_err;
+
+static bool SramLock(void) { return g_sram_lock < 0 || sceKernelWaitSema(g_sram_lock, 1, NULL) >= 0; }
+static void SramUnlock(void) { if (g_sram_lock >= 0) sceKernelSignalSema(g_sram_lock, 1); }
+
+static void SramSetPaths(const char *dir) {
+  static const char *const kNames[kPathCount] = {"saves/sm.srm", "saves/sm.srm.bak", "saves/sm.srm.new", "saves/sm.srm.tmp"};
+  size_t n = dir ? strlen(dir) : 0;
+  const bool rel = n == 0 || strcmp(dir, ".") == 0 || n + 24 > sizeof(g_sram_path[0]);
+  for (int i = 0; i < kPathCount; i++) {
+    if (rel)
+      snprintf(g_sram_path[i], sizeof(g_sram_path[i]), "%s", kNames[i]);
+    else
+      snprintf(g_sram_path[i], sizeof(g_sram_path[i]), "%s%s%s", dir, dir[n - 1] == '/' ? "" : "/", kNames[i]);
+  }
+  g_sram_dev[0] = 0;
+  const char *colon = rel ? NULL : strchr(dir, ':');
+  if (colon && (size_t)(colon - dir) + 2 <= sizeof(g_sram_dev)) {
+    memcpy(g_sram_dev, dir, (size_t)(colon - dir) + 1);
+    g_sram_dev[colon - dir + 1] = 0;
+  }
+}
+
+static uint32_t SramCrc32(const uint8 *p, size_t n) {  /* CRC-32/ISO-HDLC, check("123456789") = 0xCBF43926 */
+  uint32_t c = 0xFFFFFFFFu;
+  while (n--) {
+    c ^= *p++;
+    for (int k = 0; k < 8; k++)
+      c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+  }
+  return ~c;
+}
+/* byte-wise: the buffers are not necessarily word aligned at these offsets */
+static void SramPut32(uint8 *p, uint32_t v) { p[0] = (uint8)v; p[1] = (uint8)(v >> 8); p[2] = (uint8)(v >> 16); p[3] = (uint8)(v >> 24); }
+static uint32_t SramGet32(const uint8 *p) { return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+
+/* Read and validate a save file into buf (kSramFileBytes); the SRAM bytes are buf[0..kSramBytes). A file of exactly
+ * kSramFileBytes is a checksummed file and must carry the magic and a matching CRC. A file of exactly kSramBytes or
+ * of more than kSramFileBytes is a legacy file (no CRC to check, as the previous loader accepted it) unless need_v2.
+ * Sizes in between are a trailer cut short by an interrupted write and are rejected. A cut at exactly kSramBytes
+ * (trailer entirely missing) looks like a legacy file and cannot be told apart. */
+static bool SramReadFile(const char *path, uint8 *buf, bool need_v2) {
+  SceIoStat st;
+  if (sceIoGetstat(path, &st) < 0 || FIO_S_ISDIR(st.st_mode) || st.st_size < kSramBytes)
+    return false;
+  const int want = st.st_size >= kSramFileBytes ? kSramFileBytes : kSramBytes;
+  SceUID fd = sceIoOpen(path, PSP_O_RDONLY, 0);
+  if (fd < 0)
+    return false;
+  int got = 0;
+  while (got < want) {
+    int n = sceIoRead(fd, buf + got, want - got);
+    if (n <= 0)
+      break;
+    got += n;
+  }
+  sceIoClose(fd);
+  if (got != want)
+    return false;
+  if (st.st_size == kSramFileBytes)
+    return SramGet32(buf + kSramBytes) == (uint32_t)kSramMagic && SramGet32(buf + kSramBytes + 4) == SramCrc32(buf, kSramBytes);
+  if (st.st_size == kSramBytes || st.st_size > kSramFileBytes)
+    return !need_v2;
+  return false;  /* 8193..8199 bytes: a checksummed file whose trailer was cut short, never a legacy save */
+}
+
+static int SramWriteAll(SceUID fd, const uint8 *p, int n) {  /* 0 or the failing sceIoWrite result */
+  for (int done = 0; done < n;) {
+    const int w = sceIoWrite(fd, p + done, n - done);
+    if (w <= 0)
+      return w < 0 ? w : -1;
+    done += w;
+  }
+  return 0;
+}
+
+/* Replace the save with `data` (kSramBytes). true only when it is the current saves/sm.srm. On false the previous
+ * valid save is still on the card (as .srm, or as .bak/.new while a promote is pending). */
+static bool SramCommit(const uint8 *data) {
+  const uint32_t t0 = sceKernelGetSystemTimeLow();
+  const int plock = scePowerLock(0);  /* a power-switch press during the lock fires after scePowerUnlock */
+  int step = kStepNone, err = 0;
+  bool sync_err = false;
+  do {
+    SceUID fd = sceIoOpen(g_sram_path[kPathTmp], PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+    if (fd < 0) { step = kStepOpenTmp; err = fd; break; }
+    uint8 trailer[8] __attribute__((aligned(16)));
+    SramPut32(trailer, (uint32_t)kSramMagic);
+    SramPut32(trailer + 4, SramCrc32(data, kSramBytes));
+    err = SramWriteAll(fd, data, kSramBytes);
+    if (err == 0)
+      err = SramWriteAll(fd, trailer, sizeof(trailer));
+    const int cr = sceIoClose(fd);
+    if (err != 0) { step = kStepWriteTmp; break; }
+    if (cr < 0) { step = kStepCloseTmp; err = cr; break; }
+    if (g_sram_dev[0] && sceIoSync(g_sram_dev, 0) < 0)
+      sync_err = true;  /* best effort only, see above */
+    if (!SramReadFile(g_sram_path[kPathTmp], g_sram_verify, true) || memcmp(g_sram_verify, data, kSramBytes) != 0) {
+      step = kStepVerify; break;
+    }
+    sceIoRemove(g_sram_path[kPathNew]);  /* stale, older than the verified .tmp; failure shows up in the rename */
+    err = sceIoRename(g_sram_path[kPathTmp], g_sram_path[kPathNew]);
+    if (err < 0) { step = kStepPublish; break; }
+    SceIoStat pst;
+    if (sceIoGetstat(g_sram_path[kPathMain], &pst) >= 0) {
+      if (SramReadFile(g_sram_path[kPathMain], g_sram_verify, false)) {
+        sceIoRemove(g_sram_path[kPathBak]);  /* old backup; if it stays, the rename below fails and .srm is untouched */
+        err = sceIoRename(g_sram_path[kPathMain], g_sram_path[kPathBak]);
+      } else {
+        err = sceIoRemove(g_sram_path[kPathMain]);  /* unusable primary: never rotated over a good .bak; .new is verified */
+      }
+      if (err < 0) { step = kStepRotate; break; }
+    }
+    err = sceIoRename(g_sram_path[kPathNew], g_sram_path[kPathMain]);
+    if (err < 0) { step = kStepPromote; break; }
+  } while (0);
+  if (plock >= 0)
+    scePowerUnlock(0);
+  const uint32_t us = sceKernelGetSystemTimeLow() - t0;
+  if (SramLock()) {
+    if (us > g_sram_us_max) g_sram_us_max = us;
+    if (sync_err) g_sram_sync_errs++;
+    if (plock < 0) g_sram_plock_errs++;
+    if (step == kStepNone) {
+      g_sram_commits++;
+    } else {
+      g_sram_fails++;
+      g_sram_last_step = step;
+      g_sram_last_err = err;
+    }
+    SramUnlock();
+  }
+  return step == kStepNone;
+}
+
+/* Commit the newest snapshot if it is not persisted yet. true: nothing is pending afterwards. Failure, or another
+ * committer being active, leaves it pending; a snapshot queued meanwhile is never dropped. */
+static bool SramDrain(void) {
+  if (__sync_lock_test_and_set(&g_sram_io_busy, 1))
+    return false;
+  bool ok = false;
+  if (SramLock()) {
+    const uint32_t seq = g_sram_req;
+    if (seq == g_sram_done) {
+      SramUnlock();
+      ok = true;
+    } else {
+      memcpy(g_sram_local, g_sram_pending, kSramBytes);
+      SramUnlock();
+      if (SramCommit(g_sram_local) && SramLock()) {
+        g_sram_done = seq;
+        SramUnlock();
+        ok = true;
+      }
+    }
+  }
+  __sync_lock_release(&g_sram_io_busy);
+  return ok;
+}
+
+static int SramThread(SceSize args, void *argp) {
+  (void)args; (void)argp;
+  uint32_t backoff = 0;
+  for (bool run = true; run;) {
+    SceUInt to = backoff;
+    const uint32_t w0 = sceKernelGetSystemTimeLow();
+    if (sceKernelWaitSema(g_sram_wake, 1, backoff ? &to : NULL) < 0) {
+      if (!backoff)
+        break;  /* an untimed wait only fails if the semaphore is gone */
+      const uint32_t el = sceKernelGetSystemTimeLow() - w0;
+      if (el < backoff)
+        sceKernelDelayThread(backoff - el);  /* timeout, or an immediate error: keep the backoff */
+    }
+    for (;;) {
+      if (!SramDrain()) {  /* still pending: retry after a backoff, or at once when woken by a new snapshot */
+        backoff = backoff ? (backoff * 2 > kSramBackoffMaxUs ? kSramBackoffMaxUs : backoff * 2) : kSramBackoffMinUs;
+        break;
+      }
+      backoff = 0;
+      if (!SramLock()) { run = false; break; }
+      const bool more = g_sram_done != g_sram_req, quit = g_sram_quit;
+      if (!more && quit)
+        g_sram_alive = false;  /* only ever leaves with nothing pending */
+      SramUnlock();
+      if (more) continue;
+      if (quit) run = false;
+      break;
+    }
+  }
+  if (SramLock()) {
+    g_sram_alive = false;
+    SramUnlock();
+  }
+  return 0;
+}
+
+void RtlSramInit(const char *app_dir) {
+  if (g_sram_inited)
+    return;
+  g_sram_inited = true;
+  SramSetPaths(app_dir);
+  g_sram_lock = sceKernelCreateSema("sm-psp-sram", 0, 1, 1, NULL);
+  g_sram_wake = sceKernelCreateSema("sm-psp-sramw", 0, 0, 1, NULL);  /* max 1: wakes coalesce, none is lost */
+  if (g_sram_lock >= 0 && g_sram_wake >= 0)
+    g_sram_thread = sceKernelCreateThread("sm-sram-writer", SramThread, kSramThreadPrio, kSramThreadStack,
+                                          PSP_THREAD_ATTR_USER, NULL);
+  if (g_sram_thread >= 0) {
+    g_sram_alive = true;  /* before the start: the worker may clear it at once */
+    if (sceKernelStartThread(g_sram_thread, 0, NULL) < 0) {
+      g_sram_alive = false;
+      sceKernelDeleteThread(g_sram_thread);
+      g_sram_thread = -1;
+    }
+  }
+  if (g_sram_thread < 0) {
+    if (g_sram_lock >= 0) sceKernelDeleteSema(g_sram_lock);
+    if (g_sram_wake >= 0) sceKernelDeleteSema(g_sram_wake);
+    g_sram_lock = g_sram_wake = -1;
+    PspLog("sram: writer thread unavailable, saves stay synchronous");
+  }
+}
+
+/* 1: queued for the worker; 0: queued, no worker, the caller drains synchronously; -1: not queued. A snapshot that
+ * could not be queued is lost (it was never copied) and cannot be recovered by writing g_sram directly: that write
+ * would race the worker and an older pending snapshot could later overwrite it. It is recorded in
+ * g_sram_queue_error so Flush/Shutdown cannot report success; the next snapshot that does get queued holds the
+ * newest g_sram and clears it. */
+static int SramQueueSnapshot(void) {
+  if (!SramLock()) {
+    __sync_lock_test_and_set(&g_sram_queue_error, 1);
+    return -1;
+  }
+  memcpy(g_sram_pending, g_sram, kSramBytes);
+  ++g_sram_req;
+  __sync_lock_release(&g_sram_queue_error);
+  const bool worker = g_sram_alive && !g_sram_quit;
+  SramUnlock();
+  return worker ? 1 : 0;
+}
+
+void RtlSramKick(void) {
+  if (g_sram_wake >= 0)
+    sceKernelSignalSema(g_sram_wake, 1);  /* an overflow error just means a wake is already pending */
+}
+
+/* Wait until the newest queued snapshot is on the card. false: timed out or failed; the snapshot stays pending
+ * and keeps being retried. Without a worker the caller commits it here. */
+bool RtlSramFlush(uint32_t timeout_us) {
+  if (!g_sram_inited)
+    return true;
+  const uint32_t t0 = sceKernelGetSystemTimeLow();
+  bool kicked = false;
+  for (;;) {
+    if (!SramLock())
+      return false;
+    const bool persisted = g_sram_done == g_sram_req, alive = g_sram_alive;
+    SramUnlock();
+    if (persisted)  /* checked after the persisted test: a lost snapshot is not in req/done */
+      return __sync_fetch_and_add(&g_sram_queue_error, 0) == 0;
+    if (!alive) {
+      if (SramDrain())
+        continue;
+    } else if (!kicked) {
+      RtlSramKick();  /* skip the retry backoff once */
+      kicked = true;
+    }
+    if (sceKernelGetSystemTimeLow() - t0 >= timeout_us)
+      return false;
+    sceKernelDelayThread(2000);
+  }
+}
+
+/* Exit path, game thread. true: everything persisted and the worker is gone. false: a snapshot is still pending, or
+ * the worker did not stop; the worker is then left running (never asked to stop with work pending) and nothing is
+ * freed, so the caller can only report it and exit. Safe to call repeatedly. */
+bool RtlSramShutdown(void) {
+  if (!g_sram_inited || g_sram_stopped)
+    return true;
+  bool ok = RtlSramFlush(kSramShutdownUs);
+  if (SramLock()) {
+    PspLog("sram: %u commits, %u failures (last step %d err %08x), max %u us, sync errs %u, power-lock errs %u, %s",
+           (unsigned)g_sram_commits, (unsigned)g_sram_fails, g_sram_last_step, (unsigned)g_sram_last_err,
+           (unsigned)g_sram_us_max, (unsigned)g_sram_sync_errs, (unsigned)g_sram_plock_errs,
+           ok ? "all persisted" : __sync_fetch_and_add(&g_sram_queue_error, 0) ? "SNAPSHOT LOST (not queued)" : "PENDING");
+    SramUnlock();
+  }
+  if (!ok)
+    return false;
+  if (g_sram_thread >= 0) {
+    if (!SramLock())
+      return false;
+    ok = g_sram_done == g_sram_req && __sync_fetch_and_add(&g_sram_queue_error, 0) == 0;  /* nothing queued or lost since the flush */
+    if (ok)
+      g_sram_quit = true;
+    SramUnlock();
+    if (!ok)
+      return false;
+    RtlSramKick();
+    SceUInt to = kSramJoinUs;
+    if (sceKernelWaitThreadEnd(g_sram_thread, &to) < 0) {
+      PspLog("sram: writer did not stop, left running");
+      return false;
+    }
+    sceKernelDeleteThread(g_sram_thread);
+    sceKernelDeleteSema(g_sram_wake);
+    SceUID lock = g_sram_lock;
+    g_sram_thread = g_sram_wake = g_sram_lock = -1;  /* later saves are synchronous */
+    sceKernelDeleteSema(lock);
+  }
+  g_sram_stopped = true;
+  return true;
+}
+
+/* Copy the best saved file into dst. Returns the kPath* it came from, or -1. */
+static int SramLoadBest(uint8 *dst) {  /* dst: kSramFileBytes */
+  static const int kOrder[3] = {kPathNew, kPathMain, kPathBak};
+  for (int i = 0; i < 3; i++)
+    if (SramReadFile(g_sram_path[kOrder[i]], dst, kOrder[i] == kPathNew))  /* .new only exists as a checksummed file */
+      return kOrder[i];
+  return -1;
+}
+// ---- SRAM persistence (end) ----
+
 void RtlReadSram(void) {
+  static uint8 data[kSramFileBytes] __attribute__((aligned(64)));
+  if (!g_sram_inited)
+    RtlSramInit(NULL);
+  const int src = SramLoadBest(data);
+  if (src >= 0) {
+    PspLog("sram: loaded %s", src == kPathMain ? "sm.srm" : src == kPathNew ? "sm.srm.new (interrupted save)" : "sm.srm.bak (recovery)");
+    memcpy(g_sram, data, kSramBytes);
+    RtlSynchronizeWholeState();
+    ByteArray_Resize(&state_recorder.base_snapshot, 8192);
+    memcpy(state_recorder.base_snapshot.data, g_sram, 8192);
+    if (src != kPathMain && SramQueueSnapshot() > 0)  /* put the recovered state back into sm.srm */
+      RtlSramKick();
+    return;
+  }
+  /* Nothing under the explicit paths: the previous behaviour (newlib's cwd), for an older save location. */
   FILE *f = fopen("saves/sm.srm", "rb");
   if (f) {
-    uint8_t data[8192];
-    size_t bytes_read = fread(data, 1, sizeof(data), f);
+    size_t bytes_read = fread(data, 1, kSramBytes, f);
     int close_result = fclose(f);
-    if (bytes_read != sizeof(data) || close_result != 0) {
+    if (bytes_read != kSramBytes || close_result != 0) {
       fprintf(stderr, "Incomplete or failed read of saves/sm.srm\n");
       return;
     }
-    memcpy(g_sram, data, sizeof(data));
+    memcpy(g_sram, data, kSramBytes);
     RtlSynchronizeWholeState();
     ByteArray_Resize(&state_recorder.base_snapshot, 8192);
     memcpy(state_recorder.base_snapshot.data, g_sram, 8192);
@@ -911,17 +1288,19 @@ void RtlReadSram(void) {
 
 void RtlWriteSram(void) {
   IO_T0();
-  // PSP rename() cannot overwrite an existing file, so drop the old backup first.
-  remove("saves/sm.srm.bak");
-  rename("saves/sm.srm", "saves/sm.srm.bak");
-  FILE *f = fopen("saves/sm.srm", "wb");
-  if (f) {
-    size_t bytes_written = fwrite(g_sram, 1, 8192, f);
-    int close_result = fclose(f);
-    if (bytes_written != 8192 || close_result != 0)
-      fprintf(stderr, "Incomplete or failed write of saves/sm.srm\n");
-  } else {
-    fprintf(stderr, "Unable to write saves/sm.srm\n");
+  if (!g_sram_inited)
+    RtlSramInit(NULL);
+  const int q = SramQueueSnapshot();
+  if (q > 0) {
+    RtlSramKick();
+    IO_LOG("sram queue");
+    return;
   }
-  IO_LOG("sram write");
+  if (q == 0) {  /* no worker (not creatable, or stopped): synchronous, as before */
+    SramDrain();
+    IO_LOG("sram write");
+    return;
+  }
+  PspLog("sram: unable to queue snapshot");  /* no uncoordinated write; Flush/Shutdown report it */
+  IO_LOG("sram queue failed");
 }

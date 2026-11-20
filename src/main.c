@@ -85,6 +85,7 @@ static int ExitCallback(int arg1, int arg2, void *common) {
 
 /* Set by the power callback (callback thread), handled by the main loop. */
 static volatile bool g_power_suspended, g_power_resumed;
+static volatile int g_sram_suspend_flush = -1;  /* callback thread -> Power_Resume: 1 persisted, 0 pending */
 static int PowerCallback(int unused, int flags, void *common);
 
 static int CallbackThread(SceSize args, void *argp) {
@@ -105,7 +106,10 @@ static void SetupExitCallback(void) {
 
 void NORETURN Die(const char *error) {
   fprintf(stderr, "Error: %s\n", error);
+  const bool sram_ok = RtlSramFlush(2000000);  /* newest SRAM snapshot first, bounded */
   PspLog("DIE: %s", error);
+  if (!sram_ok)
+    PspLog("DIE: the newest SRAM snapshot is NOT on the Memory Stick");
   PspLog_Flush();
 #if PSP_AUDIO_ENABLED
   if (g_psp_audio_started) {
@@ -410,6 +414,9 @@ static int PowerCallback(int unused, int flags, void *common) {
   (void)unused; (void)common;
   bool waking = (flags & (PSP_POWER_CB_RESUMING | PSP_POWER_CB_RESUME_COMPLETE)) != 0;
   if (!waking && (flags & (PSP_POWER_CB_POWER_SWITCH | PSP_POWER_CB_SUSPENDING))) {
+    /* Bounded, and only a courtesy: a commit in flight holds scePowerLock so the suspend waits for it, and a
+     * snapshot still pending stays in RAM across the suspend and is retried on resume. Logged in Power_Resume. */
+    g_sram_suspend_flush = RtlSramFlush(600000) ? 1 : 0;
     Audio_PowerSuspend();
     g_power_suspended = true;
   }
@@ -423,6 +430,9 @@ static void Power_Resume(void) {
   PspLog("resume: suspended=%d clock cpu=%d bus=%d", (int)g_power_suspended, scePowerGetCpuClockFrequency(),
          scePowerGetBusClockFrequency());
   g_power_suspended = false;
+  PspLog("resume: SRAM %s", g_sram_suspend_flush == 1 ? "persisted before suspend" : g_sram_suspend_flush == 0 ? "snapshot still pending, retrying" : "no flush result");
+  g_sram_suspend_flush = -1;
+  RtlSramKick();
   PspRenderer_Resume();
   Audio_PowerResume();
   /* Power resume can restart the ME producer while the HOME dialog is still open. */
@@ -554,6 +564,7 @@ int main(int argc, char **argv) {
   Audio_Init();
   #endif
 
+  RtlSramInit(g_app_dir);
   RtlReadSram();
   while (g_running) {
     SceCtrlData pad;
@@ -624,6 +635,8 @@ int main(int argc, char **argv) {
       DrawPpuFrame();
   }
 
+  if (!RtlSramShutdown())  /* before Audio_Shutdown: ParkUnsafe may never return */
+    PspLog("sram: exiting with an unpersisted snapshot");
   #if PSP_AUDIO_ENABLED
   Audio_Shutdown();
   #endif
