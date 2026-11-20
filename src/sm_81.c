@@ -535,7 +535,6 @@ void GameOverMenu_7_FadeOutToSoftReset(void) {  // 0x8190FE
 }
 
 void GameOverMenu_6_LoadGameMapView(void) {  // 0x819116
-  PspMenuMosaicReset();
   DisableHdmaObjects();
   WaitUntilEndOfVblankAndClearHdma();
   game_state = kGameState_5_FileSelectMap;
@@ -672,7 +671,6 @@ void FileSelectMenu_0_FadeOutConfigGfx(void) {  // 0x81944E
     PspMenuMosaicStepOut();
     return;
   }
-  PspMenuMosaicReset();
   ScreenOff();
   QueueSfx3_Max6(1);
   DisableHdmaObjects();
@@ -707,7 +705,6 @@ void FileSelectMenu_32_FadeOutToOptions(void) {  // 0x8194A3
   HandleFadeOut();
   PspMenuMosaicStepOut();
   if ((reg_INIDISP & 0xF) == 0) {
-    PspMenuMosaicReset();
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
     int v0 = 0;
@@ -1405,7 +1402,6 @@ void FileSelectMap_22(void) {  // 0x819E7B
   HandleFadeOut();
   PspMenuMosaicStepOut();
   if ((reg_INIDISP & 0xF) == 0) {
-    PspMenuMosaicReset();
     game_state = kGameState_2_GameOptionsMenu;
     menu_index = 0;
   }

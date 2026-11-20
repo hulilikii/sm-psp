@@ -29,6 +29,22 @@
 #define SM_PSP_SW_PATH 1
 #endif
 
+/* Gate 5u: swizzled tile atlases. PSP_SWIZZLE is a bit mask: 1 = the BG/OBJ atlases (g_atlas2, g_atlas4), 2 = the mode 7
+ * tile atlas (g_atlas7). A swizzled texture is stored in blocks of 16 bytes x 8 rows (128 B), blocks in row-major order, rows
+ * inside a block consecutive: byte (xb, y) is at ((y >> 3) * (pitch / 16) + (xb >> 4)) * 128 + (y & 7) * 16 + (xb & 15).
+ * Texture coordinates do not change, only where EnsureTile*() store a tile and the swizzle flag of sceGuTexMode. A tile is
+ * 4 bytes (T4) or 8 bytes (T8) wide and 8 rows high, so it lies inside one block row and is still written with 32-bit stores,
+ * and the GE finds an 8x8 tile in one 128 B block instead of 8 rows `pitch` bytes apart. Only the three atlases qualify:
+ * they are written one tile at a time and never rewritten as a whole. Not swizzled: g_m7img and the layer images (CPU
+ * rewritten row by row, sampled in horizontal runs), the mosaic/subscreen/frame buffers (render targets can't be swizzled)
+ * and the small RAM icon/font textures. 0 (default): linear, as before. */
+#ifndef SM_PSP_SWIZZLE
+#define SM_PSP_SWIZZLE 0
+#endif
+#define SM_PSP_SWZ_BG (((SM_PSP_SWIZZLE) & 1) != 0)
+#define SM_PSP_SWZ_M7 (((SM_PSP_SWIZZLE) & 2) != 0)
+#define SWZ_FLAG(on) ((on) ? GU_TRUE : GU_FALSE)
+
 #if !SM_PSP_LOG && SM_PSP_SW_PATH < 0
 #error "SM_PSP_SW_PATH=-1 calibrates with the log clock (Now() is 0 without it): use PSP_LOG=1 or PSP_SW_PATH=0/1"
 #endif
@@ -999,6 +1015,9 @@ static void CaptureImpl(const Ppu *p, int line) {
       LayerWin(p, l, 1, &b->sm, &b->sl, &b->sr);  /* unsupported setups are flagged through subwin */
   }
   s->brightness = p->brightness & 15;
+// A mosaic transition replaces the brightness fade: the scene stays at full brightness under it. Applied in the full capture only, so line reuse and the log-build recheck agree. 
+  if (g_mosaic_size > 1)
+    s->brightness = 15;
   s->bg3prio = p->bg3priority ? 1 : 0;
   s->cg0 = p->cgram[0];
   s->forced = forced ? 1 : 0;
@@ -1574,6 +1593,14 @@ static bool EnsureTileHash(bool bpp4, int pt) {
   PROF(g_c_tdec++;)
   uint32_t *dst;
   int stride_words;
+#if SM_PSP_SWZ_BG
+// swizzled: atlas4 is 128 B wide (8 blocks per block row), atlas2 256 B (16); tile column (pt & 31 / 63) >> 2 picks the block, (pt & 3) * 4 the byte offset in the 16 B block row, the 8 tile rows are 16 B apart
+  if (bpp4)
+    dst = (uint32_t *)(g_atlas4 + ((((pt >> 5) << 3) + ((pt & 31) >> 2)) << 7) + (pt & 3) * 4);
+  else
+    dst = (uint32_t *)(g_atlas2 + ((((pt >> 6) << 4) + ((pt & 63) >> 2)) << 7) + (pt & 3) * 4);
+  stride_words = 16 / 4;
+#else
   if (bpp4) {
     dst = (uint32_t *)(g_atlas4 + (pt >> 5) * 8 * 128 + (pt & 31) * 4);
     stride_words = 128 / 4;
@@ -1581,6 +1608,7 @@ static bool EnsureTileHash(bool bpp4, int pt) {
     dst = (uint32_t *)(g_atlas2 + (pt >> 6) * 8 * 256 + (pt & 63) * 4);
     stride_words = 256 / 4;
   }
+#endif
   uint32_t any = 0, used = 0;
   for (int y = 0; y < 8; y++, dst += stride_words) {
     uint32_t w0 = src[y], w1 = bpp4 ? src[8 + y] : 0, row = 0;
@@ -1693,9 +1721,16 @@ static bool EnsureTile7(int t) {
   if (g_hash7[t] == h)
     return g_empty7[t];
   g_hash7[t] = h;
+#if SM_PSP_SWZ_M7
+// swizzled 128x128 T8: 8 blocks per block row; tile column (t & 15) >> 1 picks the block, (t & 1) * 8 the offset
+  uint32_t *dst = (uint32_t *)(g_atlas7 + ((((t >> 4) << 3) + ((t & 15) >> 1)) << 7) + (t & 1) * 8);
+  const int stride7 = 16 / 4;
+#else
   uint32_t *dst = (uint32_t *)(g_atlas7 + (t >> 4) * 8 * 128 + (t & 15) * 8);
+  const int stride7 = 128 / 4;
+#endif
   uint32_t any = 0;
-  for (int y = 0; y < 8; y++, dst += 128 / 4) {
+  for (int y = 0; y < 8; y++, dst += stride7) {
     uint32_t w0 = 0, w1 = 0;
     for (int x = 0; x < 4; x++) {
       w0 |= (uint32_t)(src[y * 8 + x] >> 8) << (8 * x);
@@ -4413,11 +4448,11 @@ static void BindBg(int l, int b, int p) {
   sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
   if (l < 2) {
     sceGuClutLoad(2, g_clut4[b][p]);
-    sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+    sceGuTexMode(GU_PSM_T4, 0, 0, SWZ_FLAG(SM_PSP_SWZ_BG));
     sceGuTexImage(0, 256, 512, 256, g_atlas4);
   } else {
     sceGuClutLoad(1, g_clut2[b][p]);
-    sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+    sceGuTexMode(GU_PSM_T4, 0, 0, SWZ_FLAG(SM_PSP_SWZ_BG));
     sceGuTexImage(0, 512, 512, 512, g_atlas2);
   }
 }
@@ -4427,7 +4462,7 @@ static void BindBgHalf(int p) {
   PROF(g_c_clut++;)
   sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
   sceGuClutLoad(1, g_clut2h[p]);
-  sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+  sceGuTexMode(GU_PSM_T4, 0, 0, SWZ_FLAG(SM_PSP_SWZ_BG));
   sceGuTexImage(0, 512, 512, 512, g_atlas2);
 }
 
@@ -4616,7 +4651,7 @@ static void DrawObjSegs(const ObjSeg *segs, int n, const BgVert *base, int brigh
     PROF(g_c_clut++;)
     sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
     sceGuClutLoad(2, g_clutobj[bright][sg->pal]);
-    sceGuTexMode(GU_PSM_T4, 0, 0, GU_FALSE);
+    sceGuTexMode(GU_PSM_T4, 0, 0, SWZ_FLAG(SM_PSP_SWZ_BG));
     sceGuTexImage(0, 256, 512, 256, g_atlas4);
     GeDraw(kVtBg, sg->n, base + sg->first);
   }
@@ -4638,7 +4673,7 @@ static void DrawM7(void) {
   PROF(g_c_clut++;)
   sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
   sceGuClutLoad(32, g_clut7);
-  sceGuTexMode(GU_PSM_T8, 0, 0, GU_FALSE);
+  sceGuTexMode(GU_PSM_T8, 0, 0, SWZ_FLAG(SM_PSP_SWZ_M7));
   sceGuTexImage(0, 128, 128, 128, g_atlas7);
   GeDraw(kVtTile, g_m7_nq * 2, g_m7v);
 }
@@ -6062,6 +6097,8 @@ static bool DrawGe(void) {
   if (g_m7w_frame)
     g_frames_m7w++;
   g_audit_now = false;
+  if (g_mosaic_size > 1)  /* transition frames are brightness-free by design: the software image would differ */
+    g_verify_now = false;
   Present(true);
   return true;
 }
@@ -6841,7 +6878,9 @@ static void PspRenderer_EndDraw(void) {
   bool drew_ge = false, held = false;
 
   if (g_ge_active && g_line_count > 0) {
-    if (DrawGe())
+    if (g_mosaic_size > 1 && g_lines[0].forced)
+      held = true;  /* mosaic handoff: the screen is blanked while the next scene loads; keep showing the last (peak mosaic) image */
+    else if (DrawGe())
       drew_ge = true;
     else if (g_ppu_skip_draw)
       held = true;  /* the software PPU skipped this frame, so there is no software image to fall back to */

@@ -4671,8 +4671,6 @@ void GameOptionsMenu_B_TransitionBackToFileSelect(void) {  // 0x82EE6A
   GameOptionsMenu_MosaicStepOut();
   if (reg_INIDISP == 0x80) {
     PspRenderer_ClearButtonIcons();
-    g_psp_options_mosaic_size = 1;
-    PspRenderer_SetMosaicTransition(1);
     EnableNMI();
     screen_fade_delay = 0;
     screen_fade_counter = 0;

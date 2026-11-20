@@ -16,7 +16,9 @@ static uint8 TitleFade(uint8 (*step)(void)) {
   uint8 done = step() & 1;
   g_title_inidisp = reg_INIDISP;
   if (done) {  /* reg_INIDISP keeps the original end state: 0x80 after a fade-out, 15 after a fade-in */
-    PspRenderer_SetMosaicTransition(1);
+// fade-out: stay at the peak (the renderer holds the last image while the screen is blanked and the next scene loads);
+// fade-in: the mosaic ends
+    PspRenderer_SetMosaicTransition(g_title_inidisp == 0x80 ? 16 : 1);
   } else {
     PspRenderer_SetMosaicTransition(16 - (g_title_inidisp & 0xF));
     reg_INIDISP = 15;
@@ -2032,6 +2034,7 @@ void CinematicFunc_Func9(void) {  // 0x8B9FAE
   uint16 j;
 
   if (TitleFade(AdvanceSlowScreenFadeOut) & 1) {
+    PspRenderer_SetMosaicTransition(1);  /* the demo start has no mosaic fade-in */
     EnableNMI();
     reg_BGMODE = 1;
     screen_fade_delay = 0;
