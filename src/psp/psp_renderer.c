@@ -6854,6 +6854,192 @@ static void B7RunWin(const char *tag, int sc, int segw, float uvh, int var) {
          (unsigned)copy, (unsigned)(sb / kB7Iters), (unsigned)(st / kB7Iters), (unsigned)mt, (unsigned)B7Verify());
 }
 
+/* Gate 5t-c: block windows. Hardware result of 5t-b: one bind per frame is 7-12x faster on the GE than a bind per segment and
+ * a swizzled plane is 40% faster again, but with window-relative |u|,|v| up to 360 the GE's interpolation is not exact at
+ * every matrix (45 deg 100%: 706 bad pixels, per-segment windows of <= 64: 0). Here the screen is cut into blocks of
+ * bw x bh pixels, every block gets the window of its own samples (extent about (bw + bh) * scale, kept below kB7Blk) and one
+ * bind, so |u|,|v| stay small like in the per-segment case while the binds drop from 224-1920 to 56-112. Segments are one
+ * row of one block (bw pixels, bw >= 32). The residue range [m0, m1] of a segment, which B7Prepare finds by scanning every
+ * pixel (2.4-3.6 ms), only depends on its start residue when the step is the same everywhere: min/max tables for the
+ * frame's a and c replace the scan (the scan is run too, once, and compared). */
+enum { kB7Blk = 128, kB7MaxBlk = 256 };
+typedef struct B7Blk { int wx, wy, first, n; } B7Blk;
+static B7Blk g_b7_blk[kB7MaxBlk];
+static int g_b7_nblk;
+static uint8_t g_b7_rmin[2][256], g_b7_rmax[2][256];
+
+static void B7ResTab(int step, int n, uint8_t *mn, uint8_t *mx) {
+  uint8_t off[kGameWidth];
+  for (int k = 0; k < n; k++)
+    off[k] = (uint8_t)((step * k) & 255);
+  for (int r0 = 0; r0 < 256; r0++) {
+    int lo = 255, hi = 0;
+    for (int k = 0; k < n; k++) {
+      int r = (r0 + off[k]) & 255;
+      if (r < lo) lo = r;
+      if (r > hi) hi = r;
+    }
+    mn[r0] = (uint8_t)lo;
+    mx[r0] = (uint8_t)hi;
+  }
+}
+
+/* tab: residue ranges from the tables, else by scanning the segment. Returns false if a block does not fit kB7Blk or a
+ * sample leaves the plane. */
+static bool B7PrepareBlocks(const int16_t *m, int bw, int bh, float uvh, bool tab, int *maxext) {
+  const int a = m[0], c = m[2];
+  const float du = (float)a / 256.0f, dv = (float)c / 256.0f;
+  if (tab) {
+    B7ResTab(a & 255, bw, g_b7_rmin[0], g_b7_rmax[0]);
+    B7ResTab(c & 255, bw, g_b7_rmin[1], g_b7_rmax[1]);
+  }
+  g_b7_nseg = 0;
+  g_b7_nblk = 0;
+  *maxext = 0;
+  for (int by0 = 0; by0 < kGameHeight; by0 += bh) {
+    for (int bx0 = 0; bx0 < kGameWidth; bx0 += bw) {
+      if (g_b7_nblk >= kB7MaxBlk || g_b7_nseg + bh > kB7MaxSegs)
+        return false;
+      const int first = g_b7_nseg, rows = IntMin(bh, kGameHeight - by0);
+      int gminx = kB7Plane, gminy = kB7Plane, gmaxx = 0, gmaxy = 0;
+      for (int r = by0; r < by0 + rows; r++) {
+        int32_t X0, Y0;
+        B7RowStart(m, r + 1, &X0, &Y0);
+        const int32_t Xs = X0 + a * bx0, Xe = X0 + a * (bx0 + bw), Ys = Y0 + c * bx0, Ye = Y0 + c * (bx0 + bw);
+        int mu0 = 255, mu1 = 0, mv0 = 255, mv1 = 0;
+        if (tab) {
+          mu0 = g_b7_rmin[0][Xs & 255];
+          mu1 = g_b7_rmax[0][Xs & 255];
+          mv0 = g_b7_rmin[1][Ys & 255];
+          mv1 = g_b7_rmax[1][Ys & 255];
+        } else {
+          for (int x = bx0; x < bx0 + bw; x++) {
+            int ru = (X0 + a * x) & 255, rv = (Y0 + c * x) & 255;
+            if (ru < mu0) mu0 = ru;
+            if (ru > mu1) mu1 = ru;
+            if (rv < mv0) mv0 = rv;
+            if (rv > mv1) mv1 = rv;
+          }
+        }
+        int minx = IntMin(Xs >> 8, Xe >> 8) - 1, maxx = IntMax(Xs >> 8, Xe >> 8) + 2;
+        int miny = IntMin(Ys >> 8, Ye >> 8) - 1, maxy = IntMax(Ys >> 8, Ye >> 8) + 2;
+        if (minx < 0 || miny < 0 || maxx >= kB7Plane || maxy >= kB7Plane)
+          return false;
+        if (minx < gminx) gminx = minx;
+        if (miny < gminy) gminy = miny;
+        if (maxx > gmaxx) gmaxx = maxx;
+        if (maxy > gmaxy) gmaxy = maxy;
+        const float su = (float)(256 - mu0 - mu1) / 512.0f - uvh * du, sv = (float)(256 - mv0 - mv1) / 512.0f - uvh * dv;
+        B7Seg *sg = &g_b7_seg[g_b7_nseg++];
+        sg->base = NULL;
+        sg->u0 = (float)Xs / 256.0f + su;
+        sg->u1 = (float)Xe / 256.0f + su;
+        sg->v0 = (float)Ys / 256.0f + sv;
+        sg->v1 = (float)Ye / 256.0f + sv;
+        sg->x0 = (int16_t)bx0;
+        sg->x1 = (int16_t)(bx0 + bw);
+        sg->y = (int16_t)r;
+      }
+      const int wx = gminx & ~15, wy = gminy & ~7;  /* block-aligned for the swizzled plane */
+      const int ext = IntMax(gmaxx - wx, gmaxy - wy);
+      if (ext >= kB7Blk)
+        return false;
+      if (ext > *maxext)
+        *maxext = ext;
+      for (int i = first; i < g_b7_nseg; i++) {
+        g_b7_seg[i].u0 -= (float)wx;
+        g_b7_seg[i].u1 -= (float)wx;
+        g_b7_seg[i].v0 -= (float)wy;
+        g_b7_seg[i].v1 -= (float)wy;
+      }
+      B7Blk *bk = &g_b7_blk[g_b7_nblk++];
+      bk->wx = wx;
+      bk->wy = wy;
+      bk->first = first;
+      bk->n = g_b7_nseg - first;
+    }
+  }
+  return true;
+}
+
+/* One frame: a bind and a GU_TRIANGLES draw per block. */
+static void B7FrameBlk(bool swz, uint32_t *build_us, uint32_t *total_us) {
+  uint32_t t0 = Now();
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuClearColor(0xff000000);
+  sceGuClear(GU_COLOR_BUFFER_BIT);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+  sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+  sceGuClutLoad(32, g_b7_clut);
+  sceGuTexMode(GU_PSM_T8, 0, 0, SWZ_FLAG(swz));
+  TileVert *v = sceGuGetMemory((unsigned)g_b7_nseg * 6 * sizeof(TileVert));
+  TileVert *w = v;
+  for (int i = 0; i < g_b7_nseg; i++) {
+    const B7Seg *sg = &g_b7_seg[i];
+    const int16_t xl = (int16_t)(kLeft + sg->x0), xr = (int16_t)(kLeft + sg->x1);
+    const int16_t yt = (int16_t)(kTop + sg->y), yb = (int16_t)(kTop + sg->y + 1);
+    const TileVert tl = {sg->u0, sg->v0, xl, yt, 0}, bl = {sg->u0, sg->v0, xl, yb, 0};
+    const TileVert tr = {sg->u1, sg->v1, xr, yt, 0}, br = {sg->u1, sg->v1, xr, yb, 0};
+    w[0] = tl; w[1] = bl; w[2] = tr;
+    w[3] = tr; w[4] = bl; w[5] = br;
+    w += 6;
+  }
+  for (int b = 0; b < g_b7_nblk; b++) {
+    const B7Blk *bk = &g_b7_blk[b];
+    const uint8_t *tex = swz ? g_b7_plane_swz + (bk->wy >> 3) * (kB7Plane * 8) + (bk->wx >> 4) * 128
+                             : g_b7_plane + bk->wy * kB7Plane + bk->wx;
+    sceGuTexImage(0, kB7Blk, kB7Blk, kB7Plane, tex);  /* also flushes the texture cache: once per block */
+    sceGuDrawArray(GU_TRIANGLES, kVtTile, bk->n * 6, NULL, v + bk->first * 6);
+  }
+  uint32_t t1 = Now();
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  *build_us = t1 - t0;
+  *total_us = Now() - t0;
+}
+
+static void B7RunBlk(const char *tag, int sc, int bw, int bh, bool swz) {
+  static B7Seg ref[kB7MaxSegs];
+  int ext = 0;
+  uint32_t t = Now();
+  bool ok = B7PrepareBlocks(g_b7_m, bw, bh, 0.5f, false, &ext);
+  const uint32_t scan = Now() - t;
+  if (!ok) {
+    PspLog("b7%s: %d deg %d%% blk-%s %dx%d unfit (a block needs a window >= %d or leaves the plane)", tag, kB7Deg[sc],
+           kB7Pct[sc], swz ? "swz" : "lin", bw, bh, kB7Blk);
+    return;
+  }
+  memcpy(ref, g_b7_seg, (size_t)g_b7_nseg * sizeof(B7Seg));
+  t = Now();
+  ok = B7PrepareBlocks(g_b7_m, bw, bh, 0.5f, true, &ext);
+  const uint32_t tabus = Now() - t;
+  const bool tabok = ok && memcmp(ref, g_b7_seg, (size_t)g_b7_nseg * sizeof(B7Seg)) == 0;
+  uint32_t sb = 0, st = 0, mt = 0;
+  for (int i = 0; i <= kB7Iters; i++) {
+    uint32_t b, tt;
+    B7FrameBlk(swz, &b, &tt);
+    if (i == 0)
+      continue;
+    sb += b;
+    st += tt;
+    if (tt > mt)
+      mt = tt;
+  }
+  PspLog("b7%s: %d deg %d%% blk-%s %dx%d binds=%d segs=%d maxext=%d prep_scan=%u prep_tab=%u tabok=%d build=%u total=%u max=%u "
+         "us bad=%u",
+         tag, kB7Deg[sc], kB7Pct[sc], swz ? "swz" : "lin", bw, bh, g_b7_nblk, g_b7_nseg, ext, (unsigned)scan, (unsigned)tabus,
+         (int)tabok, (unsigned)(sb / kB7Iters), (unsigned)(st / kB7Iters), (unsigned)mt, (unsigned)B7Verify());
+}
+
 static void B7Run(const char *tag, int sc, int segw, float uvh) {
   const bool strips = segw > 0;
   uint32_t prep = 0, sb = 0, st = 0, mt = 0;
@@ -6912,6 +7098,10 @@ static void B7Scenario(const char *tag, int sc) {
       B7RunWin(tag, sc, kSeg[k], 0.5f, var);
       B7RunWin(tag, sc, kSeg[k], 0.0f, var);
     }
+  static const int kBlk[3][2] = {{32, 32}, {32, 16}, {64, 16}};  /* block windows (centre only: corner never worked) */
+  for (int k = 0; k < 3; k++)
+    for (int swz = 0; swz < 2; swz++)
+      B7RunBlk(tag, sc, kBlk[k][0], kBlk[k][1], swz != 0);
 }
 
 static void Bench5r(void) {
