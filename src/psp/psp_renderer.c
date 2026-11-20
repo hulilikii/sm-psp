@@ -91,6 +91,8 @@ enum {
   kAtlas7Bytes = 128 * 128,
   kVramSub = kVramTexture,                    /* subscreen composite target: 256x256 8888; shares the software-frame texture (never both in one frame) */
   kSubBytes = 256 * 256 * 4,
+  kTintTexW = 8, kTintTexH = 256, kTintTexBytes = kTintTexW * kTintTexH * 4,
+  kVramTint = kVramSub + kLayers * 128 * 128 * 4,  /* smooth-tint strip (8x256 8888), behind the three mosaic source images */
   kVramSubZ = kVramAtlas7 + kAtlas7Bytes,     /* its depth buffer: 256x256 16 bit */
   kSubZBytes = 256 * 256 * 2,
   kVramNeeded = kVramSubZ + kSubZBytes,
@@ -149,6 +151,7 @@ typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
 typedef struct ColorVert { uint32_t color; int16_t x, y, z; } ColorVert;
 typedef struct ColorVertF { uint32_t color; float x, y, z; } ColorVertF;
  CASSERT(sizeof(ColorVertF) == 16);
+CASSERT(sizeof(TileVert) == 16);  /* u, v (2 x 4) + x, y, z (3 x 2) padded to the float alignment: the GE vertex size of kVtTile */
 typedef struct Run { uint16_t r0, r1, first; } Run;
 /* Gate 5h-c: BG and sprite quads (two vertices each) use a 10-byte vertex with 16-bit texture coordinates (texel units in
  * through mode, always integers here) and are written as five 32-bit words per quad instead of ten 16/32-bit stores
@@ -379,6 +382,8 @@ static int g_obj_dry_n;
  * 128x128 8888 image per tile priority; the GE stretches it (nearest) over each run. */
 enum { kMosDim = 128, kMosVerify = 16, kMosMinBright = 6, kMosHiBright = 12, kMosHiVerify = 8,
        kMosImgBytes = kMosDim * kMosDim * 4 };
+CASSERT(kLayers * kMosImgBytes + kTintTexBytes <= kSubBytes);  /* the smooth-tint strip fits behind the mosaic images */
+CASSERT(kVramTint == kVramSub + kLayers * kMosImgBytes && (kVramTint & 63) == 0);
 typedef struct MosLayer { bool on, any[2]; int size, start; TileVert *v; } MosLayer;
 static MosLayer g_mos[kLayers];
 #if SM_PSP_MOS_GE
@@ -579,16 +584,94 @@ static uint32_t BakeColor(uint16_t c, int brightness, bool transparent) {
   return (transparent ? 0u : 0xff000000u) | b << 16 | g << 8 | r;
 }
 
-static inline uint32_t TintMidColor(uint32_t a, uint32_t b) {
-  uint32_t r = (((a >> 0) & 255) + ((b >> 0) & 255)) >> 1;
-  uint32_t g = (((a >> 8) & 255) + ((b >> 8) & 255)) >> 1;
-  uint32_t bl = (((a >> 16) & 255) + ((b >> 16) & 255)) >> 1;
-  return 0xff000000u | bl << 16 | g << 8 | r;
+/* Texture state every scene pass (BG, OBJ, mode 7, restore passes) assumes; set at the top of the scene list. A pass that
+ * changes any of it re-establishes all of it afterwards. Texture mode and image are bound by each pass itself. */
+static void SceneTexState(void) {
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
 }
 
-static inline void TintAddPair(ColorVertF *v, uint32_t color, float y) {
-  v[0] = (ColorVertF){color, (float)kLeft, y, 0.0f};
-  v[1] = (ColorVertF){color, (float)(kLeft + kGameWidth), y, 0.0f};
+/* Gate 5t: smooth tint. The SNES fixed colour is 5 bits per channel and changes in steps (HDMA bands), and the main target
+ * is RGB565, so a plain Gouraud ramp is quantised back to the same bands. Instead the ramp is built here as an 8x256 8888
+ * strip: row y holds the fixed colour of tint row y, blended between neighbouring bands over min(len) rows around each
+ * band boundary (plateaus stay exact), and ordered-dithered (4x4 Bayer) between the two nearest 5-bit levels. Every texel
+ * is therefore a colour the PPU could have produced (BakeColor of an integer 5-5-5 value); flat bands are bit-exact.
+ * The GE adds/subtracts the strip with the unchanged blend setup. Runs of one half-colour group within one range are
+ * blended with each other only. Returns the number of groups (quad index of a group = g_tint[first run].v0 / 2).
+ * Called before the list is opened: the GE is idle, the strip is written through the uncached VRAM alias. */
+static int TintStripBuild(void) {
+  static const uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+  static int logged;
+  uint32_t *strip = (uint32_t *)(g_vram_u + kVramTint);
+  int groups = 0, rows = 0;
+  for (int k = 0; k < g_ntr; k++) {
+    int end = g_trange[k].first + g_trange[k].n;
+    for (int i = g_trange[k].first; i < end;) {
+      int j = i + 1;
+      while (j < end && g_tint[j].half == g_tint[i].half)
+        j++;
+      int grows = 0;
+      g_tint[i].v0 = (uint16_t)(2 * groups++);
+      for (int q = i; q < j; q++) {
+        const TintRun *c = &g_tint[q];
+        int len = (int)c->r1 - (int)c->r0;
+        int ra = c->r0, rb = c->r1;
+        int y0 = ra < 0 ? 0 : ra, y1 = rb > kTintTexH ? kTintTexH : rb;  /* never write outside the 8x256 strip */
+        if (len <= 0 || y1 <= y0)
+          continue;
+        const TintRun *pv = q > i ? &g_tint[q - 1] : NULL;  /* neighbours blend only when they touch this run */
+        const TintRun *nx = q + 1 < j ? &g_tint[q + 1] : NULL;
+        int plen = pv && pv->r1 == c->r0 ? (int)pv->r1 - (int)pv->r0 : 0;
+        int nlen = nx && nx->r0 == c->r1 ? (int)nx->r1 - (int)nx->r0 : 0;
+        int cr = c->fix & 31, cg = (c->fix >> 5) & 31, cb = (c->fix >> 10) & 31;
+        for (int y = y0; y < y1; y++) {
+          int pos2 = 2 * y + 1;  /* twice the row centre */
+          const TintRun *o = NULL;
+          int t = 256;           /* weight (of 256) of this run's colour */
+          if (plen > 0) {
+            int w = len < plen ? len : plen;
+            int d = pos2 - 2 * c->r0;
+            if (d < w) {
+              o = pv;
+              t = (d + w) * 256 / (2 * w);
+            }
+          }
+          if (!o && nlen > 0) {
+            int w = len < nlen ? len : nlen;
+            int d = 2 * c->r1 - pos2;
+            if (d < w) {
+              o = nx;
+              t = (d + w) * 256 / (2 * w);
+            }
+          }
+          int lr = cr * 16, lg = cg * 16, lb = cb * 16;  /* Q4 levels */
+          if (o) {
+            lr = (cr * t + (o->fix & 31) * (256 - t)) >> 4;
+            lg = (cg * t + ((o->fix >> 5) & 31) * (256 - t)) >> 4;
+            lb = (cb * t + ((o->fix >> 10) & 31) * (256 - t)) >> 4;
+          }
+          for (int x = 0; x < kTintTexW; x++) {
+            int bay = kBayer[y & 3][x & 3];
+            uint16_t col = (uint16_t)(((lr + bay) >> 4) | ((lg + bay) >> 4) << 5 | ((lb + bay) >> 4) << 10);
+            strip[y * kTintTexW + x] = BakeColor(col, 15, false);
+          }
+          rows++;
+          grows++;
+        }
+      }
+      g_tint[i].vn = grows ? 2 : 0;  /* the group's quad is drawn only when it has strip rows */
+      i = j;
+    }
+  }
+  __sync_synchronize();  /* CPU writes to VRAM (uncached alias) complete before the GE is started */
+  if (logged < 8) {
+    logged++;
+    PspLog("tintstrip: groups=%d runs=%d rows=%d", groups, g_ntint, rows);
+  }
+  return groups;
 }
 
  //software patch
@@ -4824,7 +4907,7 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
   if (blend)  /* subscreen composite quads + subscreen window masks, per row */
     geom += (uint32_t)g_line_count * (4 * sizeof(TileVert) + 18 * sizeof(ColorVert));
 #if SM_PSP_GE_SMOOTH_TINT
-  geom += (uint32_t)g_ntint * 6 * sizeof(ColorVertF);
+  geom += (uint32_t)g_ntint * 2 * sizeof(TileVert);  /* one textured quad per tint group, at most one per run */
 #else
   geom += (uint32_t)g_ntint * 4 * sizeof(ColorVert);
 #endif
@@ -5540,6 +5623,21 @@ static bool DrawGe(void) {
 
   S5I_FRAME(total, obj_quads, blend, tint);  /* log only */
 
+  /* Gate 5t: smooth tint is valid when no colour window clips the tint (windowed rows keep the rectangle path). The strip
+   * is written now, while the GE is idle. */
+  bool smooth_tint = false;
+  int tint_groups = 0;
+#if SM_PSP_GE_SMOOTH_TINT
+  smooth_tint = tint;
+  for (int i = 0; i < g_ntint; i++)
+    if (g_tint[i].cwm != 0) {
+      smooth_tint = false;
+      break;
+    }
+  if (smooth_tint)
+    tint_groups = TintStripBuild();
+#endif
+
   sceKernelDcacheWritebackRange(g_clut2[kClutBright], sizeof(g_clut2[0]));
   sceKernelDcacheWritebackRange(g_clut4[kClutBright], sizeof(g_clut4[0]));
   sceKernelDcacheWritebackRange(g_clutobj[kClutBright], sizeof(g_clutobj[0]));
@@ -5812,71 +5910,29 @@ static bool DrawGe(void) {
 
   VTX_FLUSH();  /* every pool vertex is written: make it visible to the GE before any draw that reads it */
   PROF(g_pc_emit = Now() - g_t_list_start;)
-// Smooth tint is valid when no colour window clips the tint. Windowed rows retain the original rectangle path. The original fixed-colour values remain the control points; only the GE interpolation between them changes.
-  bool smooth_tint = false;
-#if SM_PSP_GE_SMOOTH_TINT
-  smooth_tint = tint;
-  for (int i = 0; i < g_ntint; i++) {
-    if (g_tint[i].cwm != 0) {
-      smooth_tint = false;
-      break;
-    }
-  }
-#endif
-
   ColorVert *tv = NULL;
-  ColorVertF *gtv = NULL;
+  TileVert *gq = NULL;
 
-  if (smooth_tint) {
-    int nv = 0;
-
-    /* Allocate six vertices for the first run of each half-colour group,
-     * then four for each following run. Adjacent runs share their boundary. */
+  if (smooth_tint) {  /* one textured quad per group, rows 1:1 with the strip */
+    gq = tint_groups ? sceGuGetMemory((unsigned)tint_groups * 2 * sizeof(TileVert)) : NULL;
     for (int k = 0; k < g_ntr; k++) {
       int end = g_trange[k].first + g_trange[k].n;
       for (int i = g_trange[k].first; i < end;) {
         int j = i + 1;
         while (j < end && g_tint[j].half == g_tint[i].half)
           j++;
-
-        for (int q = i; q < j; q++) {
-          g_tint[q].v0 = (uint16_t)nv;
-          g_tint[q].vn = (uint8_t)(q == i ? 6 : 4);
-          nv += g_tint[q].vn;
+        if (!g_tint[i].vn) {  /* no strip rows: nothing is drawn for this group */
+          i = j;
+          continue;
         }
-        i = j;
-      }
-    }
-
-    gtv = nv ? sceGuGetMemory(nv * sizeof(ColorVertF)) : NULL;
-
-    for (int k = 0; k < g_ntr; k++) {
-      int end = g_trange[k].first + g_trange[k].n;
-      for (int i = g_trange[k].first; i < end;) {
-        int j = i + 1;
-        while (j < end && g_tint[j].half == g_tint[i].half)
-          j++;
-
-        for (int q = i; q < j; q++) {
-          TintRun *tr = &g_tint[q];
-          uint32_t col = BakeColor(tr->fix, 15, false);
-          uint32_t next = q + 1 < j ? BakeColor(g_tint[q + 1].fix, 15, false) : col;
-          ColorVertF *v = gtv + tr->v0;
-          int r0 = tr->r0;
-          int r1 = tr->r1;
-          float ym = (float)kTop + ((float)r0 + (float)r1) * 0.5f;
-
-          int n = 0;
-          if (q == i) {
-            TintAddPair(v + n, col, (float)(kTop + r0));
-            n += 2;
-          }
-
-          TintAddPair(v + n, col, ym);
-          n += 2;
-
-          TintAddPair(v + n, TintMidColor(col, next), (float)(kTop + r1));
-        }
+        int ya = g_tint[i].r0, yb = g_tint[j - 1].r1;
+        if (ya < 0)
+          ya = 0;
+        if (yb > kTintTexH)
+          yb = kTintTexH;
+        TileVert *v = gq + g_tint[i].v0;
+        v[0] = (TileVert){0.0f, (float)ya, (int16_t)kLeft, (int16_t)(kTop + ya), 0};
+        v[1] = (TileVert){(float)kGameWidth, (float)yb, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + yb), 0};
         i = j;
       }
     }
@@ -6046,26 +6102,40 @@ static bool DrawGe(void) {
         sceGuScissor(0, 0, kPspWidth, kPspHeight);
       sceGuDisable(GU_DEPTH_TEST);
       sceGuEnable(GU_BLEND);
-      sceGuDisable(GU_TEXTURE_2D);
       sceGuDisable(GU_ALPHA_TEST);
+      if (smooth_tint) {  /* gate 5t: CPU-written strip (no GE dependency, so TexFlush only) */
+        sceGuEnable(GU_TEXTURE_2D);
+        sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+        sceGuTexImage(0, kTintTexW, kTintTexH, kTintTexW, g_vram_u + kVramTint);
+        sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+        sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+        sceGuTexWrap(GU_REPEAT, GU_CLAMP);
+        sceGuTexScale(1.0f, 1.0f);
+        sceGuTexOffset(0.0f, 0.0f);
+        sceGuTexFlush();  /* the GE texture cache may hold the previous frame's strip; the CPU wrote the new one before the list */
+      } else {
+        sceGuDisable(GU_TEXTURE_2D);
+      }
       for (int i = rg->first; i < rg->first + rg->n;) {
         int j = i;
         while (j < rg->first + rg->n && g_tint[j].half == g_tint[i].half)
           j++;
-        int nvert = g_tint[j - 1].v0 + g_tint[j - 1].vn - g_tint[i].v0;
-        if (nvert > 0) {
-          unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
+        unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
+        if (smooth_tint) {
           sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
-          if (smooth_tint) {
-            sceGuShadeModel(GU_SMOOTH);
-            sceGuDrawArray(GU_TRIANGLE_STRIP, kVtColorF, nvert, NULL, gtv + g_tint[i].v0);
-            sceGuShadeModel(GU_FLAT);
-          } else {
+          if (g_tint[i].vn)
+            GeDraw(kVtTile, 2, gq + g_tint[i].v0);
+        } else {
+          int nvert = g_tint[j - 1].v0 + g_tint[j - 1].vn - g_tint[i].v0;
+          if (nvert > 0) {
+            sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
             GeDraw(kVtColor, nvert, tv + g_tint[i].v0);
           }
         }
         i = j;
       }
+      if (smooth_tint)  /* back to the scene's texture state for the restore passes */
+        SceneTexState();
       sceGuEnable(GU_TEXTURE_2D);
       sceGuEnable(GU_ALPHA_TEST);
       sceGuDisable(GU_BLEND);
