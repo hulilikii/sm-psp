@@ -6485,6 +6485,8 @@ static uint8_t g_b7_plane[kB7Plane * (kB7Plane + kB7PadRows)] __attribute__((ali
 static uint32_t g_b7_clut[256] __attribute__((aligned(64)));
 static B7Seg g_b7_seg[kB7MaxSegs];
 static int g_b7_nseg;
+/* Gate 5t-b: the plane again in PSP swizzle order (16 x 8 byte blocks, 1024 B pitch), for the frame-window variants. */
+static uint8_t g_b7_plane_swz[kB7Plane * kB7Plane] __attribute__((aligned(64)));
 static int16_t g_b7_m[8];  /* matrix of the scenario being run: a, b, c, d, centre x, y, scroll h, v */
 static uint32_t g_b7_rng = 0x2545F491u;
 /* deg, scale %, a = d = cos * scale * 256, b = sin * scale * 256, c = -b (as the Ceres elevator sets M7A-M7D) */
@@ -6645,6 +6647,187 @@ static uint32_t B7Verify(void) {
   return bad;
 }
 
+/* PSPSDK samples swizzle_fast: width in bytes, blocks of 16 x 8 bytes. */
+static void B7SwizzlePlane(void) {
+  const unsigned wb = kB7Plane / 16, hb = kB7Plane / 8, src_pitch = (kB7Plane - 16) / 4, src_row = kB7Plane * 8;
+  const uint8_t *ysrc = g_b7_plane;
+  uint32_t *dst = (uint32_t *)g_b7_plane_swz;
+  for (unsigned by = 0; by < hb; by++, ysrc += src_row) {
+    const uint8_t *xsrc = ysrc;
+    for (unsigned bx = 0; bx < wb; bx++, xsrc += 16) {
+      const uint32_t *src = (const uint32_t *)xsrc;
+      for (unsigned j = 0; j < 8; j++, src += src_pitch) {
+        *dst++ = *src++;
+        *dst++ = *src++;
+        *dst++ = *src++;
+        *dst++ = *src++;
+      }
+    }
+  }
+}
+
+/* Frame window strategy (Gate 5t-b). B7Prepare/B7Frame bind a new 512x512 window for every segment (sceGuTexImage also
+ * flushes the GE texture cache) and draw one strip each: 224 to 1800 binds, flushes and draws a frame. Here every segment of
+ * the frame shares ONE window (origin bx, a multiple of 16, by, a multiple of 8, so the same origin is valid in the swizzled
+ * plane), and all segments are one GU_TRIANGLES draw: a single bind, no mid-frame cache flush, the segment count only costs
+ * vertices. u/v are relative to the window; the plane position of every sample is unchanged, so a bad pixel means the GE's
+ * texture coordinate interpolation (larger |u| than in the per-segment windows) is the limit. Returns false if the frame
+ * does not fit one window or leaves the plane. */
+static bool B7PrepareFrame(const int16_t *m, int segw, float uvh, int *wbx, int *wby) {
+  const int a = m[0], c = m[2];
+  const float du = (float)a / 256.0f, dv = (float)c / 256.0f;
+  int gminx = kB7Plane, gminy = kB7Plane, gmaxx = 0, gmaxy = 0;
+  g_b7_nseg = 0;
+  for (int r = 0; r < kGameHeight; r++) {
+    int32_t X0, Y0;
+    B7RowStart(m, r + 1, &X0, &Y0);
+    for (int xs = 0; xs < kGameWidth; xs += segw) {
+      const int xe = xs + segw;
+      int mu0 = 255, mu1 = 0, mv0 = 255, mv1 = 0;
+      for (int x = xs; x < xe; x++) {
+        int ru = (X0 + a * x) & 255, rv = (Y0 + c * x) & 255;
+        if (ru < mu0) mu0 = ru;
+        if (ru > mu1) mu1 = ru;
+        if (rv < mv0) mv0 = rv;
+        if (rv > mv1) mv1 = rv;
+      }
+      const int32_t Xs = X0 + a * xs, Xe = X0 + a * xe, Ys = Y0 + c * xs, Ye = Y0 + c * xe;
+      int minx = IntMin(Xs >> 8, Xe >> 8) - 1, maxx = IntMax(Xs >> 8, Xe >> 8) + 2;
+      int miny = IntMin(Ys >> 8, Ye >> 8) - 1, maxy = IntMax(Ys >> 8, Ye >> 8) + 2;
+      if (minx < 0 || miny < 0 || maxx >= kB7Plane || maxy >= kB7Plane)
+        return false;
+      if (minx < gminx) gminx = minx;
+      if (miny < gminy) gminy = miny;
+      if (maxx > gmaxx) gmaxx = maxx;
+      if (maxy > gmaxy) gmaxy = maxy;
+      const float su = (float)(256 - mu0 - mu1) / 512.0f - uvh * du, sv = (float)(256 - mv0 - mv1) / 512.0f - uvh * dv;
+      B7Seg *sg = &g_b7_seg[g_b7_nseg++];
+      sg->base = NULL;
+      sg->u0 = (float)Xs / 256.0f + su;  /* plane position, exact: multiples of 1/512 below 2^11 */
+      sg->u1 = (float)Xe / 256.0f + su;
+      sg->v0 = (float)Ys / 256.0f + sv;
+      sg->v1 = (float)Ye / 256.0f + sv;
+      sg->x0 = (int16_t)xs;
+      sg->x1 = (int16_t)xe;
+      sg->y = (int16_t)r;
+    }
+  }
+  const int bx = gminx & ~15, by = gminy & ~7;
+  if (gmaxx - bx >= kB7Win || gmaxy - by >= kB7Win)
+    return false;
+  for (int i = 0; i < g_b7_nseg; i++) {  /* window-relative; subtracting integers is exact */
+    g_b7_seg[i].u0 -= (float)bx;
+    g_b7_seg[i].u1 -= (float)bx;
+    g_b7_seg[i].v0 -= (float)by;
+    g_b7_seg[i].v1 -= (float)by;
+  }
+  *wbx = bx;
+  *wby = by;
+  return true;
+}
+
+/* Copies the 512x512 window into the free texture region of VRAM (kVramTexture, 256 KB; nothing else uses it at boot),
+ * keeping the layout (linear, or swizzled with 512 B pitch). The part of the window outside the plane is not written: no
+ * segment samples it. */
+static void B7CopyWindow(int bx, int by, bool swz) {
+  uint8_t *dst = g_vram_u + kVramTexture;
+  if (!swz) {
+    const int nx = IntMin(kB7Win, kB7Plane - bx), ny = IntMin(kB7Win, kB7Plane - by);
+    for (int y = 0; y < ny; y++)
+      memcpy(dst + y * kB7Win, g_b7_plane + (by + y) * kB7Plane + bx, (size_t)nx);
+  } else {
+    const int nbx = IntMin(kB7Win / 16, kB7Plane / 16 - (bx >> 4)), nby = IntMin(kB7Win / 8, kB7Plane / 8 - (by >> 3));
+    for (int j = 0; j < nby; j++)
+      for (int i = 0; i < nbx; i++)
+        memcpy(dst + ((j * (kB7Win / 16) + i) << 7),
+               g_b7_plane_swz + ((((by >> 3) + j) * (kB7Plane / 16) + (bx >> 4) + i) << 7), 128);
+  }
+}
+
+/* One frame: a single bind of the window, a single GU_TRIANGLES draw of every segment (two triangles each). */
+static void B7FrameWin(const uint8_t *tex, int stride, bool swz, uint32_t *build_us, uint32_t *total_us) {
+  uint32_t t0 = Now();
+  sceGuStart(GU_DIRECT, g_gu_list);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuClearColor(0xff000000);
+  sceGuClear(GU_COLOR_BUFFER_BIT);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+  sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
+  sceGuClutLoad(32, g_b7_clut);
+  sceGuTexMode(GU_PSM_T8, 0, 0, SWZ_FLAG(swz));
+  sceGuTexImage(0, kB7Win, kB7Win, stride, tex);  /* also flushes the texture cache: once per frame */
+  TileVert *v = sceGuGetMemory((unsigned)g_b7_nseg * 6 * sizeof(TileVert));
+  TileVert *w = v;
+  for (int i = 0; i < g_b7_nseg; i++) {
+    const B7Seg *sg = &g_b7_seg[i];
+    const int16_t xl = (int16_t)(kLeft + sg->x0), xr = (int16_t)(kLeft + sg->x1);
+    const int16_t yt = (int16_t)(kTop + sg->y), yb = (int16_t)(kTop + sg->y + 1);
+    const TileVert tl = {sg->u0, sg->v0, xl, yt, 0}, bl = {sg->u0, sg->v0, xl, yb, 0};
+    const TileVert tr = {sg->u1, sg->v1, xr, yt, 0}, br = {sg->u1, sg->v1, xr, yb, 0};
+    w[0] = tl; w[1] = bl; w[2] = tr;  /* same facing as the strip (tl, bl, tr, br) */
+    w[3] = tr; w[4] = bl; w[5] = br;
+    w += 6;
+  }
+  sceGuDrawArray(GU_TRIANGLES, kVtTile, g_b7_nseg * 6, NULL, v);
+  uint32_t t1 = Now();
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  *build_us = t1 - t0;
+  *total_us = Now() - t0;
+}
+
+/* var: bit 0 = swizzled plane, bit 1 = window copied to VRAM (the copy would be paid every frame while rotating: it is
+ * reported as copy=, not included in total=). */
+static void B7RunWin(const char *tag, int sc, int segw, float uvh, int var) {
+  static const char *const kName[4] = {"ram-lin ", "ram-swz ", "vram-lin", "vram-swz"};
+  const bool swz = (var & 1) != 0, vram = (var & 2) != 0;
+  int bx = 0, by = 0;
+  uint32_t t = Now();
+  bool ok = B7PrepareFrame(g_b7_m, segw, uvh, &bx, &by);
+  uint32_t prep = Now() - t, copy = 0, sb = 0, st = 0, mt = 0;
+  if (!ok) {
+    PspLog("b7%s: %d deg %d%% win-%s seg=%d unfit (the frame does not fit one 512 window / leaves the plane)", tag, kB7Deg[sc],
+           kB7Pct[sc], kName[var], segw);
+    return;
+  }
+  const uint8_t *tex;
+  int stride;
+  if (vram) {
+    t = Now();
+    B7CopyWindow(bx, by, swz);
+    copy = Now() - t;
+    tex = g_vram_u + kVramTexture;
+    stride = kB7Win;
+  } else if (swz) {
+    tex = g_b7_plane_swz + (by >> 3) * (kB7Plane * 8) + (bx >> 4) * 128;
+    stride = kB7Plane;
+  } else {
+    tex = g_b7_plane + by * kB7Plane + bx;
+    stride = kB7Plane;
+  }
+  for (int i = 0; i <= kB7Iters; i++) {
+    uint32_t b, tt;
+    B7FrameWin(tex, stride, swz, &b, &tt);
+    if (i == 0)
+      continue;  /* first frame is cold */
+    sb += b;
+    st += tt;
+    if (tt > mt)
+      mt = tt;
+  }
+  PspLog("b7%s: %d deg %d%% win-%s seg=%d uvh=%s segs=%d verts=%d prep=%u copy=%u build=%u total=%u max=%u us bad=%u", tag,
+         kB7Deg[sc], kB7Pct[sc], kName[var], segw, uvh > 0.25f ? "centre" : "corner", g_b7_nseg, g_b7_nseg * 6, (unsigned)prep,
+         (unsigned)copy, (unsigned)(sb / kB7Iters), (unsigned)(st / kB7Iters), (unsigned)mt, (unsigned)B7Verify());
+}
+
 static void B7Run(const char *tag, int sc, int segw, float uvh) {
   const bool strips = segw > 0;
   uint32_t prep = 0, sb = 0, st = 0, mt = 0;
@@ -6698,6 +6881,11 @@ static void B7Scenario(const char *tag, int sc) {
     B7Run(tag, sc, kSeg[k], 0.5f);
     B7Run(tag, sc, kSeg[k], 0.0f);
   }
+  for (int k = 0; k < 3; k += 2)  /* frame window: one bind, one draw (segments 256 and 32) */
+    for (int var = 0; var < 4; var++) {
+      B7RunWin(tag, sc, kSeg[k], 0.5f, var);
+      B7RunWin(tag, sc, kSeg[k], 0.0f, var);
+    }
 }
 
 static void Bench5r(void) {
@@ -6713,6 +6901,12 @@ static void Bench5r(void) {
   sceKernelDcacheWritebackRange(g_b7_plane, sizeof(g_b7_plane));
   PspLog("b7: plane build %u us (16384 cells), writeback of %u KB %u us, uv x=%.1f y=%.1f", (unsigned)build,
          (unsigned)(sizeof(g_b7_plane) >> 10), (unsigned)(Now() - t0), (double)g_uvh[0], (double)g_uvh[1]);
+  t0 = Now();
+  B7SwizzlePlane();
+  build = Now() - t0;
+  t0 = Now();
+  sceKernelDcacheWritebackRange(g_b7_plane_swz, sizeof(g_b7_plane_swz));
+  PspLog("b7: plane swizzle %u us (1 MB), writeback %u us", (unsigned)build, (unsigned)(Now() - t0));
   for (int sc = 0; sc < kB7Scen; sc++)
     B7Scenario("", sc);
   B7Scenario("-again", 0);  /* A/B/A: the first scenario once more */
