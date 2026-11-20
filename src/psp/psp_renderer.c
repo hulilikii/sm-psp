@@ -674,7 +674,7 @@ static int TintStripBuild(void) {
   __sync_synchronize();  /* CPU writes to VRAM (uncached alias) complete before the GE is started */
   if (logged < 8) {
     logged++;
-    PspLog("tintstrip: groups=%d runs=%d rows=%d", groups, g_ntint, rows);
+    PspLog("tintstrip: groups=%d runs=%d rows=%d ranges=%d scissor=%d", groups, g_ntint, rows, g_ntr, g_scissor_mode);
   }
   return groups;
 }
@@ -5636,7 +5636,7 @@ static bool DrawGe(void) {
       smooth_tint = false;
       break;
     }
-  if (smooth_tint)
+  if (smooth_tint) {
     tint_groups = TintStripBuild();
   } else if (tint) {
     static int flat_logged;
