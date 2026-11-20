@@ -3002,6 +3002,28 @@ static bool SubObjHit(void) {
 
 /* One mode 7 row of the image path, computed as PpuDrawBackground_mode7 in ppu.c does (y = 1-based line):
  * an 8-bit colour index per pixel, 0 = transparent. */
+/* Gate 5v: four pixels per step in the non-mosaic loop. Hardware probe (gate 5t-d, rows rendered twice back to back): the warm
+ * render is within 2-5% of the cold one at 333 and 222 MHz, so M7RenderRow costs instructions and load latency (about 36 cycles
+ * a pixel), not cache misses. With -fno-strict-aliasing the byte store to dst may alias g_vram, so the compiler cannot start the
+ * next pixel's two dependent halfword loads before it. Here the four tile loads, then the four pixel loads, are issued before
+ * the four stores. Same arithmetic, same results (tools/test_m7_row4.sh compares both loops on random rows); four positions
+ * outside the field or inside it are told apart by one test, (a | b | c | d) > outside, exact because outside is a bit mask
+ * (0x3ffff) or never true (0xffffffff). PSP_M7_ROW4=0 builds the one pixel loop. */
+#ifndef SM_PSP_M7_ROW4
+#define SM_PSP_M7_ROW4 1
+#endif
+#if SM_PSP_M7_ROW4
+static inline unsigned M7Px(const uint16_t *vr, uint32_t xp, uint32_t yp, uint32_t outside, bool fill) {
+  unsigned tile = 0;
+  if ((xp | yp) > outside) {
+    if (!fill)
+      return 0;
+  } else {
+    tile = vr[(yp >> 11 & 0x7f) * 128 + (xp >> 11 & 0x7f)] & 0xff;
+  }
+  return vr[tile * 64 + (yp >> 8 & 7) * 8 + (xp >> 8 & 7)] >> 8;
+}
+#endif
 static void M7RenderRow(const LineSnap *ls, int y, uint8_t *dst) {
   const int16_t *m = ls->m7m;
   unsigned fl = ls->m7fl;
@@ -3026,6 +3048,34 @@ static void M7RenderRow(const LineSnap *ls, int y, uint8_t *dst) {
   uint32_t xpos = X0 + a * rx0, ypos = Y0 + c * rx0;
   uint32_t dx = xf ? 0u - a : a, dy = xf ? 0u - c : c;
   const uint16_t *vr = g_vram;
+#if SM_PSP_M7_ROW4
+  if (!mos) {
+    for (int x = 0; x < kGameWidth; x += 4) {  /* kGameWidth is a multiple of 4 */
+      const uint32_t x1 = xpos + dx, x2 = x1 + dx, x3 = x2 + dx, y1 = ypos + dy, y2 = y1 + dy, y3 = y2 + dy;
+      if ((xpos | x1 | x2 | x3 | ypos | y1 | y2 | y3) > outside) {  /* some pixel is outside the field */
+        dst[x] = (uint8_t)M7Px(vr, xpos, ypos, outside, fill);
+        dst[x + 1] = (uint8_t)M7Px(vr, x1, y1, outside, fill);
+        dst[x + 2] = (uint8_t)M7Px(vr, x2, y2, outside, fill);
+        dst[x + 3] = (uint8_t)M7Px(vr, x3, y3, outside, fill);
+      } else {
+        const unsigned t0 = vr[(ypos >> 11 & 0x7f) * 128 + (xpos >> 11 & 0x7f)] & 0xff;
+        const unsigned t1 = vr[(y1 >> 11 & 0x7f) * 128 + (x1 >> 11 & 0x7f)] & 0xff;
+        const unsigned t2 = vr[(y2 >> 11 & 0x7f) * 128 + (x2 >> 11 & 0x7f)] & 0xff;
+        const unsigned t3 = vr[(y3 >> 11 & 0x7f) * 128 + (x3 >> 11 & 0x7f)] & 0xff;
+        const unsigned p0 = vr[t0 * 64 + (ypos >> 8 & 7) * 8 + (xpos >> 8 & 7)] >> 8;
+        const unsigned p1 = vr[t1 * 64 + (y1 >> 8 & 7) * 8 + (x1 >> 8 & 7)] >> 8;
+        const unsigned p2 = vr[t2 * 64 + (y2 >> 8 & 7) * 8 + (x2 >> 8 & 7)] >> 8;
+        const unsigned p3 = vr[t3 * 64 + (y3 >> 8 & 7) * 8 + (x3 >> 8 & 7)] >> 8;
+        dst[x] = (uint8_t)p0;
+        dst[x + 1] = (uint8_t)p1;
+        dst[x + 2] = (uint8_t)p2;
+        dst[x + 3] = (uint8_t)p3;
+      }
+      xpos = x3 + dx;
+      ypos = y3 + dy;
+    }
+  } else {
+#else
   if (!mos) {
     for (int x = 0; x < kGameWidth; x++, xpos += dx, ypos += dy) {
       unsigned tile = 0;
@@ -3040,6 +3090,7 @@ static void M7RenderRow(const LineSnap *ls, int y, uint8_t *dst) {
       dst[x] = (uint8_t)(vr[tile * 64 + (ypos >> 8 & 7) * 8 + (xpos >> 8 & 7)] >> 8);
     }
   } else {
+#endif
     for (int x = 0; x < kGameWidth; x += size, xpos += dx * (uint32_t)size, ypos += dy * (uint32_t)size) {
       unsigned tile = 0, pixel = 0;
       if ((xpos | ypos) > outside) {
