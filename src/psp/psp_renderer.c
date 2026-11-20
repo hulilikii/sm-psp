@@ -434,6 +434,14 @@ static bool g_m7i_stale = true;  /* a page mode 7 reads was copied since the key
 static bool g_m7i_reuse_ok = SM_PSP_M7_REUSE;
 #if SM_PSP_LOG
 static uint32_t g_m7i_built, g_m7i_kept, g_m7i_audits, g_m7i_bad, g_m7i_auditn;
+static uint32_t g_m7i_stalef;  /* image frames that had to drop every stored row because a mode 7 VRAM page was written */
+/* PSP_M7_PROBE=1 (log builds): every 4th rendered row is rendered a second time into a scratch row straight away. The first
+ * render is cold (its tile map and tile data come from RAM), the second warm (they are in the data cache), so
+ * cold - warm is the time lost to cache misses and warm is the instruction cost. The probe is excluded from m7img cpu. */
+#ifndef SM_PSP_M7_PROBE
+#define SM_PSP_M7_PROBE 0
+#endif
+static uint32_t g_m7p_rows, g_m7p_cold, g_m7p_warm;
 #endif
 static uint16_t g_seen2[4096], g_seen4[2048];
 static uint8_t g_empty2[4096], g_empty4[2048];
@@ -3071,6 +3079,10 @@ static void M7PrepareImg(void) {
   PROF(uint32_t t0 = Now(); uint32_t taud = 0;)
   if (g_m7i_stale || !g_m7i_reuse_ok) {  /* no stored row is valid (rows that are not drawn now would be reused stale later) */
     memset(g_m7ikey, 0, sizeof(g_m7ikey));
+#if SM_PSP_LOG
+    if (g_m7i_stale)
+      g_m7i_stalef++;
+#endif
     g_m7i_stale = false;
   }
 #if SM_PSP_LOG
@@ -3083,6 +3095,20 @@ static void M7PrepareImg(void) {
     M7KeyOf(&g_lines[r], &k);
     bool render = memcmp(&g_m7ikey[r], &k, sizeof(k)) != 0;
     if (render) {
+#if SM_PSP_LOG && SM_PSP_M7_PROBE
+      if ((r & 3) == 0) {
+        uint8_t scratch[256] __attribute__((aligned(16)));
+        uint32_t tc = Now();
+        M7RenderRow(&g_lines[r], r + 1, g_m7img + r * 256);
+        uint32_t tm = Now();
+        M7RenderRow(&g_lines[r], r + 1, scratch);
+        uint32_t tw = Now();
+        g_m7p_rows++;
+        g_m7p_cold += tm - tc;
+        g_m7p_warm += tw - tm;
+        taud += tw - tm;
+      } else
+#endif
       M7RenderRow(&g_lines[r], r + 1, g_m7img + r * 256);
       g_m7ikey[r] = k;
       PROF(g_m7i_built++;)
@@ -7271,6 +7297,16 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  m7wrap: frames=%u ok=%d audited=%u", (unsigned)g_frames_m7w, (int)g_m7w_ok, (unsigned)g_m7w_vn);
     PspLog("  m7reuse: on=%d rows built=%u kept=%u audited=%u bad=%u", (int)g_m7i_reuse_ok, (unsigned)g_m7i_built,
            (unsigned)g_m7i_kept, (unsigned)g_m7i_audits, (unsigned)g_m7i_bad);
+    PspLog("  m7reuse: image frames with a dropped plane (mode 7 VRAM page written)=%u", (unsigned)g_m7i_stalef);
+#if SM_PSP_M7_PROBE
+    if (g_m7p_rows)
+      PspLog("  m7probe: rows=%u cold=%u.%u us/row warm=%u.%u us/row (miss share %d%%)", (unsigned)g_m7p_rows,
+             (unsigned)(g_m7p_cold * 10 / g_m7p_rows / 10), (unsigned)(g_m7p_cold * 10 / g_m7p_rows % 10),
+             (unsigned)(g_m7p_warm * 10 / g_m7p_rows / 10), (unsigned)(g_m7p_warm * 10 / g_m7p_rows % 10),
+             (int)(g_m7p_cold > g_m7p_warm ? (g_m7p_cold - g_m7p_warm) * 100 / g_m7p_cold : 0));
+    g_m7p_rows = g_m7p_cold = g_m7p_warm = 0;
+#endif
+    g_m7i_stalef = 0;
     g_m7i_built = g_m7i_kept = g_m7i_audits = 0;
 #if SM_PSP_TILE_GEN
     PspLog("  tilegen: on=%d skipped=%u audited=%u bad=%u", (int)g_tgen_ok, (unsigned)g_tg_skip, (unsigned)g_tg_audit, (unsigned)g_tg_bad);
