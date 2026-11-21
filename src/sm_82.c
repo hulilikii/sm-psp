@@ -3910,9 +3910,14 @@ CoroutineRet DoorTransitionFunction_LoadDoorHeaderEtc(void) {  // 0x82E2F7
   return kCoroutineNone;
 }
 
+#if SM_DOOR_DIAG && SM_DOOR_EASE
+void DoorTransitionDiagPrepare(void);
+#endif
+
 CoroutineRet DoorTransitionFunction_ScrollScreenToAlignment(void) {  // 0x82E310
 #if SM_DOOR_DIAG && SM_DOOR_EASE
   // The alignment is folded into the eased door scroll (DoorTransitionScrollingSetup, DoorTransition_*).
+  DoorTransitionDiagPrepare();
   door_transition_function = FUNC16(DoorTransitionFunction_FixDoorsMovingUp);
   return kCoroutineNone;
 #endif
@@ -4024,8 +4029,11 @@ static Func_Y_Y *const kUpdateBackgroundCommands[8] = {
   UpdateBackgroundCommand_E_DoorDependentTransferToVRAM,
 };
 
-#if SM_DOOR_MUSIC_SYNC
-static bool g_door_music_started;
+#if SM_DOOR_MUSIC_SYNC && SM_DOOR_EASE
+// Door-scroll music schedule, in scroll steps (door_transition_frame_counter), so the track changes at the middle of the
+// scroll: the stop + bank upload (two queue entries of 8 frames) is queued 24 steps before the middle, and the new track
+// (queued with at least 8 frames of delay) 8 steps before it. Rooms that keep the same music data skip the stop.
+static uint8 g_door_music_stage;  // 0: nothing queued, 1: stop/upload queued, 2: new track queued
 #endif
 
 CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
@@ -4033,11 +4041,13 @@ CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
 
   COROUTINE_BEGIN(coroutine_state_1, 0);
 
-#if SM_DOOR_MUSIC_SYNC
-  g_door_music_started = false;
-#endif
+#if SM_DOOR_MUSIC_SYNC && SM_DOOR_EASE
+  g_door_music_stage = 0;
+  LoadEnemyGfxToVram();
+#else
   LoadEnemyGfxToVram();
   LoadRoomMusic();
+#endif
   ClearEprojs();
   ClearAnimtiles();
   ClearPaletteFXObjects();
@@ -4063,16 +4073,27 @@ CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
   }
   // Wait until the screen has finished scrolling as a result of the door opening
   while ((door_transition_flag & 0x8000) == 0) {
-#if SM_DOOR_MUSIC_SYNC
-    // Queue the new track as soon as the music queue (stop + bank upload) has drained, not after the scroll.
-    // The original WaitForMusicToClear / LoadNewMusicTrackIfChanged afterwards then finds nothing left to do.
-    if (!g_door_music_started && !HasQueuedMusic()) {
-      g_door_music_started = true;
-      LoadNewMusicTrackIfChanged();
+#if SM_DOOR_MUSIC_SYNC && SM_DOOR_EASE
+    {
+      const int mid = ((door_direction & 2) ? 56 : 64) / 2;
+      const int step = door_transition_frame_counter;
+      if (g_door_music_stage == 0 && step >= mid - 24) {
+        LoadRoomMusic();
+        g_door_music_stage = 1;
+      }
+      // Wait for the stop/upload to drain, as WaitForMusicToClear would; the later call then has nothing left to do.
+      if (g_door_music_stage == 1 && step >= mid - 8 && !HasQueuedMusic()) {
+        LoadNewMusicTrackIfChanged();
+        g_door_music_stage = 2;
+      }
     }
 #endif
     COROUTINE_AWAIT(1, WaitForNMI_Async());
   }
+#if SM_DOOR_MUSIC_SYNC && SM_DOOR_EASE
+  if (g_door_music_stage == 0)
+    LoadRoomMusic();
+#endif
   palette_buffer[196] = 15328;
   SpawnBG3ScrollHdmaObject();
   hdma_objects_enable_flag |= 0x8000;

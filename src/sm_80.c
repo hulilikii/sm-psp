@@ -1753,6 +1753,15 @@ void ClearFXTilemap(void) {  // 0x80A29C
   WriteReg(MDMAEN, 2);
 }
 
+#if SM_DOOR_FIXOOB
+// layer1 * t / 256 for a signed camera position (the original multiplies the two bytes as unsigned, which is wrong
+// for the negative positions door scrolling starts from). Identical to the original for positions >= 0.
+static uint16 Layer2Parallax(uint16 layer1_pos, int t) {
+  const int p = (int16)layer1_pos;
+  return (p < 0) ? (uint16)-((-p * t) >> 8) : (uint16)((p * t) >> 8);
+}
+#endif
+
 uint8 CalculateLayer2Xpos(void) {  // 0x80A2F9
   if (!layer2_scroll_x) {
     layer2_x_pos = layer1_x_pos;
@@ -1760,8 +1769,12 @@ uint8 CalculateLayer2Xpos(void) {  // 0x80A2F9
   }
   if (layer2_scroll_x != 1) {
     int t = layer2_scroll_x & 0xFE;
+#if SM_DOOR_FIXOOB
+    layer2_x_pos = Layer2Parallax(layer1_x_pos, t);
+#else
     uint8 var933 = t * LOBYTE(layer1_x_pos) >> 8;
     layer2_x_pos = t * HIBYTE(layer1_x_pos) + var933;
+#endif
     return 0;
   }
   return 1;
@@ -1774,8 +1787,12 @@ uint8 CalculateLayer2Ypos(void) {  // 0x80A33A
   }
   if (layer2_scroll_y != 1) {
     int t = layer2_scroll_y & 0xFE;
+#if SM_DOOR_FIXOOB
+    layer2_y_pos = Layer2Parallax(layer1_y_pos, t);
+#else
     uint8 var933 = t * (uint8)layer1_y_pos >> 8;
     layer2_y_pos = t * HIBYTE(layer1_y_pos) + var933;
+#endif
     return 0;
   }
   return 1;
@@ -2107,6 +2124,20 @@ void UploadBackgroundDataColumn(void) {  // 0x80A9D6
   UpdateLevelOrBackgroundDataColumn(0x1c);
 }
 
+#if SM_DOOR_FIXOOB
+// Block word at block (x, y) of the level (bg = 0) or background (bg = 1) data; a solid black tile when the block is
+// outside the room. The original reads the array unchecked, so negative / past-the-edge positions (which door
+// scrolling and the cross-door camera offset reach) draw wrapped or unrelated data.
+#define kOobBlackBlock 0x8081
+static inline uint16 ReadBlockOrBlack(int x, int y, int bg) {
+  if (x < 0 || y < 0 || x >= (int)room_width_in_blocks || y >= (int)room_height_in_blocks)
+    return kOobBlackBlock;
+  const unsigned idx = (unsigned)y * room_width_in_blocks + (unsigned)x;
+  // 16-bit offset into the bank, as the original (also keeps the read inside g_ram for oversized rooms).
+  return *(const unaligned_uint16 *)(g_ram + 0x10000 + (uint16)(2 + (bg ? 0x9600 : 0) + 2 * idx));
+}
+#endif
+
 void UploadLevelDataColumn(void) {  // 0x80A9DB
   UpdateLevelOrBackgroundDataColumn(0);
 }
@@ -2150,7 +2181,11 @@ void UpdateLevelOrBackgroundDataColumn(uint16 k) {  // 0x80A9DE
   uint16 v9 = 0;
   uint16 var939 = 16;
   do {
+#if SM_DOOR_FIXOOB
+    uint16 var93B = ReadBlockOrBlack((int16)blocks_to_update_x_block, (int16)blocks_to_update_y_block + (16 - var939), k != 0);
+#else
     uint16 var93B = r54[v9 >> 1];
+#endif
     uint16 v10 = var93B & 0x3FF;
     uint16 v17 = v9;
     uint16 v11 = var937;
@@ -2243,7 +2278,11 @@ void UpdateLevelOrBackgroundDataRow(uint16 v0) {  // 0x80AB78
   uint16 v9 = 0;
   uint16 var939 = 17;
   do {
+#if SM_DOOR_FIXOOB
+    uint16 var93B = ReadBlockOrBlack((int16)blocks_to_update_x_block + (17 - var939), (int16)blocks_to_update_y_block, v0 != 0);
+#else
     uint16 var93B = r54[v9 >> 1];
+#endif
     uint16 v10 = var93B & 0x3FF;
     uint16 v17 = v9;
     uint16 v11 = var937;
@@ -2358,7 +2397,25 @@ void DoorTransitionScrollingSetup(void) {
   (void)old_x, (void)old_y;
 #endif
   kDoorTransitionSetupFuncs[door_direction & 3]();
+#if SM_DOOR_DIAG && SM_DOOR_EASE
+  // SetupScrolling clears the BG2 registers, so the setup derives the BG2 offsets from the layer 1 position alone. With
+  // the camera offset across the door that would leave BG2 permanently shifted by the offset; vanilla (aligned) result
+  // is "offset = -destination" on that axis.
+  if ((door_direction & 2) == 0)
+    bg2_y_scroll -= DoorAlignDistance(old_y);
+  else
+    bg2_x_scroll -= DoorAlignDistance(old_x);
+#endif
 }
+
+#if SM_DOOR_DIAG && SM_DOOR_EASE
+// Runs where the original aligned the old room (before the new room is set up). Nothing is aligned any more, but the
+// vanilla alignment loop also re-synced the BG registers with the layer positions (dropping earthquake / shake offsets);
+// the scroll setup derives its BG offsets from them, so a stale register would shift the whole transition.
+void DoorTransitionDiagPrepare(void) {
+  CalculateBgScrolls();
+}
+#endif
 
 void DoorTransitionScrollingSetup_Right(void) {  // 0x80AD4A
   CalculateLayer2Xpos();

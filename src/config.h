@@ -18,9 +18,16 @@
 #define SM_DOOR_DIAG 1
 #endif
 
-// Start the new room's music track while the door scroll is still running (0 = after it, as the original).
+// Switch room music at the middle of the door scroll (0 = original: after the scroll finishes).
+// Needs SM_DOOR_EASE (the scroll length is what the midpoint is taken from).
 #ifndef SM_DOOR_MUSIC_SYNC
 #define SM_DOOR_MUSIC_SYNC 1
+#endif
+
+// Never read outside the room when drawing scrolled-in blocks (solid black tile instead of wrapped/garbage data), and
+// make the BG2 parallax position handle negative camera positions. Both only matter once the transition is visible.
+#ifndef SM_DOOR_FIXOOB
+#define SM_DOOR_FIXOOB 1
 #endif
 
 // Run SPC + DSP on the Media Engine.
