@@ -4678,8 +4678,7 @@ void GameOptionsMenu_4_StartGame(void) {  // 0x82EEB4
 // Going to the area map: keep the peak mosaic so the renderer holds the last image through the load frames and the map's mosaic fade-in continues from it. Any other destination ends the transition here.
   const bool to_map = (enable_debug && (joypad1_lastkeys & kButton_L) == 0) ||
                       loading_game_state == kGameState_5_FileSelectMap;
-  if (!to_map)
-    PspRenderer_SetMosaicTransition(1);
+  PspRenderer_SetMosaicTransition(1);
   game_options_screen_index = 0;
   if (enable_debug && (joypad1_lastkeys & 0x20) == 0) {
     game_state = kGameState_5_FileSelectMap;
