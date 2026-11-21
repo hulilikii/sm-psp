@@ -63,6 +63,10 @@
 
 #define PSP_VBLANK_GATE 1  /* wait for vblank only when running ahead of the panel */
 
+#ifndef SM_PSP_ASYNC
+#define SM_PSP_ASYNC 0  /* 1: Present() queues a GE frame and returns; the next EndDraw waits for the GE and flips it */
+#endif
+
 enum {
   kPspWidth = 480,
   kPspHeight = 272,
@@ -180,6 +184,25 @@ static inline void BgQuad(BgVert *w, int ul, int vt, int ur, int vb, int x0, int
 typedef struct Geom { BgVert *v; int n; } Geom;
 
 static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
+
+#if SM_PSP_ASYNC
+/* Async present. g_ge_pending: a frame is queued, so until GeWait() the GE may still read everything its two lists
+ * reference (list memory of g_gu_list and g_gu_list2, CLUT arrays, atlases, layer images, g_m7img, g_texture) and
+ * writes its draw buffer g_pend_off, which is flipped by GeWait(). The compose list of a queued frame is built
+ * into g_gu_list2 while the GE still executes the scene list in g_gu_list. */
+enum { kComposeListWords = 64 * 1024, kComposeListBytes = kComposeListWords * 4 };  /* 256 KB */
+static uint32_t g_gu_list2[kComposeListWords] __attribute__((aligned(16)));
+static bool g_ge_pending;
+static uint32_t g_pend_off;
+static uint32_t g_frames_async;  /* frames queued */
+static uint32_t g_async_nofit;   /* synchronous: the compose-list bound exceeds the list */
+static uint32_t g_async_fail;    /* synchronous: sceGuStart could not enqueue the compose list */
+static uint32_t g_async_viol;    /* compose lists that used more than their bound */
+static bool g_async_ok = true;   /* cleared by such a list: every later frame is synchronous */
+#if SM_PSP_LOG
+static uint32_t g_comp_used_hw, g_comp_bound_hw, g_comp_call_hw;  /* log window: largest compose list / bound / implied command bytes per call */
+#endif
+#endif
 
 /* Gate 5f: the big vertex buffers (tiles, sprites, mode 7) are built in this cached pool and written back once, instead
  * of inside the display list (sceGuStart maps the list uncached: every vertex there is four uncached stores).
@@ -592,6 +615,7 @@ enum { kLateUs = 17000, kMissUs = 33800, kHitchUs = 24000, kHitchPerWindow = 8 }
 typedef struct Stat { uint32_t n, sum, max; } Stat;
 typedef struct Prof {
   Stat game, ppu, prep, build, gewait, vbwait, period;
+  Stat agewait, avbwait;                /* async: GE wait / vblank wait of the frame queued by the previous EndDraw (its completion, not this frame's work); GE frame bucket only */
   Stat cap, cpy, cls, bg, obj, emit;    /* capture hook (and its VRAM copy); prep split: classify, BG, OBJ; list vertices */
   Stat tseen, tdec, draws, clut, verts, m7i; /* per-frame counters; m7i: CPU time of the mode 7 image */
   uint32_t late, miss, hold;
@@ -3760,16 +3784,45 @@ static bool M7Prepare(void) {
 }
 
 // Wait for the panel only if ahead
-static void Pace(void) {
-  uint32_t t = Now();
+static void PaceWait(void) {
 #if PSP_VBLANK_GATE
   if (sceDisplayGetVcount() == g_vcount_last)
     sceDisplayWaitVblankStart();
 #else
   sceDisplayWaitVblankStart();
 #endif
+}
+
+static void Pace(void) {
+  uint32_t t = Now();
+  PaceWait();
   g_vbwait_us = Now() - t;
 }
+
+#if SM_PSP_ASYNC
+/* Completes the frame queued by Present(): waits for the GE (both lists), waits for the panel only if ahead, queues the
+ * finished buffer. Returns true if it completed one (EndDraw has then already paced). Both lists are finished before
+ * this returns, so every buffer they reference may be rewritten afterwards. The waits belong to the frame that queued
+ * the work: they go to the async profile fields, not to g_gewait_us / g_vbwait_us of the frame being drawn now. */
+static bool GeWait(void) {
+  if (!g_ge_pending)
+    return false;
+  PROF(uint32_t t0 = Now();)
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  g_ge_pending = false;
+  PROF(uint32_t t1 = Now();)
+  PaceWait();
+  PROF(uint32_t t2 = Now(); StatAdd(&g_prof[0].agewait, t1 - t0); StatAdd(&g_prof[0].avbwait, t2 - t1);)
+  sceDisplaySetFrameBuf((void *)((uintptr_t)sceGeEdramGetAddr() + g_pend_off), 512, PSP_DISPLAY_PIXEL_FORMAT_565,
+                        PSP_DISPLAY_SETBUF_NEXTFRAME);
+  g_vcount_last = sceDisplayGetVcount();
+  return true;
+}
+#else
+static inline bool GeWait(void) {
+  return false;
+}
+#endif
 
 /* Compares the GE image of a mode 7 frame with the software image (the software PPU drew this frame too).
  * Only the first kM7Verify mode 7 frames; reads the draw buffer through the uncached VRAM mirror. */
@@ -4014,11 +4067,31 @@ static void GeVerify(void) {
 
 static void ComposeGeFrame(void);
 static void ApplyMosaicTransition(void);
+#if SM_PSP_ASYNC
+static bool ComposeGeAsync(void);
+#endif
 
 static void Present(bool ge_scene) {
   uint32_t t = Now();
   g_build_us = t - g_t_list_start;
   sceGuFinish();
+#if SM_PSP_ASYNC
+  /* The scene list is now with the GE. A GE scene frame queues its compose list behind it and returns; GeWait() at the
+   * next EndDraw completes it. Frames that read the scene on the CPU (verify, audit), mosaic frames and software-path
+   * frames stay synchronous, and so does any frame whose compose list cannot be queued (ComposeGeAsync returns false
+   * without touching the buffers): they continue below with the scene list already finished. */
+  if (ge_scene && g_triple && !g_verify_now && g_mosaic_size <= 1 && ComposeGeAsync()) {
+    g_build_us = Now() - g_t_list_start;
+    g_ge_pending = true;
+    g_pend_off = g_draw_off;
+    g_frames_async++;
+    const int next = 3 - g_draw_i - g_prev_i;  /* as the synchronous path; the flip itself is GeWait() */
+    g_prev_i = g_draw_i;
+    g_draw_i = next;
+    g_draw_off = kBufOff[next];
+    return;
+  }
+#endif
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
   g_gewait_us = Now() - t;
   PROF(g_gws_scene += g_gewait_us; g_gws_n++;)
@@ -4351,6 +4424,8 @@ extern const uint8_t psp_msg_font_rgba[], psp_msg_grapple_rgba[], psp_msg_missil
     psp_msg_supermissile_rgba[], psp_msg_xray_rgba[];
 
 enum { kMsgPassGlyphs, kMsgPassIcons, kMsgPassMeasure,
+       kMsgPassCountGlyphs,  /* *nv += vertices kMsgPassGlyphs would write (same predicate, nothing written) */
+       kMsgPassCountIcons,   /* *nv += icon draws kMsgPassIcons would make */
        kMsgMaxLines = 12, kMsgMaxW = 320, kMsgIconH = 16, kMsgIconPad = 2, kMsgDimAlpha = 0xa0 };
 static const float kMsgTitleScale = 0.5f, kMsgBodyScale = 0.25f,
                    kMsgTextScale = 0.5f, kMsgOptionScale = 0.5f,
@@ -4480,6 +4555,8 @@ static void MsgWalk(const char *s, const char *e, float *cx, float y, float sc, 
             const int w = t.iw * kMsgIconH / t.ih;
             if (pass == kMsgPassIcons)
               MsgDrawImg(&t, (int)(*cx + 0.5f) + kMsgIconPad, (int)(y + 30.5f * sc) - kMsgIconH / 2, w, kMsgIconH, a);
+            else if (pass == kMsgPassCountIcons)
+              ++*nv;
             *cx += (float)(w + 2 * kMsgIconPad);
           }
         }
@@ -4500,6 +4577,8 @@ static void MsgWalk(const char *s, const char *e, float *cx, float y, float sc, 
       MsgQuad(&gv[*nv], (float)g->x, (float)g->y, (float)g->w, (float)g->h,
               (int)(*cx + (float)g->xoff * sc + 0.5f), gy, dw, dh);
       *nv += 2;
+    } else if (pass == kMsgPassCountGlyphs && ch != ' ' && g->w && g->h) {
+      *nv += 2;
     }
     *cx += (float)g->advance * sc;
   }
@@ -4514,11 +4593,16 @@ static float MsgWidth(const char *s, const char *e, float sc) {
 static void MsgDrawRun(const char *s, const char *e, float x, float y, float sc, uint32_t rgb, unsigned a) {
   if (e <= s)
     return;
-  TileVert *gv = sceGuGetMemory((int)(e - s) * 2 * (int)sizeof(TileVert));  /* <= 1 glyph per source char */
-  int nv = 0;
+  /* A label token expands to more glyphs than its source text, so the vertex buffer is sized by counting with the walker
+   * that writes it (kMsgPassCountGlyphs: same predicate, nothing written). */
+  int ng = 0;
   float cx = x;
-  MsgWalk(s, e, &cx, y, sc, kMsgPassGlyphs, gv, &nv, a);
-  if (nv) {
+  MsgWalk(s, e, &cx, y, sc, kMsgPassCountGlyphs, NULL, &ng, a);
+  if (ng) {
+    TileVert *gv = sceGuGetMemory(ng * (int)sizeof(TileVert));
+    int nv = 0;
+    cx = x;
+    MsgWalk(s, e, &cx, y, sc, kMsgPassGlyphs, gv, &nv, a);
     sceGuColor(((uint32_t)a << 24) | rgb);
     sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
     sceGuTexImage(0, PSP_MSG_FONT_W, PSP_MSG_FONT_H, PSP_MSG_FONT_W, psp_msg_font_rgba);
@@ -4954,6 +5038,146 @@ static void ApplyMosaicTransition(void) {
   sceGuFinish();
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
+
+#if SM_PSP_ASYNC
+/* Compose-list bound. sceGuGetMemory and sceGuCopyImage..sceGuFinish never check the list end, so ComposeDraw only
+ * runs on g_gu_list2 if ComposeBytesBound() <= kComposeAsyncMax (half of the list). The bound is mem + calls *
+ * kGuCallMax, from a complete audit of what ComposeGeAsync, ComposeDraw, DrawDoorTransition and DrawNativeMessage emit:
+ *
+ * mem (exact, from sizeof; every sceGuGetMemory is GuMem: size rounded up to 4 plus an 8 byte header):
+ *   ComposeDraw: source quad + HUD rects + icons ((1 + kHudRectN + 2) * 2 TileVert); DrawDoorTransition: 2 TileVert;
+ *   DrawNativeMessage: dim quad (2 ColorVert); sceGuClear (libgu): kGuClearBytes;
+ *   button overlay: one run per source row at most (a run is >= 1 row), a run has <= 2 spans = 4 TileVert;
+ *   message: per MsgDrawRun / MsgDrawStr the glyph vertices, per icon token 2 TileVert. Both are counted by the
+ *   walker that writes them (kMsgPassCountGlyphs / kMsgPassCountIcons) on the layout DrawNativeMessage uses, so
+ *   they are exact, label expansion included.
+ * calls (libgu calls, state / texture / draw / copy / clear; counted from the code):
+ *   ComposeGeAsync 5 (start, draw buffer, copy, sync, finish); ComposeDraw preamble 19, door capture 2, base quad 2,
+ *   door transition 7, HUD 17, button header 7, trailer 5; DrawNativeMessage fixed part 12 (71 + 5 = 76);
+ *   button overlay: 3 set-up + 2 per run (colour, draw); message: 5 per glyph run (colour, mode, image, flush, draw)
+ *   and 5 per icon (the same, its vertices counted in mem).
+ *   kComposeEvolutionCalls (20) is head-room for edits of ComposeDraw; ComposeCheckUsed catches an edit that exceeds it.
+ * Assumed of libgu, not provable from this source: every call above emits <= kGuCallMax (128) bytes (a draw ~20 B,
+ * a texture image ~16 B, sceGuCopyImage ~40 B, sceGuClear ~64 B) and sceGuClear allocates <= kGuClearBytes.
+ * ComposeCheckUsed measures the real list after every compose; if it ever exceeds the bound (an audit or libgu
+ * assumption is wrong) async is switched off for good. That is a detector, not the guard: the guard is the bound. */
+enum { kGuCallMax = 128, kGuClearBytes = 16 * 16, kComposeFixedCalls = 76, kComposeEvolutionCalls = 20,
+       kComposeAsyncMax = kComposeListBytes / 2 };
+CASSERT(kComposeAsyncMax + 1024 <= kComposeListBytes);
+
+static inline uint32_t GuMem(uint32_t n) {
+  return ((n + 3u) & ~3u) + 8u;
+}
+
+/* One MsgDrawRun / MsgDrawStr over [s,e): its allocations and calls. */
+static void MsgRunBound(const char *s, const char *e, uint32_t *mem, uint32_t *calls) {
+  if (e <= s)
+    return;
+  float cx = 0.0f;
+  int ng = 0, ni = 0;
+  MsgWalk(s, e, &cx, 0.0f, 1.0f, kMsgPassCountGlyphs, NULL, &ng, 0);
+  cx = 0.0f;
+  MsgWalk(s, e, &cx, 0.0f, 1.0f, kMsgPassCountIcons, NULL, &ni, 0);
+  if (ng) {
+    *mem += GuMem((uint32_t)ng * sizeof(TileVert));
+    *calls += 5;
+  }
+  *mem += (uint32_t)ni * GuMem(2 * sizeof(TileVert));
+  *calls += (uint32_t)ni * 5;
+}
+
+static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
+  uint32_t mem = GuMem((1 + kHudRectN + 2) * 2 * sizeof(TileVert)) + GuMem(2 * sizeof(TileVert)) +
+                 GuMem(2 * sizeof(ColorVert)) + GuMem(kGuClearBytes);
+  uint32_t calls = kComposeFixedCalls + kComposeEvolutionCalls;
+  for (int i = 0; i < kPspButtonIconSlots; i++) {
+    const ButtonOverlay *b = &g_button_overlays[i];
+    if (!b->pixels)
+      continue;
+    const uint32_t runs = (uint32_t)b->h;
+    mem += runs * GuMem(4 * sizeof(TileVert));
+    calls += 3 + runs * 2;
+  }
+  if (g_msg_id && g_msg_fade) {
+    const PspMessageText *m = &g_psp_message_text[g_msg_id - 1];
+    if (m->n) {
+      MsgLine ln[kMsgMaxLines];
+      const int nl = MsgLayout(m, ln);
+      for (int i = 0; i < nl; i++)
+        MsgRunBound(ln[i].s, ln[i].e, &mem, &calls);
+      if (m->flags & PSP_MSG_SAVE) {
+        MsgRunBound(">", ">" + 1, &mem, &calls);
+        MsgRunBound("YES", "YES" + 3, &mem, &calls);
+        MsgRunBound("NO", "NO" + 2, &mem, &calls);
+      }
+    }
+  }
+  *mem_out = mem;
+  *calls_out = calls;
+  return mem + calls * kGuCallMax;
+}
+
+/* sceGuStart returns int (< 0: sceGeListEnQueue failed) in current PSPSDK and void in older ones: this takes either
+ * prototype (with void a failure cannot be seen and 0 is returned). */
+#define GU_START_DIRECT(list)                                                                                      \
+  __builtin_choose_expr(__builtin_types_compatible_p(__typeof__(sceGuStart(GU_DIRECT, (list))), void),            \
+                        ((void)sceGuStart(GU_DIRECT, (list)), 0), sceGuStart(GU_DIRECT, (list)))
+
+/* After the compose list is built (every build, one sceGuGetMemory(0) per frame): sceGuGetMemory(0) returns the list
+ * position + 8 (its own header), i.e. the bytes used so far, header included. Detector only, see the bound above. */
+static void ComposeCheckUsed(uint32_t bound, uint32_t mem, uint32_t calls) {
+  const uint32_t used =
+      (uint32_t)(((uintptr_t)sceGuGetMemory(0) & 0x1fffffffu) - ((uintptr_t)g_gu_list2 & 0x1fffffffu));
+  (void)mem;
+  (void)calls;
+  PROF(if (used > g_comp_used_hw) g_comp_used_hw = used;
+       if (calls) {
+         const uint32_t pc = (used > mem ? used - mem : 0) / calls;
+         if (pc > g_comp_call_hw)
+           g_comp_call_hw = pc;
+       })
+  if (used > bound) {
+    g_async_ok = false;
+    g_async_viol++;
+    PspLog("async: compose list used %u > bound %u (mem %u, calls %u): async disabled", (unsigned)used, (unsigned)bound,
+           (unsigned)mem, (unsigned)calls);
+  }
+  if (used + 256 > (uint32_t)kComposeListBytes) {  /* memory behind the list is already overwritten: stop */
+    PspLog("async: compose list overflow, used %u of %u", (unsigned)used, (unsigned)kComposeListBytes);
+    PspLog_Flush();
+    Die("compose list overflow");
+  }
+}
+
+/* Builds the compose list (same commands as ComposeGeFrame) behind the scene list the GE already has. Returns false,
+ * with no GU list open and no pending / buffer state touched, if async is off, the bound does not fit or the list
+ * cannot be enqueued; the caller then finishes the frame synchronously (sceGuStart of the next list re-initialises
+ * the GU). */
+static bool ComposeGeAsync(void) {
+  if (!g_async_ok)
+    return false;
+  uint32_t mem, calls;
+  const uint32_t bound = ComposeBytesBound(&mem, &calls);
+  PROF(if (bound > g_comp_bound_hw) g_comp_bound_hw = bound;)
+  if (bound > (uint32_t)kComposeAsyncMax) {
+    g_async_nofit++;
+    return false;
+  }
+  if (GU_START_DIRECT(g_gu_list2) < 0) {
+    g_async_fail++;
+    return false;
+  }
+  SelectDrawBuffer();
+  sceGuCopyImage(GU_PSM_5650, kLeft, kTop, kGameWidth, kSrcRows, 512, (void *)(uintptr_t)(0x04000000u | g_draw_off), 0, 0,
+                 kGameWidth, (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramTexture));
+  sceGuTexSync();
+  const ComposeSrc src = {g_texture, GU_PSM_5650, kGameWidth, 256, kGameWidth};
+  ComposeDraw(&src);
+  ComposeCheckUsed(bound, mem, calls);
+  sceGuFinish();
+  return true;
+}
+#endif
 
 /* Splits [x0,x1) at multiples of 64 framebuffer pixels. PPSSPP's GE notes say
  * 2D images are cheaper to draw in 64-pixel-wide vertical strips on 16-bit
@@ -6696,6 +6920,7 @@ bool PspRenderer_GeActive(void) {
 /* After a sleep VRAM is not trusted: forget what the atlases hold so every tile used is decoded again, and let
  * the software PPU draw the next frames until the GE streak is rebuilt. Main thread, between frames. */
 void PspRenderer_Resume(void) {
+  GeWait();  /* complete (and show) a queued frame before the atlases and layer images are dropped */
   DoorTransitionRelease();  /* VRAM (the snapshot) is not trusted after sleep */
   memset(g_hash2, 0xff, sizeof(g_hash2));
   memset(g_hash4, 0xff, sizeof(g_hash4));
@@ -7785,6 +8010,7 @@ static bool PspRenderer_Initialize(void) {
 }
 
 static void PspRenderer_Destroy(void) {
+  GeWait();  /* the GE must be idle before the display is switched off */
   DoorTransitionRelease();
   g_ppu_line_hook = NULL;
   g_ppu_draw_begin = g_ppu_draw_end = NULL;
@@ -7821,6 +8047,9 @@ static void ProfLog(void) {
     PspLog("  gewait=%u/%u vbwait=%u/%u period=%u/%u late=%u miss=%u hold=%u skip=%d",
            AVG(p->gewait), AVG(p->vbwait), AVG(p->period), (unsigned)p->late, (unsigned)p->miss,
            (unsigned)p->hold, (int)g_ppu_skip_draw);
+    if (p->agewait.n)  /* async: the frame queued by the previous EndDraw, completed at the start of this one */
+      PspLog("  async n=%u completion gewait=%u/%u vbwait=%u/%u", (unsigned)p->agewait.n, AVG(p->agewait),
+             AVG(p->avbwait));
     PspLog("  cap=%u/%u cpy=%u/%u class=%u/%u bg=%u/%u obj=%u/%u emit=%u/%u", AVG(p->cap), AVG(p->cpy), AVG(p->cls),
            AVG(p->bg), AVG(p->obj), AVG(p->emit));
     PspLog("  tiles seen=%u/%u decoded=%u/%u | draws=%u/%u clut=%u/%u verts=%u/%u", AVG(p->tseen),
@@ -7838,6 +8067,9 @@ static void PspRenderer_EndDraw(void) {
   PROF(uint32_t t_enter = Now();)
   g_frame++;
   g_prep_us = g_build_us = g_gewait_us = g_vbwait_us = 0;
+  /* Before anything writes a buffer the GE may still read (atlases, CLUTs, layer images, g_m7img, g_texture, g_gu_list)
+   * and before the software path starts a list. Its waits are the previous frame's (see GeWait). */
+  const bool waited = GeWait();
   bool drew_ge = false, held = false;
 
   if (g_ge_active && g_line_count > 0) {
@@ -7862,7 +8094,8 @@ static void PspRenderer_EndDraw(void) {
     PROF(g_holds++;)
     g_streak = 0;
     g_ppu_skip_draw = false;
-    Pace();
+    if (!waited)  /* GeWait() has just waited for a vblank (if ahead) and queued a frame */
+      Pace();
     g_vcount_last = sceDisplayGetVcount();
   } else {
     /* Software path (unchanged behaviour). Also used when the GE path hands a
@@ -8038,6 +8271,13 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  subimg: frames=%u ok=%d%d%d audited=%u,%u,%u", (unsigned)g_frames_simg, (int)g_simg_ok[0], (int)g_simg_ok[1],
            (int)g_simg_ok[2], (unsigned)g_simg_vn[0], (unsigned)g_simg_vn[1], (unsigned)g_simg_vn[2]);
     PspLog("  m7wrap: frames=%u ok=%d audited=%u", (unsigned)g_frames_m7w, (int)g_m7w_ok, (unsigned)g_m7w_vn);
+#if SM_PSP_ASYNC
+    PspLog("  async: queued=%u sync-nofit=%u sync-startfail=%u viol=%u ok=%d | compose list used<=%u bound<=%u cap=%u, implied cmd B/call<=%u (assumed %u) (window max)",
+           (unsigned)g_frames_async, (unsigned)g_async_nofit, (unsigned)g_async_fail, (unsigned)g_async_viol,
+           (int)g_async_ok, (unsigned)g_comp_used_hw, (unsigned)g_comp_bound_hw, (unsigned)kComposeListBytes,
+           (unsigned)g_comp_call_hw, (unsigned)kGuCallMax);
+    g_comp_used_hw = g_comp_bound_hw = g_comp_call_hw = 0;
+#endif
     PspLog("  m7reuse: on=%d rows built=%u kept=%u audited=%u bad=%u", (int)g_m7i_reuse_ok, (unsigned)g_m7i_built,
            (unsigned)g_m7i_kept, (unsigned)g_m7i_audits, (unsigned)g_m7i_bad);
 #if SM_PSP_M7_BLK

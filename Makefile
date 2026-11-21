@@ -53,6 +53,8 @@ PSP_DOOR_GE ?= 0
 PSP_LAYER_IMG ?= 3
 # PSP_TILE_GEN=1: EnsureTile skips the hash of a tile whose VRAM page generation is unchanged since its last hash. 0: hash every tile as before.
 PSP_TILE_GEN ?= 0
+# PSP_ASYNC=1: a GE frame is queued by Present() and completed (GE wait, vblank pacing, flip) at the next EndDraw, so the game logic overlaps GE drawing. Costs display latency when the frame was already vsync-bound. 0: wait for the GE in the same frame.
+PSP_ASYNC ?= 0
 # PSP_M7_REUSE=1 (Gate 5t): a mode 7 image row whose matrix/flags are unchanged since it was built and whose plane (VRAM pages 0-63) was not written keeps its pixels (exact; log builds re-render every 16th reusing frame and compare). 0: every row is rendered every frame.
 PSP_M7_REUSE ?= 1
 # PSP_SWIZZLE (Gate 5u) is a bit mask: 1 = swizzle the BG/OBJ tile atlases, 2 = swizzle the mode 7 tile atlas. 0 = linear (default until A/B timed on hardware).
@@ -110,6 +112,7 @@ CFLAGS += -DSM_PSP_MOS_GE=$(PSP_MOS_GE)
 CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
 CFLAGS += -DSM_PSP_TILE_GEN=$(PSP_TILE_GEN)
+CFLAGS += -DSM_PSP_ASYNC=$(PSP_ASYNC)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
 
 # SPC/DSP code runs on the Media Engine, which has no libc/syscalls: an assert()
@@ -153,7 +156,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
