@@ -580,6 +580,11 @@ enum { kSkipAfter = 8 };  /* consecutive GE frames before the software PPU is sk
 static uint32_t g_streak;
 static uint32_t g_t_draw_start, g_t_list_start;
 static uint32_t g_prep_us, g_build_us, g_gewait_us, g_vbwait_us;
+#if SM_PSP_LOG
+/* gewait split: the scene list (until the GE is idle after sceGuFinish), ComposeGeFrame (scale + HUD, own list and sync) and
+ * ApplyMosaicTransition, summed over g_gws_n frames since the last log line. */
+static uint32_t g_gws_scene, g_gws_compose, g_gws_mosaic, g_gws_n;
+#endif
 
 #if SM_PSP_LOG
 enum { kLateUs = 17000, kMissUs = 33800, kHitchUs = 24000, kHitchPerWindow = 8 };
@@ -4016,6 +4021,7 @@ static void Present(bool ge_scene) {
   sceGuFinish();
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
   g_gewait_us = Now() - t;
+  PROF(g_gws_scene += g_gewait_us; g_gws_n++;)
   if (g_verify_now) {
     g_verify_now = false;
     PROF(g_hit_verified = true;)    
@@ -4025,11 +4031,13 @@ static void Present(bool ge_scene) {
     uint32_t t_c = Now();
     ComposeGeFrame();
     g_gewait_us += Now() - t_c;
+    PROF(g_gws_compose += Now() - t_c;)
   }
   if (g_mosaic_size > 1) {  /* the compose list is synced: the draw buffer is complete and idle */
     uint32_t t_m = Now();
     ApplyMosaicTransition();
     g_gewait_us += Now() - t_m;
+    PROF(g_gws_mosaic += Now() - t_m;)
   }
   Pace();
   if (g_triple) {
@@ -7799,6 +7807,10 @@ typedef struct PspVertex { float u, v; float x, y, z; } PspVertex;
 #if SM_PSP_LOG
 static void ProfLog(void) {
   M7Log();
+  if (g_gws_n)
+    PspLog("gewait split (us, all classes): scene=%u compose=%u mosaic=%u", (unsigned)(g_gws_scene / g_gws_n),
+           (unsigned)(g_gws_compose / g_gws_n), (unsigned)(g_gws_mosaic / g_gws_n));
+  g_gws_scene = g_gws_compose = g_gws_mosaic = g_gws_n = 0;
   for (int c = 0; c < 3; c++) {
     const Prof *p = &g_prof[c];
     if (p->period.n == 0)
