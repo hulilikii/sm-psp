@@ -1466,8 +1466,8 @@ void FileSelectMenu_16(void) {  // 0x819EF3
   eproj_id[12] = 47;
   eproj_id[13] = 87;
   eproj_id[14] = 127;
-  screen_fade_delay = 1;
-  screen_fade_counter = 1;
+  screen_fade_delay = 0;
+  screen_fade_counter = 0;
   PspRenderer_SetMosaicTransition(16);  /* the fade-in starts at the peak */
   ScreenOn();
   ++menu_index;

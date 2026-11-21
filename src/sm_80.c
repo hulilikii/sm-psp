@@ -2391,12 +2391,49 @@ void Irq_FollowDoorTransition(void) {
   }
 }
 
+// Door/elevator-room scrolling: quadratic ease in/out (SM_DOOR_EASE, default on; 0 = original constant 4 px per step).
+// The original moves 4 px per step for N steps (64 horizontal, 56 vertical), N*4 px in total. The eased path moves the
+// same total in the same N steps: cumulative(k) = total * (2t^2 for t < 1/2, 1 - 2(1-t)^2 otherwise), t = k/N, rounded.
+// Samus's step is her original per-step speed scaled by step/4, so her total distance is unchanged and exact.
+#ifndef SM_DOOR_EASE
+#define SM_DOOR_EASE 1
+#endif
+
+static int DoorEaseCum(int k, int n, int total) {
+  if (k <= 0)
+    return 0;
+  if (k >= n)
+    return total;
+  const int nn = n * n;
+  if (2 * k <= n)
+    return (2 * total * k * k + nn / 2) / nn;
+  const int m = n - k;
+  return total - (2 * total * m * m + nn / 2) / nn;
+}
+
+// Pixels moved by step i (0-based) of n steps covering total px.
+static int DoorStepPx(int i, int n, int total) {
+#if SM_DOOR_EASE
+  return DoorEaseCum(i + 1, n, total) - DoorEaseCum(i, n, total);
+#else
+  (void)i, (void)n, (void)total;
+  return 4;
+#endif
+}
+
+// Samus's door-walk distance for a step of d px: speed * d / 4 (16.16). speed32 is a multiple of 256, so this is exact.
+static uint32 DoorSamusStep(int d) {
+  const uint32 speed32 = ((uint32)samus_door_transition_speed << 16) | samus_door_transition_subspeed;
+  return (speed32 >> 2) * (uint32)d;
+}
+
 uint8 DoorTransition_Right(void) {  // 0x80AE7E
   uint16 v2 = door_transition_frame_counter;
-  AddToHiLo(&samus_x_pos, &samus_x_subpos, __PAIR32__(samus_door_transition_speed, samus_door_transition_subspeed));
+  const int d = DoorStepPx(v2, 64, 256);
+  AddToHiLo(&samus_x_pos, &samus_x_subpos, DoorSamusStep(d));
   samus_prev_x_pos = samus_x_pos;
-  layer1_x_pos += 4;
-  layer2_x_pos += 4;
+  layer1_x_pos += d;
+  layer2_x_pos += d;
   UpdateScrollVarsUpdateMap();
   door_transition_frame_counter = v2 + 1;
   if (v2 != 63)
@@ -2407,10 +2444,11 @@ uint8 DoorTransition_Right(void) {  // 0x80AE7E
 
 uint8 DoorTransition_Left(void) {  // 0x80AEC2
   uint16 v2 = door_transition_frame_counter;
-  AddToHiLo(&samus_x_pos, &samus_x_subpos, -IPAIR32(samus_door_transition_speed, samus_door_transition_subspeed));
+  const int d = DoorStepPx(v2, 64, 256);
+  AddToHiLo(&samus_x_pos, &samus_x_subpos, -DoorSamusStep(d));
   samus_prev_x_pos = samus_x_pos;
-  layer1_x_pos -= 4;
-  layer2_x_pos -= 4;
+  layer1_x_pos -= d;
+  layer2_x_pos -= d;
   UpdateScrollVarsUpdateMap();
   door_transition_frame_counter = v2 + 1;
   return v2 == 63;
@@ -2420,10 +2458,11 @@ uint8 DoorTransition_Down(void) {  // 0x80AF02
   uint16 v6 = door_transition_frame_counter;
   if (door_transition_frame_counter) {
     if (door_transition_frame_counter < 0x39) {
-      AddToHiLo(&samus_y_pos, &samus_y_subpos, __PAIR32__(samus_door_transition_speed, samus_door_transition_subspeed));
+      const int d = DoorStepPx(v6 - 1, 56, 224);
+      AddToHiLo(&samus_y_pos, &samus_y_subpos, DoorSamusStep(d));
       samus_prev_y_pos = samus_y_pos;
-      layer1_y_pos += 4;
-      layer2_y_pos += 4;
+      layer1_y_pos += d;
+      layer2_y_pos += d;
       UpdateScrollVarsUpdateMap();
     }
   } else {
@@ -2453,10 +2492,11 @@ uint8 DoorTransition_Down(void) {  // 0x80AF02
 uint8 DoorTransition_Up(void) {  // 0x80AF89
   uint16 v6 = door_transition_frame_counter;
   if (door_transition_frame_counter) {
-    AddToHiLo(&samus_y_pos, &samus_y_subpos, -IPAIR32(samus_door_transition_speed, samus_door_transition_subspeed));
+    const int d = DoorStepPx(v6 - 1, 56, 224);
+    AddToHiLo(&samus_y_pos, &samus_y_subpos, -DoorSamusStep(d));
     samus_prev_y_pos = samus_y_pos;
-    layer1_y_pos -= 4;
-    layer2_y_pos -= 4;
+    layer1_y_pos -= d;
+    layer2_y_pos -= d;
     if (door_transition_frame_counter >= 5) {
       UpdateScrollVarsUpdateMap();
     } else {
