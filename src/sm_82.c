@@ -3891,6 +3891,7 @@ CoroutineRet DoorTransitionFunction_WaitForSoundsToFinish(void) {  // 0x82E29E
 
 CoroutineRet DoorTransitionFunction_FadeOutScreen(void) {  // 0x82E2DB
   if (AdvancePaletteFadeForAllPalettes_0xc()) {
+    PspRenderer_DoorTransitionFreeze();  // the last frame that drew sprites stays on screen (no-op unless Begin reserved it)
     door_transition_function = FUNC16(DoorTransitionFunction_LoadDoorHeaderEtc);
   } else {
     DetermineWhichEnemiesToProcess();
@@ -4071,6 +4072,8 @@ CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
       bg_data_ptr = kUpdateBackgroundCommands[v1](bg_data_ptr + 2);
     } while (bg_data_ptr);
   }
+  // The new room's tiles and palettes are loaded: from here the old room slides off and the new one is shown.
+  PspRenderer_DoorTransitionArm((const uint16_t *)target_palettes);
   // Wait until the screen has finished scrolling as a result of the door opening
   while ((door_transition_flag & 0x8000) == 0) {
 #if SM_DOOR_MUSIC_SYNC && SM_DOOR_EASE
@@ -4216,7 +4219,6 @@ CoroutineRet DoorTransition_HandleTransition(void) {  // 0x82E6A2
       CallSomeSamusCode(0);
   }
   SetLiquidPhysicsType();
-  PspRenderer_StartDoorTransitionWipe(door_direction & 3);  // no-op unless Begin reserved it
   door_transition_function = FUNC16(DoorTransition_FadeInScreenAndFinish);
   *(unaligned_uint16 *)&reg_INIDISP |= 0x1F;
   return kCoroutineNone;

@@ -25,10 +25,16 @@ void PspRenderer_Resume(void);
 void PspRenderer_SetMosaicTransition(unsigned size);
 unsigned PspRenderer_GetMosaicTransition(void);
 
-// Gameplay-only room transition. Direction = door_direction & 3: 0 right, 1 left, 2 down, 3 up.
-void PspRenderer_BeginDoorTransition(void);
-void PspRenderer_StartDoorTransitionWipe(unsigned direction);
-void PspRenderer_EndDoorTransition(void);
+// Gameplay-only room transition (doors, not elevators). Direction = door_direction & 3: 0 right, 1 left, 2 down, 3 up.
+// Live old room (drawn with the palette it had before the fade-out) -> frozen last frame -> the frozen frame follows the
+// game camera off screen while the new room (target palette) is revealed -> normal rendering. No-ops unless
+// SM_PSP_DOOR_GE and the GE path are active; the game logic is identical either way.
+void PspRenderer_BeginDoorTransition(void);                                   // door hit: start following the old room
+void PspRenderer_DoorTransitionFreeze(void);                                  // fade-out done: keep the last drawn frame
+void PspRenderer_DoorTransitionRef(uint16_t layer1_x, uint16_t layer1_y, unsigned direction);  // camera at the start of the scroll
+void PspRenderer_DoorTransitionArm(const uint16_t *dest_palettes);          // new room's tiles + palettes are loaded
+void PspRenderer_DoorTransitionCamera(uint16_t layer1_x, uint16_t layer1_y);  // after every scroll step
+void PspRenderer_EndDoorTransition(void);                                     // fade-in done: release everything
 
 enum PspButtonIcon {
   PSP_BUTTON_ICON_CIRCLE,

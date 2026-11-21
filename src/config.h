@@ -24,8 +24,9 @@
 #define SM_DOOR_MUSIC_SYNC 1
 #endif
 
-// Never read outside the room when drawing scrolled-in blocks (solid black tile instead of wrapped/garbage data), and
-// make the BG2 parallax position handle negative camera positions. Both only matter once the transition is visible.
+// Never read outside the room when drawing scrolled-in blocks, and make the BG2 parallax position handle negative
+// camera positions. Both only matter once the transition is visible. 0 = original reads, 1 = repeat the nearest edge
+// block (door tubes continue), 2 = solid black tile.
 #ifndef SM_DOOR_FIXOOB
 #define SM_DOOR_FIXOOB 1
 #endif

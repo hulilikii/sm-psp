@@ -288,6 +288,24 @@ static uint32_t g_cap_n_reuse, g_cap_n_full, g_cap_n_chk, g_cap_n_bad, g_cap_n_w
 #endif
 static uint16_t g_vram[0x8000] __attribute__((aligned(16)));
 static uint16_t g_cgram[256] __attribute__((aligned(16)));
+#if SM_PSP_DOOR_GE
+/* Door transition palette: which CGRAM the GE path draws with. The game fades the real palette to black before it
+ * loads the next room; the transition shows the old room with the palette it had (outgoing) and then the new room with
+ * its target palette (dest), neither of which the software PPU sees, so GE frames are not compared with it meanwhile. */
+enum { kDoorPalGame, kDoorPalCapture, kDoorPalOutgoing, kDoorPalDest };
+static int g_door_pal_mode = kDoorPalGame;
+static uint16_t g_door_pal_out[256] __attribute__((aligned(16)));
+static const uint16_t *g_door_pal_dest;
+#endif
+static inline const uint16_t *CgramSrc(const Ppu *p) {
+#if SM_PSP_DOOR_GE
+  if (g_door_pal_mode == kDoorPalOutgoing)
+    return g_door_pal_out;
+  if (g_door_pal_mode == kDoorPalDest && g_door_pal_dest)
+    return g_door_pal_dest;
+#endif
+  return p->cgram;
+}
 
 static uint16_t g_oam[256];
 static uint8_t g_hoam[32];
@@ -1079,7 +1097,7 @@ static void CaptureRefresh(const Ppu *p, LineSnap *d, const LineSnap *prev) {
     d->bg[l].hscroll = p->bgLayer[l].hScroll & 0x3ff;
     d->bg[l].vscroll = p->bgLayer[l].vScroll & 0x3ff;
   }
-  d->cg0 = p->cgram[0];
+  d->cg0 = CgramSrc(p)[0];
 }
 
 /* Window edges ($2126-$2129) as of the last full or window-refreshed capture. */
@@ -1201,7 +1219,7 @@ static void CaptureImpl(const Ppu *p, int line) {
   }
   s->brightness = p->brightness & 15;
   s->bg3prio = p->bg3priority ? 1 : 0;
-  s->cg0 = p->cgram[0];
+  s->cg0 = CgramSrc(p)[0];
   s->forced = forced ? 1 : 0;
   {  /* mosaic (mode 1): BG1-3 with the effect on; the GE path draws it from the layer geometry (MosPrepare) */
     uint8_t mos = 0;
@@ -1283,7 +1301,13 @@ static void CaptureImpl(const Ppu *p, int line) {
      * and only if the frame can still be drawn by the GE. */
     PROF(uint32_t t_cpy = Now();)
     SnapshotVram(p);
-    memcpy(g_cgram, p->cgram, sizeof(g_cgram));
+#if SM_PSP_DOOR_GE
+    if (g_door_pal_mode == kDoorPalCapture) {  /* first frame of the door transition: the palette before the fade-out */
+      memcpy(g_door_pal_out, p->cgram, sizeof(g_door_pal_out));
+      g_door_pal_mode = kDoorPalOutgoing;
+    }
+#endif
+    memcpy(g_cgram, CgramSrc(p), sizeof(g_cgram));
     memcpy(g_oam, p->oam, sizeof(g_oam));
     memcpy(g_hoam, p->highOam, sizeof(g_hoam));
     PROF(g_cpy_us = Now() - t_cpy;)
@@ -1966,9 +1990,12 @@ static bool g_imgh_ok = SM_PSP_LAYER_IMG >= 2;          /* gate 5m: 32x64 tilema
 static bool g_img_skip_ok = SM_PSP_LAYER_IMG >= 3;      /* gate 5m: no written page in map or tiles since the last scan: skip it */
 #if SM_PSP_DOOR_GE
 // Door transition: old-room snapshot (256x192 RGB565) lives in layer-image slot 0 while the layer images are off.
-static bool g_door_ok, g_door_reserved, g_door_capture_pending, g_door_snapshot_valid, g_door_wipe_active;
+// live: the snapshot is refreshed from every composed frame; held: the last live frame covers the scene; armed: it
+// follows the game camera (new room loaded) and slides off.
+static bool g_door_ok, g_door_reserved, g_door_live, g_door_snapshot_valid, g_door_armed;
 static bool g_door_saved_img_ok, g_door_saved_imgh_ok, g_door_saved_img_skip_ok;
-static unsigned g_door_direction, g_door_frame;
+static unsigned g_door_direction;
+static uint16_t g_door_ref_x, g_door_ref_y, g_door_cam_x, g_door_cam_y;
 #endif
 static uint8_t g_img_dirty[kImgSlots][kVramPages];      /* VRAM pages written since this image's last scan (SnapshotVram) */
 static uint8_t g_img_tpg[kImgSlots][kVramPages];        /* gate 5n: VRAM pages holding tile data that a cell of the image uses (set by the scan) */
@@ -2006,9 +2033,11 @@ static void ImgMarkAllDirty(void) {
 
 static void DoorTransitionRelease(void) {
 #if SM_PSP_DOOR_GE
+  g_door_pal_mode = kDoorPalGame;
+  g_door_pal_dest = NULL;
   if (!g_door_reserved)
     return;
-  g_door_reserved = g_door_capture_pending = g_door_snapshot_valid = g_door_wipe_active = false;
+  g_door_reserved = g_door_live = g_door_snapshot_valid = g_door_armed = false;
   g_img_ok = g_door_saved_img_ok;
   g_imgh_ok = g_door_saved_imgh_ok;
   g_img_skip_ok = g_door_saved_img_skip_ok;
@@ -2026,29 +2055,63 @@ void PspRenderer_BeginDoorTransition(void) {
   g_door_saved_imgh_ok = g_imgh_ok;
   g_door_saved_img_skip_ok = g_img_skip_ok;
   g_img_ok = g_imgh_ok = g_img_skip_ok = false;  /* no layer image (main or subscreen) may use slot 0 */
-  g_door_reserved = g_door_capture_pending = true;
-  g_door_snapshot_valid = g_door_wipe_active = false;
-  g_door_frame = 0;
+  g_door_reserved = g_door_live = true;
+  g_door_snapshot_valid = g_door_armed = false;
+  g_door_pal_dest = NULL;
+  g_door_pal_mode = kDoorPalCapture;
 #endif
 }
 
-void PspRenderer_StartDoorTransitionWipe(unsigned direction) {
+void PspRenderer_DoorTransitionFreeze(void) {
 #if SM_PSP_DOOR_GE
-  if (!g_door_reserved || !g_door_snapshot_valid || direction > 3)
+  if (!g_door_reserved || !g_door_live)
     return;
-  g_door_direction = direction;
-  g_door_frame = 0;
-  g_door_wipe_active = true;
+  g_door_live = false;
+  if (!g_door_snapshot_valid) {  /* nothing was captured: leave the transition to the game's own fade */
+    PspLog("door: no snapshot at freeze");
+    DoorTransitionRelease();
+  }
+#endif
+}
+
+void PspRenderer_DoorTransitionRef(uint16_t layer1_x, uint16_t layer1_y, unsigned direction) {
+#if SM_PSP_DOOR_GE
+  if (!g_door_reserved || g_door_live)
+    return;
+  g_door_ref_x = g_door_cam_x = layer1_x;
+  g_door_ref_y = g_door_cam_y = layer1_y;
+  g_door_direction = direction & 3;
 #else
-  (void)direction;
+  (void)layer1_x, (void)layer1_y, (void)direction;
+#endif
+}
+
+void PspRenderer_DoorTransitionArm(const uint16_t *dest_palettes) {
+#if SM_PSP_DOOR_GE
+  if (!g_door_reserved || g_door_live || !g_door_snapshot_valid || !dest_palettes)
+    return;
+  g_door_pal_dest = dest_palettes;
+  g_door_pal_mode = kDoorPalDest;
+  g_door_armed = true;
+#else
+  (void)dest_palettes;
+#endif
+}
+
+void PspRenderer_DoorTransitionCamera(uint16_t layer1_x, uint16_t layer1_y) {
+#if SM_PSP_DOOR_GE
+  if (!g_door_reserved)
+    return;
+  g_door_cam_x = layer1_x;
+  g_door_cam_y = layer1_y;
+#else
+  (void)layer1_x, (void)layer1_y;
 #endif
 }
 
 void PspRenderer_EndDoorTransition(void) {
 #if SM_PSP_DOOR_GE
-  /* The wipe owns the snapshot until its final rendered frame. */
-  if (!g_door_wipe_active)
-    DoorTransitionRelease();
+  DoorTransitionRelease();
 #endif
 }
 
@@ -4097,8 +4160,15 @@ static void Present(bool ge_scene) {
   PROF(g_gws_scene += g_gewait_us; g_gws_n++;)
   if (g_verify_now) {
     g_verify_now = false;
-    PROF(g_hit_verified = true;)    
-    GeVerify();
+#if SM_PSP_DOOR_GE
+    if (g_door_pal_mode != kDoorPalGame && g_door_pal_mode != kDoorPalCapture) {
+      /* the software image uses the game's palette: a difference here is the transition, not a GE fault */
+    } else
+#endif
+    {
+      PROF(g_hit_verified = true;)
+      GeVerify();
+    }
   }
   if (ge_scene) {  /* the scene is complete in the draw buffer: scale it and place the HUD, then swap */
     uint32_t t_c = Now();
@@ -4382,37 +4452,62 @@ static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1,
 }
 
 #if SM_PSP_DOOR_GE
-// Old gameplay image slid over the new room. Rect is clipped on the CPU to the gameplay viewport (no scissor needed); the image maps 256x192 -> 360x270 exactly like the normal composition.
-static void DrawDoorTransition(const ComposeSrc *s, bool animate) {
-  enum { kDoorFrames = 13, kDoorRows = 192 };
-  const unsigned frame = animate ? ++g_door_frame : 0;
-  const int extent = g_door_direction < 2 ? kCompW : kCompH;
-  const int shift = (extent * (int)frame + kDoorFrames / 2) / kDoorFrames;
-  int dx = kCompX, dy = kCompY;  /* where the old image's top-left corner is */
-  switch (g_door_direction) {
-  case 0: dx -= shift; break;  /* right: old room moves left */
-  case 1: dx += shift; break;  /* left: moves right */
-  case 2: dy -= shift; break;  /* down: moves up */
-  default: dy += shift; break; /* up: moves down */
-  }
-  const int x0 = dx > kCompX ? dx : kCompX, x1 = dx + kCompW < kCompX + kCompW ? dx + kCompW : kCompX + kCompW;
-  const int y0 = dy > kCompY ? dy : kCompY, y1 = dy + kCompH < kCompY + kCompH ? dy + kCompH : kCompY + kCompH;
+// Old gameplay image (256x192 RGB565 in slot 0) drawn over the live new room. While armed it is displaced by the opposite
+// of the game camera's movement since the scroll started, so it stays glued to the new room whatever the easing. The rect
+// is clipped on the CPU to the gameplay viewport (no scissor needed); the image maps 256x192 -> 360x270 exactly like the
+// normal composition. Where the displaced image no longer covers the old room (the 32 source rows the HUD hides on an up
+// door, or the camera offset across the door) its nearest edge row/column is repeated, so tubes and walls continue.
+static int DoorDispPx(int src_px) {  /* source pixels -> viewport pixels (360/256 = 270/192 = 45/32), rounded */
+  return (src_px * 45 + (src_px >= 0 ? 16 : -16)) / 32;
+}
+
+static void DoorQuad(float su0, float sv0, float su1, float sv1, int x0, int y0, int x1, int y1) {
+  if (x1 <= x0 || y1 <= y0)
+    return;
+  TileVert *v = sceGuGetMemory(2 * (int)sizeof(TileVert));
+  ComposeQuad(v, su0, sv0, su1, sv1, x0, y0, x1 - x0, y1 - y0);
+  GeDraw(kVtTile, 2, v);
+}
+
+static void DrawDoorTransition(const ComposeSrc *s) {
+  enum { kDoorRows = 192, kHiddenRows = 45 /* 32 source rows */ };
+  const int sdx = g_door_armed ? -(int)(int16_t)(uint16_t)(g_door_cam_x - g_door_ref_x) : 0;
+  const int sdy = g_door_armed ? -(int)(int16_t)(uint16_t)(g_door_cam_y - g_door_ref_y) : 0;
+  const int dx = kCompX + DoorDispPx(sdx), dy = kCompY + DoorDispPx(sdy);  /* where the old image's top-left corner is */
+  const int vx0 = kCompX, vx1 = kCompX + kCompW, vy0 = kCompY, vy1 = kCompY + kCompH;
+  const int x0 = dx > vx0 ? dx : vx0, x1 = dx + kCompW < vx1 ? dx + kCompW : vx1;
+  const int y0 = dy > vy0 ? dy : vy0, y1 = dy + kCompH < vy1 ? dy + kCompH : vy1;
+  const float ku = (float)(kGameWidth - 1) / (float)(kCompW - 1), kv = (float)(kDoorRows - 1) / (float)(kCompH - 1);
+  sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+  sceGuTexImage(0, 256, 256, 256, g_img_tex[0]);
+  sceGuTexFlush();
   if (x1 > x0 && y1 > y0) {
-    const float ku = (float)(kGameWidth - 1) / (float)(kCompW - 1), kv = (float)(kDoorRows - 1) / (float)(kCompH - 1);
-    sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
-    sceGuTexImage(0, 256, 256, 256, g_img_tex[0]);
-    sceGuTexFlush();
-    TileVert *v = sceGuGetMemory(2 * (int)sizeof(TileVert));
-    ComposeQuad(v, 0.5f + (float)(x0 - dx) * ku, 0.5f + (float)(y0 - dy) * kv,
-                0.5f + (float)(x1 - 1 - dx) * ku, 0.5f + (float)(y1 - 1 - dy) * kv, x0, y0, x1 - x0, y1 - y0);
-    GeDraw(kVtTile, 2, v);
-    /* the HUD pass samples the composition source again */
-    sceGuTexMode(s->psm, 0, 0, GU_FALSE);
-    sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
-    sceGuTexFlush();
+    const float u0 = 0.5f + (float)(x0 - dx) * ku, u1 = 0.5f + (float)(x1 - 1 - dx) * ku;
+    const float v0 = 0.5f + (float)(y0 - dy) * kv, v1 = 0.5f + (float)(y1 - 1 - dy) * kv;
+    DoorQuad(u0, v0, u1, v1, x0, y0, x1, y1);
+    if (g_door_armed) {
+      const bool horiz = g_door_direction < 2;  /* horizontal door: the camera offset across it is vertical */
+      const float top = 0.5f, bottom = (float)kDoorRows - 0.5f, left = 0.5f, right = (float)kGameWidth - 0.5f;
+      if (dy > vy0 && g_door_direction != 2) {  /* above the image: row 0 repeated */
+        int h = dy - vy0;
+        if (!horiz && h > kHiddenRows)
+          h = kHiddenRows;
+        DoorQuad(u0, top, u1, top, x0, dy - h, x1, dy);
+      }
+      if (horiz && dy + kCompH < vy1)  /* below the image */
+        DoorQuad(u0, bottom, u1, bottom, x0, dy + kCompH, x1, vy1);
+      if (!horiz) {
+        if (dx > vx0)  /* left of the image */
+          DoorQuad(left, v0, left, v1, vx0, y0, dx, y1);
+        if (dx + kCompW < vx1)  /* right of the image */
+          DoorQuad(right, v0, right, v1, dx + kCompW, y0, vx1, y1);
+      }
+    }
   }
-  if (animate && frame >= kDoorFrames)
-    DoorTransitionRelease();
+  /* the HUD pass samples the composition source again */
+  sceGuTexMode(s->psm, 0, 0, GU_FALSE);
+  sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
+  sceGuTexFlush();
 }
 #endif
 
@@ -4808,15 +4903,13 @@ static void ComposeDraw(const ComposeSrc *s) {
   sceGuTexOffset(0.0f, 0.0f);
 
 #if SM_PSP_DOOR_GE
-  if (g_door_capture_pending && hud && s->psm == GU_PSM_5650) {
-    /* gameplay rows 32-223 -> slot 0 (VRAM to VRAM); sync before it is sampled */
+  if (g_door_live && hud && s->psm == GU_PSM_5650) {
+    /* gameplay rows 32-223 -> slot 0 (VRAM to VRAM), every frame until the fade-out is over; sync before it is sampled */
     sceGuCopyImage(GU_PSM_5650, 0, 32, kGameWidth, 192, s->stride,
                    (void *)(0x04000000u | ((uintptr_t)s->ptr & 0x001fffffu)), 0, 0, 256,
                    (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramImg0));
     sceGuTexSync();
-    g_door_capture_pending = false;
     g_door_snapshot_valid = true;
-    PspLog("door: snapshot captured f=%u", (unsigned)g_frame);
   }
 #endif
 
@@ -4827,8 +4920,8 @@ static void ComposeDraw(const ComposeSrc *s) {
   sceGuTexFilter(GU_LINEAR, GU_LINEAR);
   GeDraw(kVtTile, 2, base);
 #if SM_PSP_DOOR_GE
-  if (g_door_reserved && g_door_snapshot_valid)
-    DrawDoorTransition(s, g_door_wipe_active);
+  if (g_door_reserved && g_door_snapshot_valid && !g_door_live)
+    DrawDoorTransition(s);
 #endif
   if (hud) {
     TileVert *w = base + 2;
@@ -8106,8 +8199,10 @@ static void PspRenderer_EndDraw(void) {
     g_t_draw_start = Now();
     int swpath = g_swpath >= 0 ? g_swpath : (int)((g_cal_frames / kSwCalFrames) % kSwPaths);
 #if SM_PSP_DOOR_GE
-    if (g_door_capture_pending)
-      swpath = 0;  /* the capture copies a 5650 source */
+    if (g_door_reserved) {  /* the software PPU cannot draw the override palettes: the game's own transition continues */
+      PspLog("door: software frame, GE door transition dropped");
+      DoorTransitionRelease();
+    }
 #endif
     if (swpath == 0)
       PspRenderer_Convert();

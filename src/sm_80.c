@@ -7,6 +7,7 @@
 #include "enemy_types.h"
 #include "spc_player.h"
 #include "config.h"
+#include "src/psp/psp_renderer.h"
 #include "psp/psp_audio_msu.h"
 #if SM_PSP_LOG
 #include <pspthreadman.h>
@@ -2125,13 +2126,22 @@ void UploadBackgroundDataColumn(void) {  // 0x80A9D6
 }
 
 #if SM_DOOR_FIXOOB
-// Block word at block (x, y) of the level (bg = 0) or background (bg = 1) data; a solid black tile when the block is
-// outside the room. The original reads the array unchecked, so negative / past-the-edge positions (which door
-// scrolling and the cross-door camera offset reach) draw wrapped or unrelated data.
+// Block word at block (x, y) of the level (bg = 0) or background (bg = 1) data. The original reads the array unchecked,
+// so negative / past-the-edge positions (which door scrolling and the cross-door camera offset reach) draw wrapped or
+// unrelated data. Outside the room this repeats the nearest edge block (SM_DOOR_FIXOOB 1: door tubes and walls
+// continue) or draws a solid black tile (2).
 #define kOobBlackBlock 0x8081
 static inline uint16 ReadBlockOrBlack(int x, int y, int bg) {
-  if (x < 0 || y < 0 || x >= (int)room_width_in_blocks || y >= (int)room_height_in_blocks)
+  if (x < 0 || y < 0 || x >= (int)room_width_in_blocks || y >= (int)room_height_in_blocks) {
+#if SM_DOOR_FIXOOB == 2
     return kOobBlackBlock;
+#else
+    if (room_width_in_blocks == 0 || room_height_in_blocks == 0)
+      return kOobBlackBlock;
+    x = x < 0 ? 0 : (x >= (int)room_width_in_blocks ? (int)room_width_in_blocks - 1 : x);
+    y = y < 0 ? 0 : (y >= (int)room_height_in_blocks ? (int)room_height_in_blocks - 1 : y);
+#endif
+  }
   const unsigned idx = (unsigned)y * room_width_in_blocks + (unsigned)x;
   // 16-bit offset into the bank, as the original (also keeps the read inside g_ram for oversized rooms).
   return *(const unaligned_uint16 *)(g_ram + 0x10000 + (uint16)(2 + (bg ? 0x9600 : 0) + 2 * idx));
@@ -2406,6 +2416,7 @@ void DoorTransitionScrollingSetup(void) {
   else
     bg2_x_scroll -= DoorAlignDistance(old_x);
 #endif
+  PspRenderer_DoorTransitionRef(layer1_x_pos, layer1_y_pos, door_direction & 3);  // camera at the start of the scroll
 }
 
 #if SM_DOOR_DIAG && SM_DOOR_EASE
@@ -2500,6 +2511,7 @@ void Irq_FollowDoorTransition(void) {
     layer1_y_pos = door_destination_y_pos;
     door_transition_flag |= 0x8000;
   }
+  PspRenderer_DoorTransitionCamera(layer1_x_pos, layer1_y_pos);
 }
 
 // Door/elevator-room scrolling: quadratic ease in/out (SM_DOOR_EASE in config.h; 0 = original constant 4 px per step).
