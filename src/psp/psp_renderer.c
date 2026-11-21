@@ -8371,7 +8371,9 @@ static void PspRenderer_EndDraw(void) {
            (unsigned)g_frames_async, (unsigned)g_async_nofit, (unsigned)g_async_fail, (unsigned)g_async_viol,
            (int)g_async_ok, (unsigned)g_comp_used_hw, (unsigned)g_comp_bound_hw, (unsigned)kComposeListBytes,
            (unsigned)g_comp_call_hw, (unsigned)kGuCallMax);
-    g_comp_used_hw = g_comp_bound_hw = g_comp_call_hw = 0;
+  #if SM_PSP_LOG
+     g_comp_used_hw = g_comp_bound_hw = g_comp_call_hw = 0;
+  #endif
 #endif
     PspLog("  m7reuse: on=%d rows built=%u kept=%u audited=%u bad=%u", (int)g_m7i_reuse_ok, (unsigned)g_m7i_built,
            (unsigned)g_m7i_kept, (unsigned)g_m7i_audits, (unsigned)g_m7i_bad);
