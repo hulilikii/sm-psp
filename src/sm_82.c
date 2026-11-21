@@ -4652,7 +4652,12 @@ void GameOptionsMenuItemFunc_0(void) {  // 0x82EDB1
   PspRenderer_SetMosaicTransition(1);
   screen_fade_delay = 0;
   screen_fade_counter = 0;
-  game_options_screen_index = 12;  /* every exit mosaics out first; state 12 ends in GameOptionsMenu_4_StartGame */
+  if ((enable_debug && (joypad1_lastkeys & kButton_L) == 0) ||
+      loading_game_state == kGameState_5_FileSelectMap) {
+    game_options_screen_index = 4;
+  } else {
+    game_options_screen_index = 12;
+  }
 }
 
 void GameOptionsMenuItemFunc_2_ToggleJapanese(void) {  // 0x82EDDA
@@ -4707,10 +4712,12 @@ void GameOptionsMenu_C_FadeOutOptionsScreenToStart(void) {  // 0x82EE92
 
 void GameOptionsMenu_4_StartGame(void) {  // 0x82EEB4
   PspRenderer_ClearButtonIcons();
-// Going to the area map: keep the peak mosaic so the renderer holds the last image through the load frames and the map's mosaic fade-in continues from it. Any other destination ends the transition here.
   const bool to_map = (enable_debug && (joypad1_lastkeys & kButton_L) == 0) ||
                       loading_game_state == kGameState_5_FileSelectMap;
+
   PspRenderer_SetMosaicTransition(1);
+  if (to_map)
+    PspFileSelectMap_ArmOptionsMosaicFadeOut();
   game_options_screen_index = 0;
   if (enable_debug && (joypad1_lastkeys & 0x20) == 0) {
     game_state = kGameState_5_FileSelectMap;

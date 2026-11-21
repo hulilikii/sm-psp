@@ -35,6 +35,13 @@ static void PspMenuMosaicReset(void) {
   PspRenderer_SetMosaicTransition(1);
 }
 
+static bool psp_options_mosaic_fade_out;
+static bool psp_map_palette_fade_done;
+
+void PspFileSelectMap_ArmOptionsMosaicFadeOut(void) {
+  psp_options_mosaic_fade_out = true;
+}
+
 static const uint16 kFileSelectMap_AreaIndexes[6] = { 0, 3, 5, 1, 4, 2 };
 
 void SoftReset(void) {
@@ -1642,6 +1649,7 @@ LABEL_28:
 void FileSelectMap_0(void) {  // 0x81A32A
   VramWriteEntry *v1;
 
+  psp_map_palette_fade_done = false;
   PspRenderer_ClearButtonIcons();
   ClearMenuTilemap();
   uint16 v0 = vram_write_queue_tail;
@@ -1668,7 +1676,14 @@ void FileSelectMap_1(void) {  // 0x81A37C
   int16 v2;
 
 
-  if (AdvanceGradualColorChangeOfPalette(0, 0x40)) {
+  if (!psp_map_palette_fade_done)
+    psp_map_palette_fade_done = AdvanceGradualColorChangeOfPalette(0, 0x40);
+
+  const bool mosaic_done =
+      !psp_options_mosaic_fade_out || PspMosaicFadeOut();
+
+  if (psp_map_palette_fade_done && mosaic_done) {
+    psp_options_mosaic_fade_out = false;
     reg_BG1VOFS = 0;
     reg_BG1HOFS = 0;
     reg_BG2VOFS = 0;

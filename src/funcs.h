@@ -201,6 +201,7 @@ void FileSelectClearRestOfMenuTilemapRow(uint16 k);
 void FileSelectMap(void);
 void FileSelectMap_0(void);
 void FileSelectMap_1(void);
+void PspFileSelectMap_ArmOptionsMosaicFadeOut(void);
 void FileSelectMap_10_RoomSelectMap(void);
 void FileSelectMap_11(void);
 void FileSelectMap_13(void);
