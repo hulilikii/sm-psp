@@ -552,6 +552,7 @@ enum { kMaxTintRanges = 6 };
 static TintRange g_trange[kMaxTintRanges];
 static int g_ntr;
 static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2, y2), 2 = (x, y, w, h) */
+static bool g_stint_frame;  /* this frame's tint is the smooth (dithered strip) one: the audit allows one fixed-colour level of difference */
 /* Gate 4s: rows of one subscreen colour-math mask. The blend is drawn once; each band restores its own layers. */
 typedef struct BlendBand { uint16_t r0, r1; uint8_t mask; } BlendBand;
 enum { kMaxBlendBands = 6, kBandVerify = 8 };
@@ -712,9 +713,29 @@ static int TintStripBuild(void) {
     }
   }
   __sync_synchronize();  /* CPU writes to VRAM (uncached alias) complete before the GE is started */
-  if (logged < 8) {
-    logged++;
-    PspLog("tintstrip: groups=%d runs=%d rows=%d ranges=%d scissor=%d", groups, g_ntint, rows, g_ntr, g_scissor_mode);
+  static int glogged;
+  if ((g_ntint >= 3 && glogged < 24 && (g_frame & 31) == 0) || logged < 2) {
+    int maxstep = 0;
+    for (int q = 0; q + 1 < g_ntint; q++) {
+      if (g_tint[q].r1 != g_tint[q + 1].r0)
+        continue;
+      for (int sh = 0; sh < 15; sh += 5) {
+        int d = (int)((g_tint[q].fix >> sh) & 31) -
+                (int)((g_tint[q + 1].fix >> sh) & 31);
+        if (d < 0)
+          d = -d;
+        if (d > maxstep)
+          maxstep = d;
+      }
+    }
+    if (g_ntint >= 3)
+      glogged++;
+    else
+      logged++;
+    PspLog("tintstrip f=%u: groups=%d runs=%d rows=%d ranges=%d scissor=%d maxstep=%d(levels) first=%04x last=%04x",
+           (unsigned)g_frame, groups, g_ntint, rows, g_ntr, g_scissor_mode,
+           maxstep, g_ntint ? g_tint[0].fix : 0,
+           g_ntint ? g_tint[g_ntint - 1].fix : 0);
   }
   return groups;
 }
@@ -3754,6 +3775,8 @@ static void GeVerify(void) {
   uint16_t bsw = 0, bge = 0;
   static uint16_t rowbad[kMaxLines];
   memset(rowbad, 0, sizeof(rowbad));
+// Smooth tint can differ by one fixed-colour level after RGB565 quantisation.
+  const int tr = g_stint_frame ? 2 : 1, tg = g_stint_frame ? 3 : 2;
   for (int y = 0; y < g_line_count; y++)
     for (int x = 0; x < kGameWidth; x++) {
       uint16_t sw = Rgb565(g_framebuffer + (y * kGameWidth + x) * 4), g = ge[(kTop + y) * 512 + kLeft + x];
@@ -3761,7 +3784,8 @@ static void GeVerify(void) {
         exact++;
       } else {
         int dr = (sw & 31) - (g & 31), dg = ((sw >> 5) & 63) - ((g >> 5) & 63), db = (sw >> 11) - (g >> 11);
-        if (dr >= -1 && dr <= 1 && dg >= -2 && dg <= 2 && db >= -1 && db <= 1) {
+        if (dr >= -tr && dr <= tr && dg >= -tg && dg <= tg &&
+            db >= -tr && db <= tr) {
           near++;
         } else {
           rowbad[y]++;
@@ -5708,6 +5732,7 @@ static bool DrawGe(void) {
   bool tint = false;
   g_ntint = 0;
   g_ntr = 0;
+  g_stint_frame = false;
   for (int r = 0; r < g_line_count; r++) {
     const LineSnap *ls = &g_lines[r];
     if (!ls->tint)
@@ -5994,6 +6019,7 @@ static bool DrawGe(void) {
     }
   if (smooth_tint) {
     tint_groups = TintStripBuild();
+    g_stint_frame = true;
   } else if (tint) {
     static int flat_logged;
     if (flat_logged++ < 4)
