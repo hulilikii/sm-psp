@@ -6,6 +6,7 @@
 #include "funcs.h"
 #include "enemy_types.h"
 #include "spc_player.h"
+#include "config.h"
 #include "psp/psp_audio_msu.h"
 #if SM_PSP_LOG
 #include <pspthreadman.h>
@@ -2293,6 +2294,50 @@ void FixDoorsMovingUp(void) {  // 0x80AD1D
   DoorTransition_Up();
 }
 
+#if SM_DOOR_DIAG && SM_DOOR_EASE
+// Camera alignment on the axis across the door (y for left/right doors, x for up/down doors), folded into the scroll.
+// The original aligns the old room first (ScrollScreenToAlignment, 1 px/frame, nearest 256 boundary), then scrolls with
+// the new room's camera on the destination. Here the old room is not aligned; the new room's camera starts offset by the
+// alignment distance A (so the old and new halves of the door line up) and eases to the destination together with the
+// main axis. weight(k) = n^2 * (1 - cum(k)/total) is 0 at k = n, so the last step lands exactly on the destination.
+static int DoorEaseRemainW(int k, int n) {
+  const int nn = n * n;
+  if (2 * k <= n)
+    return nn - 2 * k * k;
+  const int m = n - k;
+  return 2 * m * m;
+}
+
+// Remaining distance to the destination after step i (0-based, i < n), given the remaining distance before it.
+static int DoorPerpRemaining(int rem, int i, int n) {
+  const int wi = DoorEaseRemainW(i, n), wj = DoorEaseRemainW(i + 1, n);
+  const int num = rem * wj;
+  return (num + (num >= 0 ? wi / 2 : -(wi / 2))) / wi;
+}
+
+// Distance (signed) the old camera must move to reach the nearest 256 boundary, as ScrollScreenToAlignment does.
+static int DoorAlignDistance(uint16 pos) {
+  const int low = pos & 0xFF;
+  return (low & 0x80) ? 256 - low : -low;
+}
+
+// Step i of n on the perpendicular axis; the main-axis callers pass their own step index.
+static void DoorPerpStepY(int i, int n) {
+  const int rem = (int16)(layer1_y_pos - door_destination_y_pos);
+  layer1_y_pos += DoorPerpRemaining(rem, i, n) - rem;
+  CalculateLayer2Ypos();
+}
+
+static void DoorPerpStepX(int i, int n) {
+  const int rem = (int16)(layer1_x_pos - door_destination_x_pos);
+  layer1_x_pos += DoorPerpRemaining(rem, i, n) - rem;
+  CalculateLayer2Xpos();
+}
+#else
+static inline void DoorPerpStepY(int i, int n) { (void)i, (void)n; }
+static inline void DoorPerpStepX(int i, int n) { (void)i, (void)n; }
+#endif
+
 static Func_V *const kDoorTransitionSetupFuncs[4] = {  // 0x80AD30
   DoorTransitionScrollingSetup_Right,
   DoorTransitionScrollingSetup_Left,
@@ -2301,8 +2346,17 @@ static Func_V *const kDoorTransitionSetupFuncs[4] = {  // 0x80AD30
 };
 
 void DoorTransitionScrollingSetup(void) {
+  const uint16 old_x = layer1_x_pos, old_y = layer1_y_pos;
   layer1_x_pos = door_destination_x_pos;
   layer1_y_pos = door_destination_y_pos;
+#if SM_DOOR_DIAG && SM_DOOR_EASE
+  if ((door_direction & 2) == 0)
+    layer1_y_pos -= DoorAlignDistance(old_y);
+  else
+    layer1_x_pos -= DoorAlignDistance(old_x);
+#else
+  (void)old_x, (void)old_y;
+#endif
   kDoorTransitionSetupFuncs[door_direction & 3]();
 }
 
@@ -2391,14 +2445,10 @@ void Irq_FollowDoorTransition(void) {
   }
 }
 
-// Door/elevator-room scrolling: quadratic ease in/out (SM_DOOR_EASE, default on; 0 = original constant 4 px per step).
+// Door/elevator-room scrolling: quadratic ease in/out (SM_DOOR_EASE in config.h; 0 = original constant 4 px per step).
 // The original moves 4 px per step for N steps (64 horizontal, 56 vertical), N*4 px in total. The eased path moves the
 // same total in the same N steps: cumulative(k) = total * (2t^2 for t < 1/2, 1 - 2(1-t)^2 otherwise), t = k/N, rounded.
 // Samus's step is her original per-step speed scaled by step/4, so her total distance is unchanged and exact.
-#ifndef SM_DOOR_EASE
-#define SM_DOOR_EASE 1
-#endif
-
 static int DoorEaseCum(int k, int n, int total) {
   if (k <= 0)
     return 0;
@@ -2434,6 +2484,7 @@ uint8 DoorTransition_Right(void) {  // 0x80AE7E
   samus_prev_x_pos = samus_x_pos;
   layer1_x_pos += d;
   layer2_x_pos += d;
+  DoorPerpStepY(v2, 64);
   UpdateScrollVarsUpdateMap();
   door_transition_frame_counter = v2 + 1;
   if (v2 != 63)
@@ -2449,6 +2500,7 @@ uint8 DoorTransition_Left(void) {  // 0x80AEC2
   samus_prev_x_pos = samus_x_pos;
   layer1_x_pos -= d;
   layer2_x_pos -= d;
+  DoorPerpStepY(v2, 64);
   UpdateScrollVarsUpdateMap();
   door_transition_frame_counter = v2 + 1;
   return v2 == 63;
@@ -2463,6 +2515,7 @@ uint8 DoorTransition_Down(void) {  // 0x80AF02
       samus_prev_y_pos = samus_y_pos;
       layer1_y_pos += d;
       layer2_y_pos += d;
+      DoorPerpStepX(v6 - 1, 56);
       UpdateScrollVarsUpdateMap();
     }
   } else {
@@ -2497,6 +2550,7 @@ uint8 DoorTransition_Up(void) {  // 0x80AF89
     samus_prev_y_pos = samus_y_pos;
     layer1_y_pos -= d;
     layer2_y_pos -= d;
+    DoorPerpStepX(v6 - 1, 56);
     if (door_transition_frame_counter >= 5) {
       UpdateScrollVarsUpdateMap();
     } else {

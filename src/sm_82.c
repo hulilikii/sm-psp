@@ -4,6 +4,7 @@
 #include "variables.h"
 #include "funcs.h"
 #include "enemy_types.h"
+#include "config.h"
 #include "src/psp/psp_renderer.h"
 #include "src/psp/psp_mosaic_fade.h"
 
@@ -3910,6 +3911,11 @@ CoroutineRet DoorTransitionFunction_LoadDoorHeaderEtc(void) {  // 0x82E2F7
 }
 
 CoroutineRet DoorTransitionFunction_ScrollScreenToAlignment(void) {  // 0x82E310
+#if SM_DOOR_DIAG && SM_DOOR_EASE
+  // The alignment is folded into the eased door scroll (DoorTransitionScrollingSetup, DoorTransition_*).
+  door_transition_function = FUNC16(DoorTransitionFunction_FixDoorsMovingUp);
+  return kCoroutineNone;
+#endif
   if ((door_direction & 2) != 0) {
     if ((uint8)layer1_x_pos) {
       if ((layer1_x_pos & 0x80) != 0)
@@ -3966,9 +3972,20 @@ CoroutineRet DoorTransitionFunction_SetupScrolling(void) {  // 0x82E38E
 CoroutineRet DoorTransitionFunction_PlaceSamusLoadTiles(void) {  // 0x82E3C0
   uint16 v0;
 
+#if SM_DOOR_DIAG && SM_DOOR_EASE
+  // The camera is offset across the door while it eases in; Samus is placed against the destination.
+  if ((door_direction & 2) == 0) {
+    samus_x_pos = layer1_x_pos + (uint8)samus_x_pos;
+    samus_y_pos = door_destination_y_pos + (uint8)samus_y_pos;
+  } else {
+    samus_x_pos = door_destination_x_pos + (uint8)samus_x_pos;
+    samus_y_pos = layer1_y_pos + (uint8)samus_y_pos;
+  }
+#else
   samus_x_pos = layer1_x_pos + (uint8)samus_x_pos;
-  samus_prev_x_pos = samus_x_pos;
   samus_y_pos = layer1_y_pos + (uint8)samus_y_pos;
+#endif
+  samus_prev_x_pos = samus_x_pos;
   samus_prev_y_pos = samus_y_pos;
   door_transition_flag = 0;
   if ((door_direction & 3) == 2)
@@ -4007,11 +4024,18 @@ static Func_Y_Y *const kUpdateBackgroundCommands[8] = {
   UpdateBackgroundCommand_E_DoorDependentTransferToVRAM,
 };
 
+#if SM_DOOR_MUSIC_SYNC
+static bool g_door_music_started;
+#endif
+
 CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
   uint16 bg_data_ptr;
 
   COROUTINE_BEGIN(coroutine_state_1, 0);
 
+#if SM_DOOR_MUSIC_SYNC
+  g_door_music_started = false;
+#endif
   LoadEnemyGfxToVram();
   LoadRoomMusic();
   ClearEprojs();
@@ -4039,6 +4063,14 @@ CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
   }
   // Wait until the screen has finished scrolling as a result of the door opening
   while ((door_transition_flag & 0x8000) == 0) {
+#if SM_DOOR_MUSIC_SYNC
+    // Queue the new track as soon as the music queue (stop + bank upload) has drained, not after the scroll.
+    // The original WaitForMusicToClear / LoadNewMusicTrackIfChanged afterwards then finds nothing left to do.
+    if (!g_door_music_started && !HasQueuedMusic()) {
+      g_door_music_started = true;
+      LoadNewMusicTrackIfChanged();
+    }
+#endif
     COROUTINE_AWAIT(1, WaitForNMI_Async());
   }
   palette_buffer[196] = 15328;
