@@ -1675,12 +1675,21 @@ void FileSelectMap_1(void) {  // 0x81A37C
   int16 v1;
   int16 v2;
 
-
-  if (!psp_map_palette_fade_done)
+  bool mosaic_done = true;
+  if (psp_options_mosaic_fade_out) {
+    mosaic_done = PspMosaicFadeOut();
+    if (mosaic_done) {
+// The mosaic replaces the original palette fade on this route.
+// Apply its final palette state without adding another transition.
+      palette_buffer[14] = target_palettes[14];
+      palette_buffer[30] = target_palettes[30];
+      palette_change_num = 0;
+      palette_change_denom = 15;
+      psp_map_palette_fade_done = true;
+    }
+  } else if (!psp_map_palette_fade_done) {
     psp_map_palette_fade_done = AdvanceGradualColorChangeOfPalette(0, 0x40);
-
-  const bool mosaic_done =
-      !psp_options_mosaic_fade_out || PspMosaicFadeOut();
+  }
 
   if (psp_map_palette_fade_done && mosaic_done) {
     psp_options_mosaic_fade_out = false;
