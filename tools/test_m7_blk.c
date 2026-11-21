@@ -14,7 +14,8 @@
 #include <math.h>
 
 enum { kGameWidth = 256, kMaxLines = 240, kM7Pages = 64, kVramPageWords = 256, kVramPages = 128 };
-enum { kM7PlaneW = 1024, kM7BlkW = 64, kM7BlkH = 16, kM7WinMax = 128, kM7MaxBlk = 64, kM7PlFull = 32 };
+enum { kM7PlaneW = 1024, kM7PlaneP = 1152, kM7WinMax = 128, kM7MaxBlk = 256, kM7PlFull = 32 };
+#define PROF(...)
 typedef struct LineSnap { uint8_t mossize, mosstart, m7on, m7fl; int16_t m7m[8]; } LineSnap;
 typedef struct M7Cfg { int16_t m[8]; uint8_t fl; } M7Cfg;
 typedef struct M7BSeg { float u0, v0, u1, v1; int16_t x0, x1, y, pad; } M7BSeg;
@@ -25,12 +26,13 @@ static int g_line_count, g_m7_rows, g_m7_bnseg, g_m7_bnblk, g_m7_nrng;
 static bool g_m7_same, g_m7_blk, g_m7_img, g_m7b_ok = true, g_m7pl_valid;
 static M7Cfg g_m7c;
 static float g_uvh[2] = {0.5f, 0.5f};
-static uint8_t g_m7pl[kM7PlaneW * kM7PlaneW] __attribute__((aligned(64)));
+static uint8_t g_m7pl[kM7PlaneP * kM7PlaneP] __attribute__((aligned(64)));
 static uint8_t g_m7pl_dirty[64];
-static M7BSeg g_m7bseg[kMaxLines * 4];
+static M7BSeg g_m7bseg[kMaxLines * 8];
 static M7BBlk g_m7bblk[kM7MaxBlk];
 #define BLK_WHY(r) ((void)0)
-enum { kBlkOk, kBlkOff, kBlkSame, kBlkFlags, kBlkWindow, kBlkPlane, kBlkStraddle };
+enum { kBlkOk, kBlkOff, kBlkSame, kBlkFlags, kBlkWindow };
+static uint32_t Now(void) { return 0; }
 static void sceKernelDcacheWritebackRange(const void *p, unsigned n) { (void)p; (void)n; }
 #define SM_PSP_M7_ROW4 1
 #include "/tmp/m7row_extract.inc"
@@ -38,15 +40,16 @@ static void sceKernelDcacheWritebackRange(const void *p, unsigned n) { (void)p; 
 
 static uint32_t rng = 0x2545F491u;
 static uint32_t R(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
-static inline int SwzAddr(int X, int Y) { return (((Y >> 3) * 64 + (X >> 4)) << 7) + (Y & 7) * 16 + (X & 15); }
+static inline int SwzAddr(int X, int Y) { return (((Y >> 3) * (kM7PlaneP / 16) + (X >> 4)) << 7) + (Y & 7) * 16 + (X & 15); }
 static int RefPixel(int X, int Y) {
+  X &= 1023; Y &= 1023;  /* the padded plane repeats the start of the plane */
   unsigned tile = g_vram[(Y >> 3) * 128 + (X >> 3)] & 0xff;
   return g_vram[tile * 64 + (Y & 7) * 8 + (X & 7)] >> 8;
 }
 static long ComparePlane(void) {
   long bad = 0;
-  for (int Y = 0; Y < 1024; Y++)
-    for (int X = 0; X < 1024; X++)
+  for (int Y = 0; Y < kM7PlaneP; Y++)
+    for (int X = 0; X < kM7PlaneP; X++)
       if (g_m7pl[SwzAddr(X, Y)] != RefPixel(X, Y)) bad++;
   return bad;
 }
@@ -79,21 +82,46 @@ static int TestPlane(bool negative) {
 
 static int TestRes(void) {
   long bad = 0;
-  for (int it = 0; it < 4000; it++) {
-    int step = (int)(R() % 256);
+  static const int kN[3] = {64, 32, 16};
+  for (int it = 0; it < 3000; it++) {
+    int step = (int)(R() % 256), n = kN[it % 3];
     M7Res t;
-    M7ResBuild(&t, step, kM7BlkW);
+    M7ResBuild(&t, step, n);
     for (int r0 = 0; r0 < 256; r0++) {
       int lo = 255, hi = 0, mlo, mhi;
-      for (int k = 0; k < kM7BlkW; k++) { int r = (r0 + step * k) & 255; if (r < lo) lo = r; if (r > hi) hi = r; }
+      for (int k = 0; k < n; k++) { int r = (r0 + step * k) & 255; if (r < lo) lo = r; if (r > hi) hi = r; }
       M7ResGet(&t, r0, &mlo, &mhi);
       if (lo != mlo || hi != mhi) bad++;
+      /* a shorter segment only has a subset of the residues: its range lies inside */
+      int m = 1 + (int)(R() % n);
+      int slo = 255, shi = 0;
+      for (int k = 0; k < m; k++) { int r = (r0 + step * k) & 255; if (r < slo) slo = r; if (r > shi) shi = r; }
+      if (slo < mlo || shi > mhi) bad++;
     }
   }
   printf("  residue tables: %ld mismatches\n", bad);
   return bad != 0;
 }
 
+static int TestClip(void) {
+  long bad = 0;
+  for (int it = 0; it < 400000; it++) {
+    int p0 = (int)(R() % 1200000) - 450000, step = (int)(R() % 1601) - 800;
+    int xs = (int)(R() % 4) * 64, xe = xs + 64;
+    int cs = xs, ce = xe;
+    M7Clip(p0, step, &cs, &ce);
+    for (int x = xs; x < xe; x++) {
+      uint32_t pos = (uint32_t)(p0 + step * x);
+      bool inside = pos <= 0x3ffffu;
+      bool in = x >= cs && x < ce;
+      if (inside != in) bad++;
+    }
+  }
+  printf("  clip to the plane: %ld mismatches\n", bad);
+  return bad != 0;
+}
+
+static long g_w64, g_w32, g_uncov, g_rejwin;
 static int TestFrames(double eps, long *accepted, long *rejected, long *pixels) {
   long bad = 0;
   *accepted = *rejected = *pixels = 0;
@@ -104,7 +132,7 @@ static int TestFrames(double eps, long *accepted, long *rejected, long *pixels) 
     int16_t m[8];
     int kind = (int)(R() % 5);
     int ang = (int)(R() % 360);
-    double sc = 0.5 + (R() % 200) / 100.0;  /* 0.5 .. 2.5 as zoom */
+    double sc = 0.4 + (R() % 300) / 100.0;  /* 0.4 .. 3.4: the larger ones need the smaller blocks or the CPU image */
     if (kind == 0) { m[0] = m[3] = 256; m[1] = m[2] = 0; }
     else if (kind <= 3) { m[0] = (int16_t)lrint(256 * cos(ang * M_PI / 180) * sc); m[1] = (int16_t)lrint(256 * sin(ang * M_PI / 180) * sc);
                           m[2] = (int16_t)-m[1]; m[3] = m[0]; }
@@ -127,9 +155,13 @@ static int TestFrames(double eps, long *accepted, long *rejected, long *pixels) 
     if (R() % 30 == 0) g_m7_same = false;
     if (R() % 6 == 0) { int w = (int)(R() % 0x4000); g_vram[w] = (uint16_t)R(); g_m7pl_dirty[w / kVramPageWords] = 1; }
     bool ok = M7PrepareBlk();
-    if (!ok) { (*rejected)++; if (g_m7_blk) bad++; continue; }
+    if (!ok) { (*rejected)++; if (g_m7_blk) bad++; if (g_m7_same && !(fl & ~9u) && g_m7_rows) g_rejwin++; continue; }
     if (fl & ~9u || !g_m7_same) { printf("  accepted an unsupported frame\n"); bad++; continue; }
     (*accepted)++;
+    { int maxw = 0; for (int i = 0; i < g_m7_bnseg; i++) if (g_m7bseg[i].x1 - g_m7bseg[i].x0 > maxw) maxw = g_m7bseg[i].x1 - g_m7bseg[i].x0;
+      if (maxw > 32) g_w64++; else g_w32++; }
+    static uint8_t cov[kMaxLines][256];
+    memset(cov, 0, sizeof cov);
     for (int b = 0; b < g_m7_bnblk; b++) {
       const M7BBlk *bk = &g_m7bblk[b];
       for (int i = bk->first; i < bk->first + bk->n; i++) {
@@ -145,10 +177,21 @@ static int TestFrames(double eps, long *accepted, long *rejected, long *pixels) 
           int tx = (int)floor(u), ty = (int)floor(v);
           if (tx < 0 || ty < 0 || tx >= kM7WinMax || ty >= kM7WinMax) { bad++; continue; }  /* outside the bound window */
           int X = bk->wx + tx, Y = bk->wy + ty;
-          if (X >= 1024 || Y >= 1024) { bad++; continue; }
+          if (X >= kM7PlaneP || Y >= kM7PlaneP || X < 0 || Y < 0) { bad++; continue; }
           (*pixels)++;
+          cov[sg->y][x]++;
           if (g_m7pl[SwzAddr(X, Y)] != ref[x]) bad++;
         }
+      }
+    }
+    /* every pixel of a mode 7 row is drawn exactly once, except (large field) the ones outside the plane, which ppu.c leaves 0 */
+    for (int r = 0; r < g_line_count; r++) {
+      if (!g_lines[r].m7on) { for (int x = 0; x < 256; x++) if (cov[r][x]) bad++; continue; }
+      uint8_t ref[256];
+      M7RenderRow(&g_lines[r], r + 1, ref);
+      for (int x = 0; x < 256; x++) {
+        if (cov[r][x] > 1) bad++;
+        if (!cov[r][x]) { g_uncov++; if (!(fl & 1) || ref[x] != 0) bad++; }
       }
     }
   }
@@ -165,12 +208,14 @@ int main(int argc, char **argv) {
   bad |= TestPlane(false);
   printf("  plane maintenance (full, partial, many pages): %s\n", bad ? "FAIL" : "ok");
   bad |= TestRes();
+  bad |= TestClip();
   const double eps_list[] = {0.0, 1.0 / 2048, 1.0 / 1024};
   for (int i = 0; i < 3; i++) {
     long acc, rej, px;
     int b = TestFrames(eps_list[i], &acc, &rej, &px);
     printf("  emulated GE, error +-%.5f texel: %ld frames drawn from the plane (%ld pixels), %ld sent to the CPU image, %s\n",
            eps_list[i], acc, px, rej, b ? "MISMATCH" : "exact");
+    if (i == 2) printf("    block widths: 64 -> %ld frames, 32 -> %ld; window too big for every block size: %ld; pixels left undrawn (outside the plane): %ld\n", g_w64, g_w32, g_rejwin, g_uncov);
     bad |= b;
   }
   printf(bad ? "FAIL\n" : "ok\n");

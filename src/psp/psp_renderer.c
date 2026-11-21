@@ -436,19 +436,23 @@ static uint32_t g_m7i_vn, g_m7i_vbad, g_frames_m7i;
 static bool g_m7_blk;               /* this frame's mode 7 is drawn from the plane (g_m7_img is set too) */
 static int g_m7_bnseg, g_m7_bnblk;  /* row segments and window blocks of this frame */
 #if SM_PSP_M7_BLK
-enum { kM7PlaneW = 1024, kM7BlkW = 64, kM7BlkH = 16, kM7WinMax = 128, kM7MaxBlk = 64, kM7BVerify = 24, kM7PlFull = 32 };
+/* The plane is 1024 x 1024 plus 128 pixels of its own start repeated at the right and at the bottom (kM7PlaneP = 1152, 72
+ * swizzle blocks of 16 B per block row), so a window of up to kM7WinMax pixels that crosses the edge of a wrapping plane reads
+ * the repeated texels instead of needing a second bind. */
+enum { kM7PlaneW = 1024, kM7PlaneP = 1024 + 128, kM7WinMax = 128, kM7MaxBlk = 256, kM7BVerify = 24, kM7PlFull = 32 };
 typedef struct M7BSeg { float u0, v0, u1, v1; int16_t x0, x1, y, pad; } M7BSeg;
 typedef struct M7BBlk { int16_t wx, wy; uint16_t first, n; } M7BBlk;
-static uint8_t g_m7pl[kM7PlaneW * kM7PlaneW] __attribute__((aligned(64)));  /* the 1024x1024 plane, 8 bit, swizzled in 16 x 8 blocks */
+static uint8_t g_m7pl[kM7PlaneP * kM7PlaneP] __attribute__((aligned(64)));  /* swizzled in 16 x 8 blocks, pitch kM7PlaneP */
 static bool g_m7pl_valid;
 static uint8_t g_m7pl_dirty[64];  /* VRAM pages 0-63 written since the plane was last brought up to date */
-static M7BSeg g_m7bseg[kMaxLines * 4];
+static M7BSeg g_m7bseg[kMaxLines * 8];  /* at most one segment per row and 32 pixels */
 static M7BBlk g_m7bblk[kM7MaxBlk];
 static bool g_m7b_ok = true;
 static uint32_t g_m7b_vn, g_m7b_vbad, g_frames_m7b;
 #if SM_PSP_LOG
-enum { kBlkOk, kBlkOff, kBlkSame, kBlkFlags, kBlkWindow, kBlkPlane, kBlkStraddle, kBlkReasons };
-static uint32_t g_m7b_why[kBlkReasons];
+enum { kBlkOk, kBlkOff, kBlkSame, kBlkFlags, kBlkWindow, kBlkReasons };
+static uint32_t g_m7b_why[kBlkReasons], g_m7b_cfg[3];
+static uint32_t g_m7b_t_prep, g_m7b_t_plane, g_m7b_t_vtx, g_m7b_t_draw, g_m7b_tn;  /* microseconds summed over g_m7b_tn block frames */
 #define BLK_WHY(r) (g_m7b_why[r]++)
 #else
 #define BLK_WHY(r) ((void)0)
@@ -3329,20 +3333,34 @@ static void M7PrepareImg(void) {
  * ms on the GE and was pixel-exact (bad=0 in all 24 block configurations; one 512 window for the whole frame was not).
  * The plane is the 128x128 map of 8x8 tiles expanded to 8 bit pixels (the same pixel M7RenderRow reads: tile = low byte of
  * the map word, pixel = high byte of word tile * 64 + row * 8 + column) in PSP swizzle order, so it is kept up to date from
- * the VRAM pages the game writes. Taken only when every row of the frame has the same matrix, the flags are at most large
- * field and y flip, and every block's window fits (see M7PrepareBlk); anything else uses the CPU image as before. */
+ * the VRAM pages the game writes. Taken when every row of the frame has the same matrix and the flags are at most large
+ * field and y flip; anything else uses the CPU image as before. Gate 5w-b (first hardware run: 28% of the rotating frames
+ * were taken, the rest failed the window size, the plane edge or the wrap edge): the block size is tried at 64x16, 32x16 and
+ * 32x8; outside the plane (large field) every row segment is cut to the pixels ppu.c would draw; the wrapping plane has the
+ * repeated margin. */
 #define M7BMIN(a, b) ((a) < (b) ? (a) : (b))
 #define M7BMAX(a, b) ((a) > (b) ? (a) : (b))
 
-/* One 8x8 cell of the plane: cell (cx, cy) holds tile g_vram[cy * 128 + cx] & 0xff. Swizzled: 1024 B pitch = 64 blocks of 16 B
- * per block row, a cell is half a block (8 B) wide and one block row high. */
+/* One 8x8 cell at (cx, cy), 0 <= cx, cy < 144, of the padded plane: the tile of map cell (cx & 127, cy & 127). Swizzled: 72
+ * blocks of 16 B per block row, a cell is half a block (8 B) wide and one block row high. */
 static void M7PlaneCell(int cx, int cy) {
-  const unsigned tile = g_vram[cy * 128 + cx] & 0xff;
+  const unsigned tile = g_vram[(cy & 127) * 128 + (cx & 127)] & 0xff;
   const uint16_t *src = &g_vram[tile * 64];
-  uint32_t *dst = (uint32_t *)(g_m7pl + (((cy << 6) + (cx >> 1)) << 7) + (cx & 1) * 8);
+  uint32_t *dst = (uint32_t *)(g_m7pl + (((cy * (kM7PlaneP / 16)) + (cx >> 1)) << 7) + (cx & 1) * 8);
   for (int y = 0; y < 8; y++, src += 8, dst += 4) {
     dst[0] = (uint32_t)(src[0] >> 8) | (uint32_t)(src[1] >> 8) << 8 | (uint32_t)(src[2] >> 8) << 16 | (uint32_t)(src[3] >> 8) << 24;
     dst[1] = (uint32_t)(src[4] >> 8) | (uint32_t)(src[5] >> 8) << 8 | (uint32_t)(src[6] >> 8) << 16 | (uint32_t)(src[7] >> 8) << 24;
+  }
+}
+/* Map cell (cx, cy), 0 <= cx, cy < 128, and its copies in the repeated margin (cells 128-143 repeat cells 0-15). */
+static void M7PlaneCellAll(int cx, int cy) {
+  M7PlaneCell(cx, cy);
+  if (cx < 16)
+    M7PlaneCell(cx + 128, cy);
+  if (cy < 16) {
+    M7PlaneCell(cx, cy + 128);
+    if (cx < 16)
+      M7PlaneCell(cx + 128, cy + 128);
   }
 }
 
@@ -3356,8 +3374,8 @@ static void M7PlaneUpdate(void) {
   if (g_m7pl_valid && nd == 0)
     return;
   if (!g_m7pl_valid || nd >= kM7PlFull) {
-    for (int cy = 0; cy < 128; cy++)
-      for (int cx = 0; cx < 128; cx++)
+    for (int cy = 0; cy < kM7PlaneP / 8; cy++)
+      for (int cx = 0; cx < kM7PlaneP / 8; cx++)
         M7PlaneCell(cx, cy);
     g_m7pl_valid = true;
   } else {
@@ -3367,14 +3385,14 @@ static void M7PlaneUpdate(void) {
         continue;
       for (int i = 0; i < kVramPageWords; i++) {
         const int cell = pg * kVramPageWords + i;
-        M7PlaneCell(cell & 127, cell >> 7);
+        M7PlaneCellAll(cell & 127, cell >> 7);
       }
       tmask[(pg * 4) >> 5] |= 0xfu << ((pg * 4) & 31);
     }
     for (int cell = 0; cell < 128 * 128; cell++) {
       const unsigned t = g_vram[cell] & 0xff;
       if (tmask[t >> 5] >> (t & 31) & 1)
-        M7PlaneCell(cell & 127, cell >> 7);
+        M7PlaneCellAll(cell & 127, cell >> 7);
     }
   }
   memset(g_m7pl_dirty, 0, sizeof(g_m7pl_dirty));
@@ -3385,7 +3403,7 @@ static void M7PlaneUpdate(void) {
  * o_k = (step * k) & 255 are marked present once per frame; nxt[t] = smallest present offset >= t (256: none), prv[t] =
  * largest present offset <= t (-1: none). Start r0 wraps for the offsets o >= 256 - r0: the smallest wrapped value is
  * r0 + nxt[256 - r0] - 256 (below r0, so below every unwrapped one) and the largest is max(r0 + omax - 256, r0 + the
- * largest unwrapped offset). */
+ * largest unwrapped offset). A segment shorter than n has a subset of these residues: the range is then only wider. */
 typedef struct M7Res { int16_t nxt[257], prv[256]; int omin, omax; } M7Res;
 static void M7ResBuild(M7Res *t, int step, int n) {
   uint8_t present[256];
@@ -3428,11 +3446,114 @@ static inline void M7BRowStart(const int16_t *m, int y, int32_t *X0, int32_t *Y0
   *Y0 = ((m[2] * ch) & ~63) + ((m[3] * y) & ~63) + ((m[3] * cv) & ~63) + (yc << 8);
 }
 
-/* Segments (one row of one 64 pixel block) and windows (one per block of 16 rows x 64 pixels). Nearest sampling takes
+/* floor(n / d) and ceil(n / d) for d > 0 and any n. */
+static inline int M7FloorDiv(int n, int d) { return n >= 0 ? n / d : -((-n + d - 1) / d); }
+static inline int M7CeilDiv(int n, int d) { return -M7FloorDiv(-n, d); }
+
+/* Narrows [*xs, *xe) to the x with 0 <= p0 + step * x <= 0x3ffff: the positions ppu.c does not treat as outside the large
+ * field ((xpos | ypos) > 0x3ffff with xpos, ypos unsigned). */
+static void M7Clip(int p0, int step, int *xs, int *xe) {
+  int lo, hi;  /* x in [lo, hi] */
+  if (step == 0) {
+    if (p0 < 0 || p0 > 0x3ffff)
+      *xe = *xs;
+    return;
+  }
+  if (step > 0) {
+    lo = M7CeilDiv(-p0, step);
+    hi = M7FloorDiv(0x3ffff - p0, step);
+  } else {
+    lo = M7CeilDiv(p0 - 0x3ffff, -step);
+    hi = M7FloorDiv(p0, -step);
+  }
+  if (lo > *xs)
+    *xs = lo;
+  if (hi + 1 < *xe)
+    *xe = hi + 1;
+  if (*xe < *xs)
+    *xe = *xs;
+}
+
+/* Segments (one row of one block of bw pixels) and windows (one per block of bh rows x bw pixels). Nearest sampling takes
  * floor(u); the exact plane position of a pixel is a multiple of 1/256, so u is shifted by delta = (256 - m0 - m1) / 512
  * (middle of the room the residues m0..m1 of the segment leave) minus the half pixel the GE adds at the pixel centre (g_uvh),
  * and u, v are relative to the window origin so that they stay below kM7WinMax and the GE's interpolation stays exact.
- * Returns false (and draws nothing) when the frame needs the CPU image. */
+ * Returns false when a window needs kM7WinMax pixels or more. */
+static bool M7TryBlk(const int16_t *m, int bw, int bh, bool wrap, bool yflip, const M7Res *ru, const M7Res *rv, int *pnseg,
+                     int *pnblk) {
+  const int a = m[0], c = m[2];
+  const float du = (float)a / 256.0f, dv = (float)c / 256.0f;
+  int nseg = 0, nblk = 0;
+  for (int by0 = 0; by0 < g_line_count; by0 += bh) {
+    const int by1 = M7BMIN(by0 + bh, g_line_count);
+    for (int bx0 = 0; bx0 < kGameWidth; bx0 += bw) {
+      if (nblk >= kM7MaxBlk)
+        return false;
+      const int first = nseg;
+      int gminx = 1 << 30, gminy = 1 << 30, gmaxx = -(1 << 30), gmaxy = -(1 << 30);
+      for (int r = by0; r < by1; r++) {
+        if (!g_lines[r].m7on)
+          continue;
+        int32_t X0, Y0;
+        M7BRowStart(m, yflip ? 255 - (r + 1) : r + 1, &X0, &Y0);
+        int xs = bx0, xe = bx0 + bw;
+        if (!wrap) {  /* outside the plane is transparent: the segment only covers the pixels ppu.c draws */
+          M7Clip(X0, a, &xs, &xe);
+          M7Clip(Y0, c, &xs, &xe);
+          if (xs >= xe)
+            continue;
+        }
+        const int32_t Xs = X0 + a * xs, Xe = X0 + a * xe, Ys = Y0 + c * xs, Ye = Y0 + c * xe;
+        int mu0, mu1, mv0, mv1;
+        M7ResGet(ru, Xs & 255, &mu0, &mu1);
+        M7ResGet(rv, Ys & 255, &mv0, &mv1);
+        const int minx = M7BMIN(Xs >> 8, Xe >> 8) - 1, maxx = M7BMAX(Xs >> 8, Xe >> 8) + 2;
+        const int miny = M7BMIN(Ys >> 8, Ye >> 8) - 1, maxy = M7BMAX(Ys >> 8, Ye >> 8) + 2;
+        if (minx < gminx) gminx = minx;
+        if (miny < gminy) gminy = miny;
+        if (maxx > gmaxx) gmaxx = maxx;
+        if (maxy > gmaxy) gmaxy = maxy;
+        const float su = (float)(256 - mu0 - mu1) / 512.0f - g_uvh[0] * du;
+        const float sv = (float)(256 - mv0 - mv1) / 512.0f - g_uvh[1] * dv;
+        M7BSeg *sg = &g_m7bseg[nseg++];
+        sg->u0 = (float)Xs / 256.0f + su;  /* plane position, made window relative below */
+        sg->u1 = (float)Xe / 256.0f + su;
+        sg->v0 = (float)Ys / 256.0f + sv;
+        sg->v1 = (float)Ye / 256.0f + sv;
+        sg->x0 = (int16_t)xs;
+        sg->x1 = (int16_t)xe;
+        sg->y = (int16_t)r;
+        sg->pad = 0;
+      }
+      if (nseg == first)
+        continue;
+      if (!wrap) {  /* the drawn pixels are inside the plane; the margin of the bounding box may not be */
+        if (gminx < 0) gminx = 0;
+        if (gminy < 0) gminy = 0;
+      }
+      const int wxu = gminx & ~15, wyu = gminy & ~7;  /* unwrapped window origin, aligned to the swizzle block */
+      if (M7BMAX(gmaxx - wxu, gmaxy - wyu) >= kM7WinMax)
+        return false;
+      /* wrapping plane: the window starts at the origin modulo 1024 and may run into the repeated margin */
+      const int wx = wrap ? (wxu & (kM7PlaneW - 1)) : wxu, wy = wrap ? (wyu & (kM7PlaneW - 1)) : wyu;
+      for (int i = first; i < nseg; i++) {
+        g_m7bseg[i].u0 -= (float)wxu;
+        g_m7bseg[i].u1 -= (float)wxu;
+        g_m7bseg[i].v0 -= (float)wyu;
+        g_m7bseg[i].v1 -= (float)wyu;
+      }
+      M7BBlk *bk = &g_m7bblk[nblk++];
+      bk->wx = (int16_t)wx;
+      bk->wy = (int16_t)wy;
+      bk->first = (uint16_t)first;
+      bk->n = (uint16_t)(nseg - first);
+    }
+  }
+  *pnseg = nseg;
+  *pnblk = nblk;
+  return true;
+}
+
 static bool M7PrepareBlk(void) {
   g_m7_blk = false;
   g_m7_bnseg = g_m7_bnblk = 0;
@@ -3449,83 +3570,27 @@ static bool M7PrepareBlk(void) {
     BLK_WHY(kBlkFlags);
     return false;
   }
+  PROF(uint32_t t0 = Now();)
+  static const int kCfg[3][2] = {{64, 16}, {32, 16}, {32, 8}};
   const int16_t *m = g_m7c.m;
-  const int a = m[0], c = m[2];
-  const bool wrap = !(fl & 1), yflip = (fl & 8) != 0;
   M7Res ru, rv;
-  M7ResBuild(&ru, a & 255, kM7BlkW);
-  M7ResBuild(&rv, c & 255, kM7BlkW);
-  const float du = (float)a / 256.0f, dv = (float)c / 256.0f;
-  int nseg = 0, nblk = 0;
-  for (int by0 = 0; by0 < g_line_count; by0 += kM7BlkH) {
-    const int by1 = M7BMIN(by0 + kM7BlkH, g_line_count);
-    for (int bx0 = 0; bx0 < kGameWidth; bx0 += kM7BlkW) {
-      const int first = nseg;
-      int gminx = 1 << 30, gminy = 1 << 30, gmaxx = -(1 << 30), gmaxy = -(1 << 30);
-      for (int r = by0; r < by1; r++) {
-        if (!g_lines[r].m7on)
-          continue;
-        int32_t X0, Y0;
-        M7BRowStart(m, yflip ? 255 - (r + 1) : r + 1, &X0, &Y0);
-        const int32_t Xs = X0 + a * bx0, Xe = Xs + a * kM7BlkW, Ys = Y0 + c * bx0, Ye = Ys + c * kM7BlkW;
-        int mu0, mu1, mv0, mv1;
-        M7ResGet(&ru, Xs & 255, &mu0, &mu1);
-        M7ResGet(&rv, Ys & 255, &mv0, &mv1);
-        const int minx = M7BMIN(Xs >> 8, Xe >> 8) - 1, maxx = M7BMAX(Xs >> 8, Xe >> 8) + 2;
-        const int miny = M7BMIN(Ys >> 8, Ye >> 8) - 1, maxy = M7BMAX(Ys >> 8, Ye >> 8) + 2;
-        if (minx < gminx) gminx = minx;
-        if (miny < gminy) gminy = miny;
-        if (maxx > gmaxx) gmaxx = maxx;
-        if (maxy > gmaxy) gmaxy = maxy;
-        const float su = (float)(256 - mu0 - mu1) / 512.0f - g_uvh[0] * du;
-        const float sv = (float)(256 - mv0 - mv1) / 512.0f - g_uvh[1] * dv;
-        M7BSeg *sg = &g_m7bseg[nseg++];
-        sg->u0 = (float)Xs / 256.0f + su;  /* plane position, made window relative below */
-        sg->u1 = (float)Xe / 256.0f + su;
-        sg->v0 = (float)Ys / 256.0f + sv;
-        sg->v1 = (float)Ye / 256.0f + sv;
-        sg->x0 = (int16_t)bx0;
-        sg->x1 = (int16_t)(bx0 + kM7BlkW);
-        sg->y = (int16_t)r;
-        sg->pad = 0;
-      }
-      if (nseg == first)
-        continue;
-      const int wxu = gminx & ~15, wyu = gminy & ~7;  /* unwrapped window origin, aligned to the swizzle block */
-      if (M7BMAX(gmaxx - wxu, gmaxy - wyu) >= kM7WinMax) {
-        BLK_WHY(kBlkWindow);
-        return false;
-      }
-      int wx = wxu, wy = wyu;
-      if (!wrap) {  /* outside the plane is transparent: only blocks entirely inside it are drawn from the plane */
-        if (gminx < 0 || gminy < 0 || gmaxx >= kM7PlaneW || gmaxy >= kM7PlaneW) {
-          BLK_WHY(kBlkPlane);
-          return false;
-        }
-      } else {  /* the plane repeats: the window must not cross the edge */
-        wx = wxu & (kM7PlaneW - 1);
-        wy = wyu & (kM7PlaneW - 1);
-        if (wx + (gmaxx - wxu) >= kM7PlaneW || wy + (gmaxy - wyu) >= kM7PlaneW) {
-          BLK_WHY(kBlkStraddle);
-          return false;
-        }
-      }
-      for (int i = first; i < nseg; i++) {
-        g_m7bseg[i].u0 -= (float)wxu;
-        g_m7bseg[i].u1 -= (float)wxu;
-        g_m7bseg[i].v0 -= (float)wyu;
-        g_m7bseg[i].v1 -= (float)wyu;
-      }
-      M7BBlk *bk = &g_m7bblk[nblk++];
-      bk->wx = (int16_t)wx;
-      bk->wy = (int16_t)wy;
-      bk->first = (uint16_t)first;
-      bk->n = (uint16_t)(nseg - first);
+  int resbw = 0, nseg = 0, nblk = 0, cfg = -1;
+  for (int k = 0; k < 3 && cfg < 0; k++) {
+    if (kCfg[k][0] != resbw) {
+      resbw = kCfg[k][0];
+      M7ResBuild(&ru, m[0] & 255, resbw);
+      M7ResBuild(&rv, m[2] & 255, resbw);
     }
+    if (M7TryBlk(m, kCfg[k][0], kCfg[k][1], !(g_m7c.fl & 1), (g_m7c.fl & 8) != 0, &ru, &rv, &nseg, &nblk))
+      cfg = k;
   }
-  if (nseg == 0)
+  if (cfg < 0 || nseg == 0) {
+    BLK_WHY(kBlkWindow);
     return false;
+  }
+  PROF(uint32_t t1 = Now();)
   M7PlaneUpdate();
+  PROF(g_m7b_t_prep += t1 - t0; g_m7b_t_plane += Now() - t1; g_m7b_tn++; g_m7b_cfg[cfg]++;)
   g_m7_bnseg = nseg;
   g_m7_bnblk = nblk;
   g_m7_blk = true;
@@ -5097,13 +5162,15 @@ static void DrawM7(void) {
     sceGuClutMode(GU_PSM_8888, 0, 0xff, 0);
     sceGuClutLoad(32, g_clut7);
     sceGuTexMode(GU_PSM_T8, 0, 0, GU_TRUE);
+    PROF(uint32_t td0 = Now();)
     for (int b = 0; b < g_m7_bnblk; b++) {
       const M7BBlk *bk = &g_m7bblk[b];
-      /* swizzled: block row wy / 8 is 8 * 1024 B, block column wx / 16 is 128 B (wx % 16 == wy % 8 == 0) */
-      sceGuTexImage(0, kM7WinMax, kM7WinMax, kM7PlaneW, g_m7pl + (bk->wy >> 3) * (kM7PlaneW * 8) + (bk->wx >> 4) * 128);
+      /* swizzled: block row wy / 8 is 8 * kM7PlaneP B, block column wx / 16 is 128 B (wx % 16 == wy % 8 == 0) */
+      sceGuTexImage(0, kM7WinMax, kM7WinMax, kM7PlaneP, g_m7pl + (bk->wy >> 3) * (kM7PlaneP * 8) + (bk->wx >> 4) * 128);
       PROF(g_c_draws++; g_c_verts += (uint32_t)bk->n * 6;)
       sceGuDrawArray(GU_TRIANGLES, kVtTile, bk->n * 6, NULL, g_m7v + bk->first * 6);
     }
+    PROF(g_m7b_t_draw += Now() - td0;)
     return;
   }
 #endif
@@ -6194,6 +6261,7 @@ static bool DrawGe(void) {
     }
 #if SM_PSP_M7_BLK
   } else if (g_m7_blk) {  /* gate 5w: per segment two triangles (tl bl tr, tr bl br; rows are one pixel high) */
+    PROF(uint32_t tv0 = Now();)
     g_m7v = VtxAlloc((uint32_t)g_m7_bnseg * 6 * sizeof(TileVert));
     TileVert *w = g_m7v;
     const int16_t z = (int16_t)(5 * kZLevel);
@@ -6208,6 +6276,7 @@ static bool DrawGe(void) {
       w[4] = w[1];
       w[5] = (TileVert){sg->u1, sg->v1, xr, yb, z};
     }
+    PROF(g_m7b_t_vtx += Now() - tv0;)
 #endif
   } else if (g_m7_img) {  /* image path: one 1:1 quad per row range (texel (x, row) = pixel (x, row)) */
     g_m7v = VtxAlloc(g_m7_nrng * 2 * sizeof(TileVert));
@@ -7934,11 +8003,17 @@ static void PspRenderer_EndDraw(void) {
     PspLog("  m7reuse: on=%d rows built=%u kept=%u audited=%u bad=%u", (int)g_m7i_reuse_ok, (unsigned)g_m7i_built,
            (unsigned)g_m7i_kept, (unsigned)g_m7i_audits, (unsigned)g_m7i_bad);
 #if SM_PSP_M7_BLK
-    PspLog("  m7blk: on=%d frames=%u verified=%u bad=%u | why not: off=%u same=%u flags=%u window=%u plane=%u straddle=%u (ok=%u)",
-           (int)g_m7b_ok, (unsigned)g_frames_m7b, (unsigned)g_m7b_vn, (unsigned)g_m7b_vbad, (unsigned)g_m7b_why[kBlkOff],
-           (unsigned)g_m7b_why[kBlkSame], (unsigned)g_m7b_why[kBlkFlags], (unsigned)g_m7b_why[kBlkWindow],
-           (unsigned)g_m7b_why[kBlkPlane], (unsigned)g_m7b_why[kBlkStraddle], (unsigned)g_m7b_why[kBlkOk]);
+    PspLog("  m7blk: on=%d frames=%u verified=%u bad=%u | taken=%u (64x16=%u 32x16=%u 32x8=%u) not taken: off=%u same=%u flags=%u window=%u",
+           (int)g_m7b_ok, (unsigned)g_frames_m7b, (unsigned)g_m7b_vn, (unsigned)g_m7b_vbad, (unsigned)g_m7b_why[kBlkOk],
+           (unsigned)g_m7b_cfg[0], (unsigned)g_m7b_cfg[1], (unsigned)g_m7b_cfg[2], (unsigned)g_m7b_why[kBlkOff],
+           (unsigned)g_m7b_why[kBlkSame], (unsigned)g_m7b_why[kBlkFlags], (unsigned)g_m7b_why[kBlkWindow]);
+    if (g_m7b_tn)
+      PspLog("  m7blk time per frame (us): prep=%u plane=%u vertices=%u draw=%u (%u frames)", (unsigned)(g_m7b_t_prep / g_m7b_tn),
+             (unsigned)(g_m7b_t_plane / g_m7b_tn), (unsigned)(g_m7b_t_vtx / g_m7b_tn), (unsigned)(g_m7b_t_draw / g_m7b_tn),
+             (unsigned)g_m7b_tn);
     memset(g_m7b_why, 0, sizeof(g_m7b_why));
+    memset(g_m7b_cfg, 0, sizeof(g_m7b_cfg));
+    g_m7b_t_prep = g_m7b_t_plane = g_m7b_t_vtx = g_m7b_t_draw = g_m7b_tn = 0;
 #endif
     PspLog("  m7reuse: image frames with a dropped plane (mode 7 VRAM page written)=%u", (unsigned)g_m7i_stalef);
 #if SM_PSP_M7_PROBE
