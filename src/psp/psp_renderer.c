@@ -791,7 +791,8 @@ static void TintStripBuild(void) {
     PspLog("tintstrip f=%u: runs=%d bands=%d rows=%d ranges=%d scissor=%d cw=%u maxstep=%d(levels) first=%04x last=%04x",
            (unsigned)g_frame, g_ntint, bands_total, rows, g_ntr, g_scissor_mode, (unsigned)g_cw_rows, maxstep,
            g_ntint ? g_tint[0].fix : 0, g_ntint ? g_tint[g_ntint - 1].fix : 0);
-  }
+   }
+ }
 
  //software patch
  
