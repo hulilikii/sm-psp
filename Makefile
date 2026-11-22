@@ -64,7 +64,7 @@ PSP_LAYER_IMG ?= 3
 # PSP_TILE_GEN=1: EnsureTile skips the hash of a tile whose VRAM page generation is unchanged since its last hash. 0: hash every tile as before.
 PSP_TILE_GEN ?= 0
 # PSP_ASYNC=1 or 2: a GE frame is queued by Present() and completed (GE wait, vblank pacing, flip) at the next EndDraw, so the game logic overlaps GE drawing. Costs display latency when the frame was already vsync-bound. 1: scene list and compose list (own 256 KB list) queued back to back. 2: scene and compose commands in ONE list (no second list, no extra RAM). Both check a completion marker before each flip. 0: wait for the GE in the same frame.
-PSP_ASYNC ?= 0
+PSP_ASYNC ?= 1
 # PSP_M7_REUSE=1 (Gate 5t): a mode 7 image row whose matrix/flags are unchanged since it was built and whose plane (VRAM pages 0-63) was not written keeps its pixels (exact; log builds re-render every 16th reusing frame and compare). 0: every row is rendered every frame.
 PSP_M7_REUSE ?= 1
 # PSP_SWIZZLE (Gate 5u) is a bit mask: 1 = swizzle the BG/OBJ tile atlases, 2 = swizzle the mode 7 tile atlas. 0 = linear (default until A/B timed on hardware).
