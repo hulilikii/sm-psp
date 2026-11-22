@@ -3840,6 +3840,31 @@ static void M7PrepareImg(void) {
 }
 
 #if SM_PSP_M7_BLK
+#if SM_PSP_LOG
+/* Frames the block path refused because no block size gave a window below kM7WinMax (the CPU image draws them: 13-16 ms of
+ * prep). Log only: the matrix of the first refused frames, then every 64th, and per window the largest matrix terms. */
+static int g_m7b_ext;  /* M7TryBlk: pixels of the first window that did not fit (-1: too many blocks) */
+static uint32_t g_m7b_rf_n, g_m7b_rf_nlog;
+static int g_m7b_rf_a, g_m7b_rf_b, g_m7b_rf_c, g_m7b_rf_d, g_m7b_rf_e8min = 1 << 30, g_m7b_rf_e8max;
+static void M7BlkRefused(const int16_t *m, const int *ext) {
+  const int a = m[0] < 0 ? -m[0] : m[0], b = m[1] < 0 ? -m[1] : m[1], c = m[2] < 0 ? -m[2] : m[2],
+            d = m[3] < 0 ? -m[3] : m[3];
+  g_m7b_rf_n++;
+  if (a > g_m7b_rf_a) g_m7b_rf_a = a;
+  if (b > g_m7b_rf_b) g_m7b_rf_b = b;
+  if (c > g_m7b_rf_c) g_m7b_rf_c = c;
+  if (d > g_m7b_rf_d) g_m7b_rf_d = d;
+  if (ext[2] < g_m7b_rf_e8min) g_m7b_rf_e8min = ext[2];
+  if (ext[2] > g_m7b_rf_e8max) g_m7b_rf_e8max = ext[2];
+  if (g_m7b_rf_nlog < 40 || (g_m7b_rf_n & 63) == 0) {
+    g_m7b_rf_nlog++;
+    PspLog("m7blk refused f=%u m=%d,%d,%d,%d ctr=%d,%d scr=%d,%d fl=%u rows=%d lines=%d | first window too big (px, limit %d): 64x16=%d 32x16=%d 32x8=%d",
+           (unsigned)g_frame, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], (unsigned)g_m7c.fl, g_m7_rows, g_line_count,
+           (int)kM7WinMax, ext[0], ext[1], ext[2]);
+  }
+}
+#endif
+
 /* M7BLK-BEGIN */
 /* Gate 5w. Hardware bench (gate 5t-b/c, PSP-1000 222 MHz, 4 matrices): the CPU image costs 9.2-11.1 ms + 1.4 ms drawing it; a
  * swizzled 1024x1024 plane drawn with one bind per 64x16 block of rows, one GU_TRIANGLES quad per row and block, costs 2.1-3.1
@@ -4000,8 +4025,10 @@ static bool M7TryBlk(const int16_t *m, int bw, int bh, bool wrap, bool yflip, co
   for (int by0 = 0; by0 < g_line_count; by0 += bh) {
     const int by1 = M7BMIN(by0 + bh, g_line_count);
     for (int bx0 = 0; bx0 < kGameWidth; bx0 += bw) {
-      if (nblk >= kM7MaxBlk)
+      if (nblk >= kM7MaxBlk) {
+        PROF(g_m7b_ext = -1;)
         return false;
+      }
       const int first = nseg;
       int gminx = 1 << 30, gminy = 1 << 30, gmaxx = -(1 << 30), gmaxy = -(1 << 30);
       for (int r = by0; r < by1; r++) {
@@ -4045,8 +4072,10 @@ static bool M7TryBlk(const int16_t *m, int bw, int bh, bool wrap, bool yflip, co
         if (gminy < 0) gminy = 0;
       }
       const int wxu = gminx & ~15, wyu = gminy & ~7;  /* unwrapped window origin, aligned to the swizzle block */
-      if (M7BMAX(gmaxx - wxu, gmaxy - wyu) >= kM7WinMax)
+      if (M7BMAX(gmaxx - wxu, gmaxy - wyu) >= kM7WinMax) {
+        PROF(g_m7b_ext = M7BMAX(gmaxx - wxu, gmaxy - wyu);)
         return false;
+      }
       /* wrapping plane: the window starts at the origin modulo 1024 and may run into the repeated margin */
       const int wx = wrap ? (wxu & (kM7PlaneW - 1)) : wxu, wy = wrap ? (wyu & (kM7PlaneW - 1)) : wyu;
       for (int i = first; i < nseg; i++) {
@@ -4088,6 +4117,7 @@ static bool M7PrepareBlk(void) {
   const int16_t *m = g_m7c.m;
   M7Res ru, rv;
   int resbw = 0, nseg = 0, nblk = 0, cfg = -1;
+  PROF(int ext[3] = {0, 0, 0};)
   for (int k = 0; k < 3 && cfg < 0; k++) {
     if (kCfg[k][0] != resbw) {
       resbw = kCfg[k][0];
@@ -4096,9 +4126,11 @@ static bool M7PrepareBlk(void) {
     }
     if (M7TryBlk(m, kCfg[k][0], kCfg[k][1], !(g_m7c.fl & 1), (g_m7c.fl & 8) != 0, &ru, &rv, &nseg, &nblk))
       cfg = k;
+    PROF(else ext[k] = g_m7b_ext;)
   }
   if (cfg < 0 || nseg == 0) {
     BLK_WHY(kBlkWindow);
+    PROF(M7BlkRefused(m, ext);)
     return false;
   }
   PROF(uint32_t t1 = Now();)
@@ -9126,6 +9158,13 @@ static void PspRenderer_EndDraw(void) {
       PspLog("  m7blk time per frame (us): prep=%u plane=%u vertices=%u draw=%u (%u frames)", (unsigned)(g_m7b_t_prep / g_m7b_tn),
              (unsigned)(g_m7b_t_plane / g_m7b_tn), (unsigned)(g_m7b_t_vtx / g_m7b_tn), (unsigned)(g_m7b_t_draw / g_m7b_tn),
              (unsigned)g_m7b_tn);
+    if (g_m7b_rf_n)
+      PspLog("  m7blk refused: n=%u max|a|=%d max|b|=%d max|c|=%d max|d|=%d | 32x8 first window px %d..%d (limit %d)",
+             (unsigned)g_m7b_rf_n, g_m7b_rf_a, g_m7b_rf_b, g_m7b_rf_c, g_m7b_rf_d, g_m7b_rf_e8min, g_m7b_rf_e8max,
+             (int)kM7WinMax);
+    g_m7b_rf_n = 0;
+    g_m7b_rf_a = g_m7b_rf_b = g_m7b_rf_c = g_m7b_rf_d = g_m7b_rf_e8max = 0;
+    g_m7b_rf_e8min = 1 << 30;
     memset(g_m7b_why, 0, sizeof(g_m7b_why));
     memset(g_m7b_cfg, 0, sizeof(g_m7b_cfg));
     g_m7b_t_prep = g_m7b_t_plane = g_m7b_t_vtx = g_m7b_t_draw = g_m7b_tn = 0;
