@@ -63,6 +63,16 @@
 #ifndef SM_PSP_GE_GOURAUD_TINT
 #define SM_PSP_GE_GOURAUD_TINT 0
 #endif
+/* Gate 5x line-colour smoothing radius (rows), after bsnes-hd's "HD background colour radius" (bsnes/sfc/ppu-fast/line.cpp, avgBgC): the
+ * fixed colour of a line is the plain average of the lines within +-radius, taken in pairs so the window stays centred, and the window stops
+ * growing at the screen edge, at a change of the colour-math state, and at a line whose colour is more than 76 (summed |dR|+|dG|+|dB|, 8-bit)
+ * from the centre line's. Here: the same centred box average at 8 bits per channel, over the extracted tint profile; the window shrinks at
+ * the chain ends (chain = same colour-math state and window, no hard edge) and where the levels in it span more than kGrSmoothRange per
+ * channel (a per-channel rule instead of bsnes-hd's summed one, so the three channels stay independent). 0: no row smoothing, the profile
+ * is interpolated through the band edges (long flat bands then become slow ramps). 4 is bsnes-hd's default. */
+#ifndef SM_PSP_GR_RADIUS
+#define SM_PSP_GR_RADIUS 4
+#endif
 #ifndef SM_PSP_GE_GOURAUD_DITHER
 #define SM_PSP_GE_GOURAUD_DITHER 1  /* GE ordered dither on the ramp triangles only (PSP_GE_GOURAUD_DITHER=0: plain Gouraud) */
 #endif
@@ -851,24 +861,26 @@ static void TintStripBuild(void) {
  *      or more levels in any channel between two runs. Such a jump is a genuine colour stop of the picture (a horizon, a glow
  *      edge, a rainbow band), not banding: the chain ends there and both sides stay separate. Steps of 1-3 levels are banding
  *      and are smoothed, whatever the length of the bands on either side.
- *   2. Profile. Per channel, equal-level neighbouring runs merge into one plateau. A one-level step between two plateaus means
- *      the underlying value crosses the half level there, so the profile passes through the midpoint of the two band colours at
- *      the boundary (a larger step: the midpoint too, which keeps the profile within half the step of both bands). The first and
- *      last plateau start/end at their exact SNES colour, so the chain's end colours are the SNES end colours, and a plateau
- *      that is a local peak or valley also gets its exact colour at its centre, so extremes are not shaved. A monotone profile
- *      built this way re-quantises to the SNES level on every row (it stays within half a level of its band). The profile is
- *      sampled at every integer row edge of the chain: it is independent of how the SNES split the rows into bands.
- *   3. Simplification. Ramer-Douglas-Peucker on those samples, error = largest per-channel distance (8-bit) from the chord,
- *      tolerance kGrFitTol8. Knots can fall on any row, not just on band edges or centres; ripples from uneven band lengths
- *      vanish into long ramps and a knot survives only where the profile really bends. A chain of m runs gets at most m + 1
- *      quads (the tolerance doubles until it does, which stays within the list budget of ListBytesNeeded).
+ *   2. Profile (line-colour smoothing, after bsnes-hd's avgBgC, see SM_PSP_GR_RADIUS). At every row edge of the chain the colour is the mean, at 8 bits per channel, of the SNES rows within
+ *      +-SM_PSP_GR_RADIUS rows (a window centred on the edge, so the curve passes through the middle of every one-level step). The
+ *      window shrinks until the levels in it span at most kGrSmoothRange (3) per channel, so rows of very different colour never mix,
+ *      and it shrinks towards the chain ends, so the first and last colour stay the exact SNES colours. Channels are smoothed
+ *      independently. Inside a run wider than the window the mean is the exact SNES colour. Radius 0 instead interpolates the
+ *      profile through the band edges (midpoint of the two band colours; peaks and valleys keep their centre colour), which
+ *      turns even long flat bands into slow ramps.
+ *      The profile is sampled at every integer row edge and does not depend on how the SNES split the rows into bands.
+ *   3. Simplification. Plateaus (runs of kGrPlateauRows or more rows that are not part of a regular slope; radius > 0 only) are kept: the exactly flat part of each is a
+ *      flat quad of its own. Between them Ramer-Douglas-Peucker on the samples, error = largest per-channel distance (8-bit) from
+ *      the chord, tolerance kGrFitTol8. Knots can fall on any row; ripples from uneven band lengths vanish into long ramps and a
+ *      knot survives only where the profile really bends. A chain of m runs with n plateaus gets at most m + 1 + 2n quads (the
+ *      tolerance doubles until it does; ListBytesNeeded budgets for it).
  *   4. Quads between consecutive knots, c0 / c1 = the profile's colours at the knot rows: neighbouring quads share their edge
  *      colour, so there is no seam or colour shift at a knot. The curve stays within half a band + kGrFitTol8 of every SNES
  *      row (larger for steps of 2-3 levels), never on the other side of a stop.
  * The result is quantised to RGB565 by the GE; GE dither (GrSetDither, on gradient quads only) spreads the remaining
  * sub-level steps, otherwise a ramp would only have evenly spaced instead of uneven 1-level steps. A quad whose end colours are
  * equal but not an exact SNES colour counts as a ramp too (dithered), a flat quad is always an exact SNES colour.
- * A group with no gradient quad (plateaus, steps of 4+ levels, single runs) is not planned: GrPlan returns false and the frame
+ * A group with no gradient quad (flat runs, steps of 4+ levels, single runs) is not planned: GrPlan returns false and the frame
  * is drawn as before. */
 static inline int Expand5(int l) {
   return (l << 3) | (l >> 2);
@@ -878,14 +890,18 @@ static inline int Lv(int fix, int ch) {
   return (fix >> (5 * ch)) & 31;
 }
 
-enum { kGrMaxPts = 2 * kMaxLines + 8 };
+enum { kGrMaxPts = 2 * kMaxLines + 8, kGrSmoothRange = 3, kGrPlateauRows = 16, kGrRegularRatio = 3 };
+/* kGrSmoothRange: most levels (per channel) one smoothing window may span. kGrPlateauRows: a run of one colour at least this long is a flat
+ * plateau (GrIsPlateau) unless it is part of a regular slope (kGrRegularRatio): it stays flat (exact SNES colour) except within the smoothing
+ * radius of its ends. Shorter runs are band steps of a gradient. A plateau and a slow ramp quantised to long bands cannot be told apart from
+ * the data alone; this is the heuristic. */
 static float g_gr_q[kMaxLines + 1][3];  /* profile at the integer row edges top .. bottom of the chain being planned (8-bit units) */
 static int g_gr_pp[kGrMaxPts];          /* profile points of one channel: position in half rows (2 * edge) ... */
 static float g_gr_pv[kGrMaxPts];        /* ... and 8-bit value */
 static float g_gr_tolmax;               /* largest RDP tolerance used by the last GrPlan (kGrFitTol8 unless a chain hit its quad cap) */
 
 /* Channel ch of the chain t[0..m-1] (touching runs) -> g_gr_q[row - top][ch] for row = top .. bottom. */
-static void GrProfile(const TintRun *t, int m, int ch) {
+static void GrProfileEdges(const TintRun *t, int m, int ch) {
   const int top = t[0].r0, bot = t[m - 1].r1;
   int n = 0, prev = -1, lv = Lv(t[0].fix, ch), pa = top;
   g_gr_pp[n] = 2 * top;
@@ -917,6 +933,48 @@ static void GrProfile(const TintRun *t, int m, int ch) {
     const float f = (float)(p2 - g_gr_pp[k]) / (float)(g_gr_pp[k + 1] - g_gr_pp[k]);
     g_gr_q[y - top][ch] = g_gr_pv[k] + (g_gr_pv[k + 1] - g_gr_pv[k]) * f;
   }
+}
+
+/* Edge-aware moving average of channel ch of the chain t[0..m-1] -> g_gr_q[edge - top][ch] for every row edge top .. bottom. The sample at edge p
+ * is the mean of the 8-bit colours of the 2k rows [p - k, p + k) around it (a window centred on the edge: the curve then passes through the
+ * middle of every one-level step). k <= radius, and k shrinks until the levels in the window span at most kGrSmoothRange levels, so rows that
+ * differ strongly never mix; it also shrinks towards the chain ends, which keeps the first and last colour exactly the SNES ones. Inside a
+ * plateau wider than the window the mean is the exact SNES colour: plateaus stay flat. */
+static uint8_t g_gr_lv[kMaxLines];
+static void GrProfileSmooth(const TintRun *t, int m, int ch, int radius) {
+  const int top = t[0].r0, rows = t[m - 1].r1 - top;
+  for (int i = 0; i < m; i++)
+    for (int y = t[i].r0; y < t[i].r1; y++)
+      g_gr_lv[y - top] = (uint8_t)Lv(t[i].fix, ch);
+  g_gr_q[0][ch] = (float)Expand5(g_gr_lv[0]);
+  g_gr_q[rows][ch] = (float)Expand5(g_gr_lv[rows - 1]);
+  for (int p = 1; p < rows; p++) {
+    int k = radius < p ? radius : p;
+    if (k > rows - p)
+      k = rows - p;
+    for (; k > 1; k--) {
+      int mn = 255, mx = 0;
+      for (int y = p - k; y < p + k; y++) {
+        const int l = g_gr_lv[y];
+        mn = l < mn ? l : mn;
+        mx = l > mx ? l : mx;
+      }
+      if (mx - mn <= kGrSmoothRange)
+        break;
+    }
+    int sum = 0;
+    for (int y = p - k; y < p + k; y++)
+      sum += Expand5(g_gr_lv[y]);
+    g_gr_q[p][ch] = (float)sum / (float)(2 * k);
+  }
+}
+
+static inline void GrProfile(const TintRun *t, int m, int ch) {
+#if SM_PSP_GR_RADIUS > 0
+  GrProfileSmooth(t, m, ch, SM_PSP_GR_RADIUS);
+#else
+  GrProfileEdges(t, m, ch);
+#endif
 }
 
 static inline uint32_t GrCol(const float *q) {
@@ -969,6 +1027,35 @@ static void GrRdp(uint8_t *keep, int a, int b, float tol) {
     GrRdp(keep, wi, b, tol);
   }
 }
+
+#if SM_PSP_GR_RADIUS > 0
+/* Three consecutive runs of one chain that look like one quantised slope: no channel changes direction between the two steps, and each run is
+ * at most kGrRegularRatio times as long as the other (a slow ramp quantised to 1-level bands is regular; a flat region next to a gradient, or a
+ * peak, is not). */
+static bool GrRegular3(const TintRun *a, const TintRun *b, const TintRun *c) {
+  const int la = a->r1 - a->r0, lb = b->r1 - b->r0, lc = c->r1 - c->r0;
+  if (la > kGrRegularRatio * lb || lb > kGrRegularRatio * la || lb > kGrRegularRatio * lc || lc > kGrRegularRatio * lb)
+    return false;
+  for (int ch = 0; ch < 3; ch++)
+    if ((Lv(b->fix, ch) - Lv(a->fix, ch)) * (Lv(c->fix, ch) - Lv(b->fix, ch)) < 0)
+      return false;
+  return true;
+}
+
+/* Run i of the chain t[0..m-1] is a flat plateau: long (more than a smoothing window, kGrPlateauRows at least) and not part of a regular slope.
+ * Two long runs with nothing regular around them (one step between two flat regions) are both plateaus. */
+static bool GrIsPlateau(const TintRun *t, int m, int i) {
+  const int len = t[i].r1 - t[i].r0;
+  if (len < kGrPlateauRows || len <= 2 * SM_PSP_GR_RADIUS)
+    return false;
+  if (m >= 3) {
+    const int a = i == 0 ? 0 : i == m - 1 ? m - 3 : i - 1;
+    if (GrRegular3(&t[a], &t[a + 1], &t[a + 2]))
+      return false;
+  }
+  return true;
+}
+#endif
 
 static bool GrPush(int r0, int r1, uint32_t c0, uint32_t c1, const TintRun *f, int *ramps) {
   if (g_ngr >= kMaxGrSegs || r1 <= r0)
@@ -1025,14 +1112,34 @@ __attribute__((unused)) static bool GrPlan(void) {
             for (int c = 0; c < 3; c++)
               GrProfile(f, m, c);
             float tol = (float)kGrFitTol8;
+            int nlock = 0;
+#if SM_PSP_GR_RADIUS > 0
+            for (int t = 0; t < m; t++)  /* flat plateaus: [first run row + radius, last run row - radius] in edges, ends of the chain exact */
+              if (GrIsPlateau(f, m, t))
+                nlock++;
+#endif
             for (;;) {
               memset(keep, 0, (size_t)n);
               keep[0] = keep[n - 1] = 1;
+#if SM_PSP_GR_RADIUS > 0
+              for (int t = 0; t < m; t++)
+                if (GrIsPlateau(f, m, t)) {
+                  keep[f[t].r0 - top + (t > 0 ? SM_PSP_GR_RADIUS : 0)] = 1;
+                  keep[f[t].r1 - top - (t < m - 1 ? SM_PSP_GR_RADIUS : 0)] = 1;
+                }
+              int cnt = 0, pa = 0;
+              for (int t = 1; t < n; t++)
+                if (keep[t]) {
+                  GrRdp(keep, pa, t, tol);
+                  pa = t;
+                }
+#else
               GrRdp(keep, 0, n - 1, tol);
               int cnt = 0;
+#endif
               for (int t = 0; t < n; t++)
                 cnt += keep[t];
-              if (cnt - 1 <= m + 1 || tol >= 255.0f)
+              if (cnt - 1 <= m + 1 + 2 * nlock || tol >= 255.0f)
                 break;
               tol *= 2.0f;  /* too many quads for the list budget: coarser fit (never expected for real HDMA tables) */
             }
@@ -1048,7 +1155,7 @@ __attribute__((unused)) static bool GrPlan(void) {
             samples += n;
           }
         }
-        if (!ok) {  /* cannot happen (<= m + 1 segments per chain, kMaxGrSegs = 2 * kMaxLines); fall back rather than overrun */
+        if (!ok) {  /* cannot happen (<= m + 1 + 2 * plateaus segments per chain, kMaxGrSegs = 2 * kMaxLines); fall back rather than overrun */
           g_ngr = 0;
           return false;
         }
@@ -6029,12 +6136,15 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
 #endif
 #if SM_PSP_GE_GOURAUD_TINT
   geom += (uint32_t)g_ntint * 18 * sizeof(ColorVert);  /* gate 5x worst case: 1.5 segments per run (chain of m runs: <= m + 1 quads), 2 window spans of 6 vertices each */
+#if SM_PSP_GR_RADIUS > 0
+  geom += (uint32_t)(2 * (kMaxLines / kGrPlateauRows)) * 12 * sizeof(ColorVert);  /* + 2 quads per flat plateau (>= kGrPlateauRows rows each) */
+#endif
 #endif
   uint32_t passes = 1 + (blend ? (g_nbband > 1 ? (uint32_t)g_nbband : 1u) : 0u) + (tint ? (uint32_t)g_ntr : 0u);
   uint32_t per_pass = 2 * kLayers * 8 + 2 + mos_draws + (uint32_t)g_nspr * (uint32_t)obj_np + (uint32_t)g_m7_bnblk;  /* BG, M7 + backdrop (+ a bind and a draw per block), OBJ segments */
   uint32_t draws = passes * per_pass + 48 + (sobj ? (uint32_t)g_nspr : 0u) + (uint32_t)g_ntint + 16;
 #if SM_PSP_GE_GOURAUD_TINT
-  draws += 2u * (uint32_t)g_ntint;  /* gate 5x: a draw (and a dither toggle) per flat/gradient batch, <= 1.5 segments per run */
+  draws += 2u * (uint32_t)g_ntint + 2u * (uint32_t)(2 * (kMaxLines / kGrPlateauRows));  /* gate 5x: a draw (and a dither toggle) per flat/gradient batch, <= 1.5 segments per run + 2 per plateau */
 #endif
   return geom + draws * kDrawCmdBytes + kListFixedBytes + kListAllocBytes + kListSlackBytes;
 }
