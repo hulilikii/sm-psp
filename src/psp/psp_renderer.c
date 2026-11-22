@@ -54,7 +54,7 @@
 #endif
 
 #ifndef SM_PSP_GE_SMOOTH_TINT
-#define SM_PSP_GE_SMOOTH_TINT 1
+#define SM_PSP_GE_SMOOTH_TINT 0  /* experimental, not verified on hardware: off unless the build asks for it (PSP_GE_SMOOTH_TINT=1) */
 #endif
 
 #ifndef SM_PSP_MOS_GE
@@ -96,12 +96,20 @@ enum {
   kVramSub = kVramTexture,                    /* subscreen composite target: 256x256 8888; shares the software-frame texture (never both in one frame) */
   kSubBytes = 256 * 256 * 4,
   kTintTexW = 8, kTintTexH = 256, kTintTexBytes = kTintTexW * kTintTexH * 4,
-  kVramTint = kVramSub + kLayers * 128 * 128 * 4,  /* smooth-tint strip (8x256 8888), behind the three mosaic source images */
   kVramSubZ = kVramAtlas7 + kAtlas7Bytes,     /* its depth buffer: 256x256 16 bit */
   kSubZBytes = 256 * 256 * 2,
   kVramNeeded = kVramSubZ + kSubZBytes,
   kVramBuf2 = kVramNeeded,                    /* third 5650 frame buffer (triple buffering) */
   kBufBytes = 512 * 272 * 2,
+};
+
+/* Behind the third frame buffer: the two layer images (gate 5l; BG2, BG3; 512x256 wide map or 256x512 high map) and the
+ * smooth-tint strip. The strip has its own 8 KB, so it never depends on which frames use the subscreen target, the mosaic
+ * images or the software-frame texture (kVramSub region). Written by the CPU before the list, read by the GE only. */
+enum {
+  kImgSlots = 2, kImgW = 512, kImgH = 256, kImgBytes = kImgW * kImgH,
+  kVramImg0 = kVramBuf2 + kBufBytes, kVramImgEnd = kVramImg0 + kImgSlots * kImgBytes,
+  kVramTint = kVramImgEnd, kVramTintEnd = kVramTint + kTintTexBytes,
 };
 
 // Reasons a frame is handed back to the software renderer. 
@@ -428,8 +436,8 @@ static int g_obj_dry_n;
  * 128x128 8888 image per tile priority; the GE stretches it (nearest) over each run. */
 enum { kMosDim = 128, kMosVerify = 16, kMosMinBright = 6, kMosHiBright = 12, kMosHiVerify = 8,
        kMosImgBytes = kMosDim * kMosDim * 4 };
-CASSERT(kLayers * kMosImgBytes + kTintTexBytes <= kSubBytes);  /* the smooth-tint strip fits behind the mosaic images */
-CASSERT(kVramTint == kVramSub + kLayers * kMosImgBytes && (kVramTint & 63) == 0);
+CASSERT(kVramTint >= kVramImgEnd && (kVramTint & 63) == 0);  /* the strip lies behind every other allocation, 64-byte aligned */
+CASSERT(kVramTintEnd <= 2 * 1024 * 1024);                       /* inside the default 2 MB eDRAM */
 typedef struct MosLayer { bool on, any[2]; int size, start; TileVert *v; } MosLayer;
 static MosLayer g_mos[kLayers];
 #if SM_PSP_MOS_GE
@@ -593,7 +601,8 @@ enum { kMaxTintRanges = 6 };
 static TintRange g_trange[kMaxTintRanges];
 static int g_ntr;
 static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2, y2), 2 = (x, y, w, h) */
-static bool g_stint_frame;  /* this frame's tint is the smooth (dithered strip) one: the audit allows one fixed-colour level of difference */
+static bool g_tint_ok;      /* smooth tint enabled at build time and the eDRAM holds the strip region (set at start-up) */
+static bool g_stint_frame;  /* this frame's tint is the smooth (dithered strip) one; GeVerify logs it but keeps the strict tolerance */
 /* Gate 4s: rows of one subscreen colour-math mask. The blend is drawn once; each band restores its own layers. */
 typedef struct BlendBand { uint16_t r0, r1; uint8_t mask; } BlendBand;
 enum { kMaxBlendBands = 6, kBandVerify = 8 };
@@ -1970,9 +1979,7 @@ static void BuildClut7(int b) {
  * priority << 7 | palette << (4 or 2) | pixel, 0 = transparent) that is updated only where a tilemap word or a tile's
  * data changed, and every run is one textured strip (GU_REPEAT does the scroll wrap). The palette and the tile
  * priority come from two CLUTs (one per priority pass; entries of the other priority are transparent). */
-enum { kImgSlots = 2, kImgW = 512, kImgH = 256, kImgCells = 64 * 32, kImgMinRuns = 12, kImgVerify = 8,
-       kImgBytes = kImgW * kImgH,  /* VRAM: two images behind the third frame buffer (BG2, BG3); 512x256 (wide map) or 256x512 (high map) */
-       kVramImg0 = kVramBuf2 + kBufBytes, kVramImgEnd = kVramImg0 + kImgSlots * kImgBytes };
+enum { kImgCells = 64 * 32, kImgMinRuns = 12, kImgVerify = 8 };  /* image slots and VRAM offsets: see the VRAM layout at the top */
 
 /* Final 4:3 composition (fullscreen.md). The GE scene is still drawn at (kLeft, kTop) of the draw buffer. Present() then
  * copies its 256x224 visible rows into the texture region (kVramTexture, 262144 bytes) as a 256x256 RGB565 image, and the
@@ -3903,8 +3910,7 @@ static void GeVerify(void) {
   uint16_t bsw = 0, bge = 0;
   static uint16_t rowbad[kMaxLines];
   memset(rowbad, 0, sizeof(rowbad));
-// Smooth tint can differ by one fixed-colour level after RGB565 quantisation.
-  const int tr = g_stint_frame ? 2 : 1, tg = g_stint_frame ? 3 : 2;
+  const int tr = 1, tg = 2;
   for (int y = 0; y < g_line_count; y++)
     for (int x = 0; x < kGameWidth; x++) {
       uint16_t sw = Rgb565(g_framebuffer + (y * kGameWidth + x) * 4), g = ge[(kTop + y) * 512 + kLeft + x];
@@ -3926,6 +3932,8 @@ static void GeVerify(void) {
         }
       }
     }
+  if (g_stint_frame)  /* smooth tint blends colour bands on purpose: this shows how far it departs from the strict comparison */
+    PspLog("geaudit: smooth tint f=%u exact=%u near=%u bad=%u", (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad);
   bool m7 = g_m7_nq > 0;
   if (m7 && !g_m7w_frame) {
     g_m7_vn++;
@@ -6340,7 +6348,7 @@ static bool DrawGe(void) {
 // Gate 5t: smooth tint. Colour-window rows are included: the strip is indexed by row and the window clips the sprites. The strip is written now, while the GE is idle.
   bool smooth_tint = false;
 #if SM_PSP_GE_SMOOTH_TINT
-  smooth_tint = tint;
+  smooth_tint = tint && g_tint_ok;
   if (smooth_tint) {
     TintStripBuild();
     g_stint_frame = true;
@@ -6651,6 +6659,7 @@ static bool DrawGe(void) {
       nv += ns * 2;
     }
     gq = nv ? sceGuGetMemory((unsigned)nv * sizeof(TileVert)) : NULL;
+    const float iu = 0.5f - g_uvh[0], iv = 0.5f - g_uvh[1];  /* as the layer-image strips: no-op while the GE samples at the pixel centre */
     for (int i = 0; i < g_ntint; i++) {
       int wa[2], we[2];
       int ya = g_tint[i].r0, yb = g_tint[i].r1;
@@ -6660,8 +6669,8 @@ static bool DrawGe(void) {
         (void)WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we);
         TileVert *v = &gq[g_tint[i].v0 + 2 * k];
         /* u = game x, so the 8-texel strip pattern (and its dither phase) is the same at any window edge */
-        v[0] = (TileVert){(float)wa[k], (float)ya, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + ya), 0};
-        v[1] = (TileVert){(float)we[k], (float)yb, (int16_t)(kLeft + we[k]), (int16_t)(kTop + yb), 0};
+        v[0] = (TileVert){(float)wa[k] + iu, (float)ya + iv, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + ya), 0};
+        v[1] = (TileVert){(float)we[k] + iu, (float)yb + iv, (int16_t)(kLeft + we[k]), (int16_t)(kTop + yb), 0};
       }
     }
   } else if (tint) {
@@ -8013,6 +8022,9 @@ static bool PspRenderer_Initialize(void) {
   g_ge_ok = (unsigned)sceGeEdramGetSize() >= (unsigned)kVramNeeded;
   PspLog("edram size=%u needed=%u ge_ok=%d", (unsigned)sceGeEdramGetSize(),
          (unsigned)kVramNeeded, (int)g_ge_ok);
+  g_tint_ok = SM_PSP_GE_SMOOTH_TINT && g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)kVramTintEnd;
+  PspLog("smooth tint: %d (strip %u..%u of %u)", (int)g_tint_ok, (unsigned)kVramTint, (unsigned)kVramTintEnd,
+         (unsigned)sceGeEdramGetSize());
   PspLog("vtx16: %d bgvert=%u bytes", (int)SM_PSP_VTX16, (unsigned)sizeof(BgVert));
   g_img_ok = SM_PSP_LAYER_IMG && g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)kVramImgEnd;
   g_imgh_ok = g_img_ok && SM_PSP_LAYER_IMG >= 2;
