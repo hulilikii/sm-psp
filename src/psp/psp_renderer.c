@@ -689,62 +689,87 @@ static void SceneTexState(void) {
 
 /* Gate 5t: smooth tint. The SNES fixed colour is 5 bits per channel and changes in steps (HDMA bands), and the main target
  * is RGB565, so a plain Gouraud ramp is quantised back to the same bands. Instead the ramp is built here as an 8x256 8888
- * strip: row y holds the fixed colour of tint row y, blended between neighbouring bands over min(len) rows around each
- * band boundary (plateaus stay exact), and ordered-dithered (4x4 Bayer) between the two nearest 5-bit levels. Every texel
- * is therefore a colour the PPU could have produced (BakeColor of an integer 5-5-5 value); flat bands are bit-exact.
- * The GE adds/subtracts the strip with the unchanged blend setup. Runs of one half-colour group within one range are
- * blended with each other only. Returns the number of groups (quad index of a group = g_tint[first run].v0 / 2).
+ * strip: row y holds the fixed colour of tint row y, blended between neighbouring colour bands over min(len) rows around
+ * each band boundary (plateaus stay exact), and ordered-dithered (4x4 Bayer) between the two nearest 5-bit levels. Every
+ * texel is therefore a colour the PPU could have produced (BakeColor of an integer 5-5-5 value); flat bands are bit-exact.
+ * The GE adds/subtracts the strip with the unchanged blend setup. A colour band is a span of consecutive rows with the
+ * same fixed colour, whatever the colour window does to those rows (a run is split when its window edges change, a band is
+ * not), and bands of one half-colour group within one range are blended with each other only. The strip is indexed by
+ * row only; the colour window clips the sprites that sample it.
  * Called before the list is opened: the GE is idle, the strip is written through the uncached VRAM alias. */
-static int TintStripBuild(void) {
+static void TintStripBuild(void) {
   static const uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
-  static int logged;
+  static int logged, glogged;
+  static uint16_t by0[kMaxLines], by1[kMaxLines], bfix[kMaxLines];  /* colour bands of one group */
   uint32_t *strip = (uint32_t *)(g_vram_u + kVramTint);
-  int groups = 0, rows = 0;
+  int rows = 0, bands_total = 0, maxstep = 0;
   for (int k = 0; k < g_ntr; k++) {
     int end = g_trange[k].first + g_trange[k].n;
     for (int i = g_trange[k].first; i < end;) {
       int j = i + 1;
       while (j < end && g_tint[j].half == g_tint[i].half)
         j++;
-      int grows = 0;
-      g_tint[i].v0 = (uint16_t)(2 * groups++);
+      int nb = 0;  /* merge consecutive runs with the same fixed colour into bands */
       for (int q = i; q < j; q++) {
         const TintRun *c = &g_tint[q];
-        int len = (int)c->r1 - (int)c->r0;
-        int ra = c->r0, rb = c->r1;
+        if ((int)c->r1 <= (int)c->r0)
+          continue;
+        if (nb && by1[nb - 1] == c->r0 && bfix[nb - 1] == c->fix) {
+          by1[nb - 1] = c->r1;
+        } else if (nb < kMaxLines) {
+          by0[nb] = c->r0;
+          by1[nb] = c->r1;
+          bfix[nb++] = c->fix;
+        }
+      }
+      bands_total += nb;
+      for (int q = 0; q < nb; q++) {
+        int len = (int)by1[q] - (int)by0[q];
+        int ra = by0[q], rb = by1[q];
         int y0 = ra < 0 ? 0 : ra, y1 = rb > kTintTexH ? kTintTexH : rb;  /* never write outside the 8x256 strip */
         if (len <= 0 || y1 <= y0)
           continue;
-        const TintRun *pv = q > i ? &g_tint[q - 1] : NULL;  /* neighbours blend only when they touch this run */
-        const TintRun *nx = q + 1 < j ? &g_tint[q + 1] : NULL;
-        int plen = pv && pv->r1 == c->r0 ? (int)pv->r1 - (int)pv->r0 : 0;
-        int nlen = nx && nx->r0 == c->r1 ? (int)nx->r1 - (int)nx->r0 : 0;
-        int cr = c->fix & 31, cg = (c->fix >> 5) & 31, cb = (c->fix >> 10) & 31;
+        int fx = bfix[q];
+        int pfx = 0, nfx = 0;  /* neighbours blend only when they touch this band */
+        int plen = q > 0 && by1[q - 1] == by0[q] ? (int)by1[q - 1] - (int)by0[q - 1] : 0;
+        int nlen = q + 1 < nb && by0[q + 1] == by1[q] ? (int)by1[q + 1] - (int)by0[q + 1] : 0;
+        if (plen > 0)
+          pfx = bfix[q - 1];
+        if (nlen > 0)
+          nfx = bfix[q + 1];
+        for (int sh = 0; sh < 15; sh += 5) {
+          int d1 = plen > 0 ? (((fx >> sh) & 31) - ((pfx >> sh) & 31)) : 0;
+          if (d1 < 0)
+            d1 = -d1;
+          if (d1 > maxstep)
+            maxstep = d1;
+        }
+        int cr = fx & 31, cg = (fx >> 5) & 31, cb = (fx >> 10) & 31;
         for (int y = y0; y < y1; y++) {
           int pos2 = 2 * y + 1;  /* twice the row centre */
-          const TintRun *o = NULL;
-          int t = 256;           /* weight (of 256) of this run's colour */
+          int ofx = -1;
+          int t = 256;           /* weight (of 256) of this band's colour */
           if (plen > 0) {
             int w = len < plen ? len : plen;
-            int d = pos2 - 2 * c->r0;
+            int d = pos2 - 2 * ra;
             if (d < w) {
-              o = pv;
+              ofx = pfx;
               t = (d + w) * 256 / (2 * w);
             }
           }
-          if (!o && nlen > 0) {
+          if (ofx < 0 && nlen > 0) {
             int w = len < nlen ? len : nlen;
-            int d = 2 * c->r1 - pos2;
+            int d = 2 * rb - pos2;
             if (d < w) {
-              o = nx;
+              ofx = nfx;
               t = (d + w) * 256 / (2 * w);
             }
           }
           int lr = cr * 16, lg = cg * 16, lb = cb * 16;  /* Q4 levels */
-          if (o) {
-            lr = (cr * t + (o->fix & 31) * (256 - t)) >> 4;
-            lg = (cg * t + ((o->fix >> 5) & 31) * (256 - t)) >> 4;
-            lb = (cb * t + ((o->fix >> 10) & 31) * (256 - t)) >> 4;
+          if (ofx >= 0) {
+            lr = (cr * t + (ofx & 31) * (256 - t)) >> 4;
+            lg = (cg * t + ((ofx >> 5) & 31) * (256 - t)) >> 4;
+            lb = (cb * t + ((ofx >> 10) & 31) * (256 - t)) >> 4;
           }
           for (int x = 0; x < kTintTexW; x++) {
             int bay = kBayer[y & 3][x & 3];
@@ -752,40 +777,21 @@ static int TintStripBuild(void) {
             strip[y * kTintTexW + x] = BakeColor(col, 15, false);
           }
           rows++;
-          grows++;
         }
       }
-      g_tint[i].vn = grows ? 2 : 0;  /* the group's quad is drawn only when it has strip rows */
       i = j;
     }
   }
   __sync_synchronize();  /* CPU writes to VRAM (uncached alias) complete before the GE is started */
-  static int glogged;
-  if ((g_ntint >= 3 && glogged < 24 && (g_frame & 31) == 0) || logged < 2) {
-    int maxstep = 0;
-    for (int q = 0; q + 1 < g_ntint; q++) {
-      if (g_tint[q].r1 != g_tint[q + 1].r0)
-        continue;
-      for (int sh = 0; sh < 15; sh += 5) {
-        int d = (int)((g_tint[q].fix >> sh) & 31) -
-                (int)((g_tint[q + 1].fix >> sh) & 31);
-        if (d < 0)
-          d = -d;
-        if (d > maxstep)
-          maxstep = d;
-      }
-    }
-    if (g_ntint >= 3)
+  if ((bands_total >= 3 && glogged < 24 && (g_frame & 31) == 0) || logged < 2) {  /* gradient frames, not just the first flat ones */
+    if (bands_total >= 3)
       glogged++;
     else
       logged++;
-    PspLog("tintstrip f=%u: groups=%d runs=%d rows=%d ranges=%d scissor=%d maxstep=%d(levels) first=%04x last=%04x",
-           (unsigned)g_frame, groups, g_ntint, rows, g_ntr, g_scissor_mode,
-           maxstep, g_ntint ? g_tint[0].fix : 0,
-           g_ntint ? g_tint[g_ntint - 1].fix : 0);
+    PspLog("tintstrip f=%u: runs=%d bands=%d rows=%d ranges=%d scissor=%d cw=%u maxstep=%d(levels) first=%04x last=%04x",
+           (unsigned)g_frame, g_ntint, bands_total, rows, g_ntr, g_scissor_mode, (unsigned)g_cw_rows, maxstep,
+           g_ntint ? g_tint[0].fix : 0, g_ntint ? g_tint[g_ntint - 1].fix : 0);
   }
-  return groups;
-}
 
  //software patch
  
@@ -3905,8 +3911,7 @@ static void GeVerify(void) {
         exact++;
       } else {
         int dr = (sw & 31) - (g & 31), dg = ((sw >> 5) & 63) - ((g >> 5) & 63), db = (sw >> 11) - (g >> 11);
-        if (dr >= -tr && dr <= tr && dg >= -tg && dg <= tg &&
-            db >= -tr && db <= tr) {
+        if (dr >= -tr && dr <= tr && dg >= -tg && dg <= tg && db >= -tr && db <= tr) {
           near++;
         } else {
           rowbad[y]++;
@@ -5612,7 +5617,7 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
   if (blend)  /* subscreen composite quads + subscreen window masks, per row */
     geom += (uint32_t)g_line_count * (4 * sizeof(TileVert) + 18 * sizeof(ColorVert));
 #if SM_PSP_GE_SMOOTH_TINT
-  geom += (uint32_t)g_ntint * 2 * sizeof(TileVert);  /* one textured quad per tint group, at most one per run */
+  geom += (uint32_t)g_ntint * 4 * sizeof(TileVert);  /* one sprite per window span of a run: at most 2 spans = 4 vertices */
 #else
   geom += (uint32_t)g_ntint * 4 * sizeof(ColorVert);
 #endif
@@ -6331,24 +6336,13 @@ static bool DrawGe(void) {
 
   S5I_FRAME(total, obj_quads, blend, tint);  /* log only */
 
-  /* Gate 5t: smooth tint is valid when no colour window clips the tint (windowed rows keep the rectangle path). The strip
-   * is written now, while the GE is idle. */
+// Gate 5t: smooth tint. Colour-window rows are included: the strip is indexed by row and the window clips the sprites. The strip is written now, while the GE is idle.
   bool smooth_tint = false;
-  int tint_groups = 0;
 #if SM_PSP_GE_SMOOTH_TINT
   smooth_tint = tint;
-  for (int i = 0; i < g_ntint; i++)
-    if (g_tint[i].cwm != 0) {
-      smooth_tint = false;
-      break;
-    }
   if (smooth_tint) {
-    tint_groups = TintStripBuild();
+    TintStripBuild();
     g_stint_frame = true;
-  } else if (tint) {
-    static int flat_logged;
-    if (flat_logged++ < 4)
-      PspLog("tintflat: colour-window rows (runs=%d ranges=%d)", g_ntint, g_ntr);
   }
 #endif
 
@@ -6647,26 +6641,26 @@ static bool DrawGe(void) {
   TileVert *gq = NULL;
 
   if (smooth_tint) {  /* one textured quad per group, rows 1:1 with the strip */
-    gq = tint_groups ? sceGuGetMemory((unsigned)tint_groups * 2 * sizeof(TileVert)) : NULL;
-    for (int k = 0; k < g_ntr; k++) {
-      int end = g_trange[k].first + g_trange[k].n;
-      for (int i = g_trange[k].first; i < end;) {
-        int j = i + 1;
-        while (j < end && g_tint[j].half == g_tint[i].half)
-          j++;
-        if (!g_tint[i].vn) {  /* no strip rows: nothing is drawn for this group */
-          i = j;
-          continue;
-        }
-        int ya = g_tint[i].r0, yb = g_tint[j - 1].r1;
-        if (ya < 0)
-          ya = 0;
-        if (yb > kTintTexH)
-          yb = kTintTexH;
-        TileVert *v = gq + g_tint[i].v0;
-        v[0] = (TileVert){0.0f, (float)ya, (int16_t)kLeft, (int16_t)(kTop + ya), 0};
-        v[1] = (TileVert){(float)kGameWidth, (float)yb, (int16_t)(kLeft + kGameWidth), (int16_t)(kTop + yb), 0};
-        i = j;
+    int nv = 0;
+    for (int i = 0; i < g_ntint; i++) {
+      int wa[2], we[2];
+      int ns = g_tint[i].r0 < kTintTexH ? WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we) : 0;
+      g_tint[i].v0 = (uint16_t)nv;
+      g_tint[i].vn = (uint8_t)(ns * 2);
+      nv += ns * 2;
+    }
+    gq = nv ? sceGuGetMemory((unsigned)nv * sizeof(TileVert)) : NULL;
+    for (int i = 0; i < g_ntint; i++) {
+      int wa[2], we[2];
+      int ya = g_tint[i].r0, yb = g_tint[i].r1;
+      if (yb > kTintTexH)
+        yb = kTintTexH;
+      for (int k = 0; k < (int)g_tint[i].vn / 2; k++) {
+        (void)WinSpans(g_tint[i].cwm, g_tint[i].cwl, g_tint[i].cwr, wa, we);
+        TileVert *v = &gq[g_tint[i].v0 + 2 * k];
+        /* u = game x, so the 8-texel strip pattern (and its dither phase) is the same at any window edge */
+        v[0] = (TileVert){(float)wa[k], (float)ya, (int16_t)(kLeft + wa[k]), (int16_t)(kTop + ya), 0};
+        v[1] = (TileVert){(float)we[k], (float)yb, (int16_t)(kLeft + we[k]), (int16_t)(kTop + yb), 0};
       }
     }
   } else if (tint) {
@@ -6855,9 +6849,11 @@ static bool DrawGe(void) {
           j++;
         unsigned f = g_tint[i].half ? 0x00808080u : 0x00ffffffu;
         if (smooth_tint) {
-          sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
-          if (g_tint[i].vn)
-            GeDraw(kVtTile, 2, gq + g_tint[i].v0);
+          int nvert = g_tint[j - 1].v0 + g_tint[j - 1].vn - g_tint[i].v0;
+          if (nvert > 0) {
+            sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
+            GeDraw(kVtTile, nvert, gq + g_tint[i].v0);
+          }
         } else {
           int nvert = g_tint[j - 1].v0 + g_tint[j - 1].vn - g_tint[i].v0;
           if (nvert > 0) {

@@ -64,7 +64,7 @@ PSP_M7_PROBE ?= 0
 # PSP_M7_ROW4=1 (Gate 5v): the mode 7 image row loop renders four pixels per step (exact; tools/test_m7_row4.sh). 0: one pixel per step.
 PSP_M7_ROW4 ?= 1
 # PSP_M7_BLK=1 (Gate 5w, experimental): mode 7 frames with one matrix, no flips/fill/mosaic whose block windows fit are drawn from a swizzled 1 MB plane with one bind per 64x16 block instead of the CPU image (hardware bench: 2-3 ms GE vs 9-11 ms CPU at 222 MHz). Log builds check the first 24 frames against the software PPU. 0 (default): CPU image only, none of the code is built.
-PSP_M7_BLK ?= 0
+PSP_M7_BLK ?= 1
 ifeq ($(PSP_LOG),1)
 SRCS += src/psp/psp_log.c
 endif
