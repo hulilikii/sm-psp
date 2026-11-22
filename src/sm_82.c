@@ -4037,6 +4037,11 @@ static Func_Y_Y *const kUpdateBackgroundCommands[8] = {
 static uint8 g_door_music_stage;  // 0: nothing queued, 1: stop/upload queued, 2: new track queued
 #endif
 
+// GE door transition: the new room is visible during the scroll, so its HDMA objects (water, haze, layer blending) run
+// from the start of the scroll instead of after it (the original keeps them off while the screen is dark).
+static bool g_door_hdma_early;
+static uint16 g_door_saved_periodic_damage;
+
 CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
   uint16 bg_data_ptr;
 
@@ -4074,6 +4079,12 @@ CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
   }
   // The new room's tiles and palettes are loaded: from here the old room slides off and the new one is shown.
   PspRenderer_DoorTransitionArm((const uint16_t *)target_palettes);
+  g_door_hdma_early = PspRenderer_DoorTransitionArmed();
+  if (g_door_hdma_early) {
+    g_door_saved_periodic_damage = samus_periodic_damage;
+    SpawnBG3ScrollHdmaObject();
+    hdma_objects_enable_flag |= 0x8000;
+  }
   // Wait until the screen has finished scrolling as a result of the door opening
   while ((door_transition_flag & 0x8000) == 0) {
 #if SM_DOOR_MUSIC_SYNC && SM_DOOR_EASE
@@ -4098,8 +4109,13 @@ CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
     LoadRoomMusic();
 #endif
   palette_buffer[196] = 15328;
-  SpawnBG3ScrollHdmaObject();
-  hdma_objects_enable_flag |= 0x8000;
+  if (g_door_hdma_early) {
+    // Already running; objects that damage Samus by position must not leave a value from mid-scroll.
+    samus_periodic_damage = g_door_saved_periodic_damage;
+  } else {
+    SpawnBG3ScrollHdmaObject();
+    hdma_objects_enable_flag |= 0x8000;
+  }
   COROUTINE_AWAIT(2, PlmHandler_Async());
 
   if ((door_direction & 2) == 0) {

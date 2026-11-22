@@ -3,6 +3,7 @@
 #include "variables.h"
 #include "sm_rtl.h"
 #include "funcs.h"
+#include "src/psp/psp_renderer.h"
 
 
 #define g_byte_88A206 ((uint8*)RomFixedPtr(0x88a206))
@@ -2451,7 +2452,10 @@ void sub_88DE18(uint16 k, uint16 a) {  // 0x88DE18
   int v2 = (uint8)k >> 1;
   hdma_object_B[v2] = a;
   hdma_object_A[v2] = 0;
-  if (door_transition_function == FUNC16(DoorTransition_FadeInScreenAndFinish)) {
+  const bool door_ge = PspRenderer_DoorTransitionArmed();  // new room on screen during the scroll: haze fully on, no ramp
+  if (door_ge || door_transition_function == FUNC16(DoorTransition_FadeInScreenAndFinish)) {
+    if (door_ge)
+      hdma_object_A[v2] = 15;
     hdma_object_pre_instructions[v2] = FUNC16(HdmaobjPreInstr_HazeColorMathSubscreen_FadingIn);
     HdmaobjPreInstr_HazeColorMathSubscreen_FadingIn(k);
   }
@@ -2486,7 +2490,8 @@ void HdmaobjPreInstr_HazeColorMathSubscreen_FadedIn(uint16 k) {  // 0x88DE74
   reg_COLDATA[1] = 64;
   reg_COLDATA[2] = 0x80;
   fx_layer_blending_config_c = 44;
-  if (door_transition_function == FUNC16(DoorTransitionFunction_FadeOutScreen))
+  // The GE door transition keeps the leaving room's haze at full strength (its fade-out is drawn with the pre-fade palette).
+  if (door_transition_function == FUNC16(DoorTransitionFunction_FadeOutScreen) && !PspRenderer_DoorTransitionActive())
     hdma_object_pre_instructions[(uint8)k >> 1] = FUNC16(HdmaobjPreInstr_HazeColorMathSubscreen_FadingOut);
 }
 

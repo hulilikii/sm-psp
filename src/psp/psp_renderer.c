@@ -614,11 +614,11 @@ static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2
 static bool g_tint_ok;      /* smooth tint enabled at build time and the eDRAM holds the strip region (set at start-up) */
 static bool g_stint_frame;  /* this frame's tint is the smooth (dithered strip) one; GeVerify logs it but keeps the strict tolerance */
 /* Gate 5x: Gouraud tint. A segment is one quad of rows [r0,r1) of one tint group (same half colour, same colour window), drawn
- * as two triangles per window span. c0 / c1: vertex colours at its top / bottom edge. c0 == c1: a flat quad (bit exact, never
- * dithered); c0 != c1: a gradient quad (ramp = 1). v0/vn: its ColorVerts (6 per span). The segments of range k are
+ * as two triangles per window span. c0 / c1: vertex colours at its top / bottom edge. c0 == c1 and an exact SNES colour: a flat quad
+ * (bit exact, never dithered); otherwise a gradient quad (ramp = 1, dithered). v0/vn: its ColorVerts (6 per span). The segments of range k are
  * g_grseg[g_grr0[k] .. + g_grn[k]). g_gr_row: rows covered by a gradient quad (GeVerify uses a looser tolerance there). */
 typedef struct GrSeg { uint16_t r0, r1, v0, vn; uint8_t half, ramp, cwm, cwl, cwr; uint32_t c0, c1; } GrSeg;
-enum { kGrEdgeLevels = 4, kGrFitTol8 = 10, kGrVerify = 8, kGrBadMax = 600, kGrAuditR = 4, kGrAuditG = 8,
+enum { kGrEdgeLevels = 4, kGrFitTol8 = 6, kGrVerify = 8, kGrBadMax = 600, kGrAuditR = 4, kGrAuditG = 8,
        kMaxGrSegs = 2 * kMaxLines };
 static GrSeg g_grseg[kMaxGrSegs];
 static uint8_t g_gr_row[kMaxLines];
@@ -830,49 +830,106 @@ static void TintStripBuild(void) {
 
 /* Gate 5x: Gouraud tint planning.
  *
- * What the SNES does: HDMA writes the fixed colour per scanline, 5 bits per channel, so a gradient is a staircase of
- * constant bands (typically one level per step, step lengths uneven). The goal here is the opposite of reproducing that
- * staircase: keep the gradient's colours, endpoints, direction and major transitions, and replace the bands by smooth
- * ramps. Per frame, per tint group (same half colour, range and colour window):
+ * What the SNES does: HDMA writes the fixed colour per scanline, 5 bits per channel, so a gradient is a staircase of constant
+ * bands. The staircase is a quantised sample of a continuous colour profile; the planner recovers a profile and draws that,
+ * instead of reproducing the bands. Per frame, per tint group (same half colour, range and colour window):
  *   1. Chains. Adjacent runs (touching rows, same colour window) form one chain, unless the colour jumps by kGrEdgeLevels (4)
- *      or more levels in any channel between two runs. Such a jump is a genuine colour stop of the picture (a horizon, a
- *      glow edge, a rainbow band), not banding: the chain ends there and both sides stay flat. Steps of 1-3 levels are
- *      banding and get smoothed, whatever the length of the bands on either side.
- *   2. Knots. A run is represented by one knot at the centre of its rows, with its exact SNES colour (8-bit expanded). The
- *      curve through the knots is the "centre-to-centre" reading of the staircase: it hits the real band colours at the
- *      band centres and lies half a step off at the band edges. The chain's top and bottom rows stay flat up to the first
- *      and last knot, so the chain's end colours are the SNES end colours.
- *   3. Simplification. Ramer-Douglas-Peucker on the knots, error = largest per-channel distance (8-bit) of a dropped knot
- *      from the straight line between its neighbours, tolerance kGrFitTol8 (10 of 255, 1.2 five-bit levels = about one SNES
- *      step). Ripples of one step vanish into long ramps; a knot survives wherever the gradient really bends (slope or hue
- *      change larger than a step), so no major transition is lost and no stop is added that recreates banding.
- *   4. Quads between consecutive kept knots, c0 / c1 = the knots' colours: neighbouring quads share their edge colour, so
- *      there is no seam, jump or colour shift at a knot. The curve stays within kGrFitTol8 of every band centre and within
- *      about one further step of every SNES row, never on the other side of a stop.
+ *      or more levels in any channel between two runs. Such a jump is a genuine colour stop of the picture (a horizon, a glow
+ *      edge, a rainbow band), not banding: the chain ends there and both sides stay separate. Steps of 1-3 levels are banding
+ *      and are smoothed, whatever the length of the bands on either side.
+ *   2. Profile. Per channel, equal-level neighbouring runs merge into one plateau. A one-level step between two plateaus means
+ *      the underlying value crosses the half level there, so the profile passes through the midpoint of the two band colours at
+ *      the boundary (a larger step: the midpoint too, which keeps the profile within half the step of both bands). The first and
+ *      last plateau start/end at their exact SNES colour, so the chain's end colours are the SNES end colours, and a plateau
+ *      that is a local peak or valley also gets its exact colour at its centre, so extremes are not shaved. A monotone profile
+ *      built this way re-quantises to the SNES level on every row (it stays within half a level of its band). The profile is
+ *      sampled at every integer row edge of the chain: it is independent of how the SNES split the rows into bands.
+ *   3. Simplification. Ramer-Douglas-Peucker on those samples, error = largest per-channel distance (8-bit) from the chord,
+ *      tolerance kGrFitTol8. Knots can fall on any row, not just on band edges or centres; ripples from uneven band lengths
+ *      vanish into long ramps and a knot survives only where the profile really bends. A chain of m runs gets at most m + 1
+ *      quads (the tolerance doubles until it does, which stays within the list budget of ListBytesNeeded).
+ *   4. Quads between consecutive knots, c0 / c1 = the profile's colours at the knot rows: neighbouring quads share their edge
+ *      colour, so there is no seam or colour shift at a knot. The curve stays within half a band + kGrFitTol8 of every SNES
+ *      row (larger for steps of 2-3 levels), never on the other side of a stop.
  * The result is quantised to RGB565 by the GE; GE dither (GrSetDither, on gradient quads only) spreads the remaining
- * sub-level steps, otherwise a ramp would only have evenly spaced instead of uneven 1-level steps.
- * No limit on ramp length or on the number of runs: a whole sky gradient is a handful of quads. A group with no gradient
- * quad (plateaus, steps of 4+ levels, single runs) is not planned: GrPlan returns false and the frame is drawn as before. */
+ * sub-level steps, otherwise a ramp would only have evenly spaced instead of uneven 1-level steps. A quad whose end colours are
+ * equal but not an exact SNES colour counts as a ramp too (dithered), a flat quad is always an exact SNES colour.
+ * A group with no gradient quad (plateaus, steps of 4+ levels, single runs) is not planned: GrPlan returns false and the frame
+ * is drawn as before. */
 static inline int Expand5(int l) {
   return (l << 3) | (l >> 2);
 }
-
-typedef struct GrKnot { int16_t y; uint8_t c[3]; } GrKnot;
 
 static inline int Lv(int fix, int ch) {
   return (fix >> (5 * ch)) & 31;
 }
 
-static inline uint32_t GrCol(const GrKnot *k) {
-  return 0xff000000u | (uint32_t)k->c[2] << 16 | (uint32_t)k->c[1] << 8 | (uint32_t)k->c[0];
+enum { kGrMaxPts = 2 * kMaxLines + 8 };
+static float g_gr_q[kMaxLines + 1][3];  /* profile at the integer row edges top .. bottom of the chain being planned (8-bit units) */
+static int g_gr_pp[kGrMaxPts];          /* profile points of one channel: position in half rows (2 * edge) ... */
+static float g_gr_pv[kGrMaxPts];        /* ... and 8-bit value */
+static float g_gr_tolmax;               /* largest RDP tolerance used by the last GrPlan (kGrFitTol8 unless a chain hit its quad cap) */
+
+/* Channel ch of the chain t[0..m-1] (touching runs) -> g_gr_q[row - top][ch] for row = top .. bottom. */
+static void GrProfile(const TintRun *t, int m, int ch) {
+  const int top = t[0].r0, bot = t[m - 1].r1;
+  int n = 0, prev = -1, lv = Lv(t[0].fix, ch), pa = top;
+  g_gr_pp[n] = 2 * top;
+  g_gr_pv[n++] = (float)Expand5(lv);
+  for (int i = 1; i <= m; i++) {
+    const int nl = i < m ? Lv(t[i].fix, ch) : -1;
+    if (i < m && nl == lv)
+      continue;  /* same plateau */
+    if (i < m) {
+      const int pb = t[i - 1].r1;
+      if (prev >= 0 && ((lv > prev && lv > nl) || (lv < prev && lv < nl))) {  /* peak or valley: keep its exact colour at the centre */
+        g_gr_pp[n] = pa + pb;
+        g_gr_pv[n++] = (float)Expand5(lv);
+      }
+      g_gr_pp[n] = 2 * t[i].r0;  /* the underlying value crosses the half level at the band edge */
+      g_gr_pv[n++] = 0.5f * (float)(Expand5(lv) + Expand5(nl));
+      prev = lv;
+      lv = nl;
+      pa = t[i].r0;
+    }
+  }
+  g_gr_pp[n] = 2 * bot;
+  g_gr_pv[n++] = (float)Expand5(lv);
+  int k = 0;
+  for (int y = top; y <= bot; y++) {
+    const int p2 = 2 * y;
+    while (k < n - 2 && g_gr_pp[k + 1] <= p2)
+      k++;
+    const float f = (float)(p2 - g_gr_pp[k]) / (float)(g_gr_pp[k + 1] - g_gr_pp[k]);
+    g_gr_q[y - top][ch] = g_gr_pv[k] + (g_gr_pv[k + 1] - g_gr_pv[k]) * f;
+  }
 }
 
-/* Largest per-channel distance of knot i from the straight line between knots a and b (a < i < b, y strictly increasing). */
-static float GrDev(const GrKnot *k, int a, int b, int i) {
-  const float t = (float)(k[i].y - k[a].y) / (float)(k[b].y - k[a].y);
+static inline uint32_t GrCol(const float *q) {
+  uint32_t c[3];
+  for (int ch = 0; ch < 3; ch++) {
+    int v = (int)(q[ch] + 0.5f);
+    c[ch] = (uint32_t)(v < 0 ? 0 : v > 255 ? 255 : v);
+  }
+  return 0xff000000u | c[2] << 16 | c[1] << 8 | c[0];
+}
+
+/* True when every channel of the 8-bit colour is a 5-bit SNES level expanded to 8 bits (it survives the RGB565 truncation as is). */
+static inline bool GrExact(uint32_t c) {
+  for (int ch = 0; ch < 3; ch++) {
+    const int v = (int)((c >> (8 * ch)) & 255);
+    if (v != Expand5(v >> 3))
+      return false;
+  }
+  return true;
+}
+
+/* Largest per-channel distance of sample i from the chord between samples a and b (a < i < b). */
+static float GrDev(int a, int b, int i) {
+  const float t = (float)(i - a) / (float)(b - a);
   float w = 0.0f;
   for (int c = 0; c < 3; c++) {
-    float d = (float)k[i].c[c] - ((float)k[a].c[c] + ((float)k[b].c[c] - (float)k[a].c[c]) * t);
+    float d = g_gr_q[i][c] - (g_gr_q[a][c] + (g_gr_q[b][c] - g_gr_q[a][c]) * t);
     if (d < 0.0f)
       d = -d;
     if (d > w)
@@ -881,29 +938,30 @@ static float GrDev(const GrKnot *k, int a, int b, int i) {
   return w;
 }
 
-/* keep[] marks the knots of the simplified curve; keep[a] and keep[b] are set by the caller. Depth <= number of knots. */
-static void GrRdp(const GrKnot *k, uint8_t *keep, int a, int b) {
+/* keep[] marks the knots of the simplified curve; keep[a] and keep[b] are set by the caller. Depth <= number of samples. */
+static void GrRdp(uint8_t *keep, int a, int b, float tol) {
   float worst = 0.0f;
   int wi = -1;
   for (int i = a + 1; i < b; i++) {
-    const float d = GrDev(k, a, b, i);
+    const float d = GrDev(a, b, i);
     if (d > worst) {
       worst = d;
       wi = i;
     }
   }
-  if (wi >= 0 && worst > (float)kGrFitTol8) {
+  if (wi >= 0 && worst > tol) {
     keep[wi] = 1;
-    GrRdp(k, keep, a, wi);
-    GrRdp(k, keep, wi, b);
+    GrRdp(keep, a, wi, tol);
+    GrRdp(keep, wi, b, tol);
   }
 }
 
 static bool GrPush(int r0, int r1, uint32_t c0, uint32_t c1, const TintRun *f, int *ramps) {
   if (g_ngr >= kMaxGrSegs || r1 <= r0)
     return false;
-  g_grseg[g_ngr++] = (GrSeg){(uint16_t)r0, (uint16_t)r1, 0, 0, f->half, (uint8_t)(c0 != c1), f->cwm, f->cwl, f->cwr, c0, c1};
-  if (c0 != c1) {
+  const bool ramp = c0 != c1 || !GrExact(c0);
+  g_grseg[g_ngr++] = (GrSeg){(uint16_t)r0, (uint16_t)r1, 0, 0, f->half, (uint8_t)ramp, f->cwm, f->cwl, f->cwr, c0, c1};
+  if (ramp) {
     (*ramps)++;
     for (int y = r0; y < r1 && y < kMaxLines; y++)
       g_gr_row[y] = 1;
@@ -914,11 +972,11 @@ static bool GrPush(int r0, int r1, uint32_t c0, uint32_t c1, const TintRun *f, i
 /* Builds g_grseg for the frame's tint ranges. True when at least one gradient quad exists: then the frame is drawn with the
  * segments (flat ones included, so everything else draws exactly as before). False: nothing changes. */
 __attribute__((unused)) static bool GrPlan(void) {
-  static GrKnot kn[kMaxLines];
-  static uint8_t keep[kMaxLines];
+  static uint8_t keep[kMaxLines + 1];
   static int glogged;
-  int ramps = 0, chains = 0, knots = 0, kept = 0;
+  int ramps = 0, chains = 0, samples = 0, kept = 0;
   g_ngr = 0;
+  g_gr_tolmax = (float)kGrFitTol8;
   memset(g_gr_row, 0, sizeof(g_gr_row));
   for (int k = 0; k < g_ntr; k++) {
     g_grr0[k] = (uint16_t)g_ngr;
@@ -932,7 +990,7 @@ __attribute__((unused)) static bool GrPlan(void) {
         int m = 1;
         for (; q + m < j; m++) {  /* the chain: touching rows, one colour window, no jump of kGrEdgeLevels or more */
           const TintRun *p = &g_tint[q + m];
-          bool edge = p->r0 != p[-1].r1 || p->cwm != f->cwm || p->cwl != f->cwl || p->cwr != f->cwr;
+          bool edge = p->r0 != p[-1].r1 || p->r1 <= p->r0 || p->cwm != f->cwm || p->cwl != f->cwl || p->cwr != f->cwr;
           for (int c = 0; c < 3 && !edge; c++) {
             int d = Lv(p->fix, c) - Lv(p[-1].fix, c);
             edge = (d < 0 ? -d : d) >= kGrEdgeLevels;
@@ -947,30 +1005,36 @@ __attribute__((unused)) static bool GrPlan(void) {
           const uint32_t col = BakeColor(f->fix, 15, false);
           ok = GrPush(f->r0, f->r1, col, col, f, &ramps);
         } else {
-          for (int t = 0; t < m; t++) {
-            const TintRun *r = &g_tint[q + t];
-            kn[t].y = (int16_t)(r->r0 + ((int)r->r1 - (int)r->r0) / 2);  /* strictly increasing: the next run starts at r1 */
+          const int top = f->r0, n = l->r1 - top + 1;  /* profile samples: every row edge from the chain's top to its bottom */
+          ok = n >= 2 && n <= kMaxLines + 1;
+          if (ok) {
             for (int c = 0; c < 3; c++)
-              kn[t].c[c] = (uint8_t)Expand5(Lv(r->fix, c));
-            keep[t] = 0;
-          }
-          keep[0] = keep[m - 1] = 1;
-          GrRdp(kn, keep, 0, m - 1);
-          ok = true;
-          if (kn[0].y > f->r0)
-            ok = GrPush(f->r0, kn[0].y, GrCol(&kn[0]), GrCol(&kn[0]), f, &ramps);
-          int a = 0;
-          for (int t = 1; t < m && ok; t++)
-            if (keep[t]) {
-              ok = GrPush(kn[a].y, kn[t].y, GrCol(&kn[a]), GrCol(&kn[t]), f, &ramps);
-              a = t;
-              kept++;
+              GrProfile(f, m, c);
+            float tol = (float)kGrFitTol8;
+            for (;;) {
+              memset(keep, 0, (size_t)n);
+              keep[0] = keep[n - 1] = 1;
+              GrRdp(keep, 0, n - 1, tol);
+              int cnt = 0;
+              for (int t = 0; t < n; t++)
+                cnt += keep[t];
+              if (cnt - 1 <= m + 1 || tol >= 255.0f)
+                break;
+              tol *= 2.0f;  /* too many quads for the list budget: coarser fit (never expected for real HDMA tables) */
             }
-          if (ok)
-            ok = GrPush(kn[m - 1].y, l->r1, GrCol(&kn[m - 1]), GrCol(&kn[m - 1]), f, &ramps);
-          knots += m;
+            if (tol > g_gr_tolmax)
+              g_gr_tolmax = tol;
+            int a = 0;
+            for (int t = 1; t < n && ok; t++)
+              if (keep[t]) {
+                ok = GrPush(top + a, top + t, GrCol(g_gr_q[a]), GrCol(g_gr_q[t]), f, &ramps);
+                a = t;
+                kept++;
+              }
+            samples += n;
+          }
         }
-        if (!ok) {  /* cannot happen (<= 1.5 segments per run, kMaxGrSegs = 2 * kMaxLines); fall back rather than overrun */
+        if (!ok) {  /* cannot happen (<= m + 1 segments per chain, kMaxGrSegs = 2 * kMaxLines); fall back rather than overrun */
           g_ngr = 0;
           return false;
         }
@@ -982,8 +1046,8 @@ __attribute__((unused)) static bool GrPlan(void) {
   }
   if (ramps && glogged < 24 && (g_frame & 31) == 0) {
     glogged++;
-    PspLog("grtint f=%u: runs=%d chains=%d knots=%d kept=%d segs=%d gradient quads=%d ranges=%d", (unsigned)g_frame, g_ntint,
-           chains, knots, kept, g_ngr, ramps, g_ntr);
+    PspLog("grtint f=%u: runs=%d chains=%d samples=%d kept=%d segs=%d gradient quads=%d ranges=%d tol=%d", (unsigned)g_frame, g_ntint,
+           chains, samples, kept, g_ngr, ramps, g_ntr, (int)g_gr_tolmax);
   }
   return ramps > 0;
 }
@@ -2311,6 +2375,22 @@ void PspRenderer_DoorTransitionCamera(uint16_t layer1_x, uint16_t layer1_y) {
 void PspRenderer_EndDoorTransition(void) {
 #if SM_PSP_DOOR_GE
   DoorTransitionRelease();
+#endif
+}
+
+bool PspRenderer_DoorTransitionActive(void) {
+#if SM_PSP_DOOR_GE
+  return g_door_reserved;
+#else
+  return false;
+#endif
+}
+
+bool PspRenderer_DoorTransitionArmed(void) {
+#if SM_PSP_DOOR_GE
+  return g_door_reserved && g_door_armed;
+#else
+  return false;
 #endif
 }
 

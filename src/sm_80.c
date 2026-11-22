@@ -1177,15 +1177,29 @@ void IrqHandler_16_VerticalDoor_BeginHud(void) {  // 0x809758
   IrqHandler_SetResult(18, 31, 152);
 }
 
+// While the new room is on screen under the sliding old one (PspRenderer_DoorTransitionArmed), the door scroll draws it
+// like IrqHandler_6 does: its own layers (BG2 backdrop, BG3 water), BG3 tilemap and colour math. The original shows only
+// BG1 + sprites with colour math off (BG1 hidden when the CRE differs) because the screen is faded to black then.
+static void DoorIrqDrawNewRoom(void) {
+  WriteReg(CGWSEL, gameplay_CGWSEL);
+  WriteReg(CGADSUB, gameplay_CGADSUB);
+  WriteReg(BG3SC, gameplay_BG3SC);
+  WriteReg(TM, gameplay_TM);
+}
+
 void IrqHandler_18_VerticalDoor_EndHud(void) {  // 0x809771
-  uint8 v0;
-  if (((previous_cre_bitset | cre_bitset) & 1) != 0)
-    v0 = 16;
-  else
-    v0 = 17;
-  WriteReg(TM, v0);
-  WriteReg(CGWSEL, 0);
-  WriteReg(CGADSUB, 0);
+  if (PspRenderer_DoorTransitionArmed()) {
+    DoorIrqDrawNewRoom();
+  } else {
+    uint8 v0;
+    if (((previous_cre_bitset | cre_bitset) & 1) != 0)
+      v0 = 16;
+    else
+      v0 = 17;
+    WriteReg(TM, v0);
+    WriteReg(CGWSEL, 0);
+    WriteReg(CGADSUB, 0);
+  }
   if ((door_transition_flag & 0x8000) == 0)
     Irq_FollowDoorTransition();
   IrqHandler_SetResult(20, 216, 152);
@@ -1205,15 +1219,18 @@ void IrqHandler_22_HorizDoor_BeginHud(void) {  // 0x8097C1
 }
 
 void IrqHandler_24_HorizDoor_EndHud(void) {  // 0x8097DA
-  uint8 v0;
-
-  if (((previous_cre_bitset | cre_bitset) & 1) != 0)
-    v0 = 16;
-  else
-    v0 = 17;
-  WriteReg(TM, v0);
-  WriteReg(CGWSEL, 0);
-  WriteReg(CGADSUB, 0);
+  if (PspRenderer_DoorTransitionArmed()) {
+    DoorIrqDrawNewRoom();
+  } else {
+    uint8 v0;
+    if (((previous_cre_bitset | cre_bitset) & 1) != 0)
+      v0 = 16;
+    else
+      v0 = 17;
+    WriteReg(TM, v0);
+    WriteReg(CGWSEL, 0);
+    WriteReg(CGADSUB, 0);
+  }
   if ((door_transition_flag & 0x8000) == 0)
     Irq_FollowDoorTransition();
   IrqHandler_SetResult(26, 160, 152);

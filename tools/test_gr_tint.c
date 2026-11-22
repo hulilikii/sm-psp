@@ -49,7 +49,8 @@ static void CheckStructure(const char *name) {
     const GrSeg *g = &g_grseg[s];
     if (!allow_gap || s == 0) CHECK(g->r0 == next, "%s: seg %d starts at %d, expected %d", name, s, g->r0, next);
     CHECK(g->r1 > g->r0, "%s: empty seg", name);
-    CHECK(g->ramp == (g->c0 != g->c1), "%s: ramp flag", name);
+    CHECK(g->ramp == (g->c0 != g->c1 || !GrExact(g->c0)), "%s: ramp flag", name);
+    CHECK(g->ramp || g->c0 == g->c1, "%s: flat quad with two colours", name);
     next = g->r1;
     bool newrange = false;
     for (int k = 1; k < g_ntr; k++) if (s == g_grr0[k]) newrange = true;
@@ -67,21 +68,24 @@ static void CheckStructure(const char *name) {
     CHECK(g_gr_row[y] == (sg >= 0 && g_grseg[sg].ramp), "%s: g_gr_row[%d]", name, y);
   }
 }
-/* fit checks: every run keeps its band-centre colour within the tolerance, every row stays within tolerance + one step of its band */
+/* fit checks. The profile of one channel stays within half the step to the neighbouring plateau of the plateau's level (a plateau = the
+ * touching runs of equal level in that channel), so every row stays within that + the planner's tolerance + rounding of its SNES colour.
+ * Neighbours across a hard edge (kGrEdgeLevels or more) or a row gap are not part of the chain and do not widen the allowance. */
+static int Lvl(int i, int ch) { return (g_tint[i].fix >> (5 * ch)) & 31; }
 static void CheckFit(const char *name) {
-  for (int i = 0; i < g_ntint; i++) {
-    int yc = g_tint[i].r0 + (g_tint[i].r1 - g_tint[i].r0) / 2;
+  for (int i = 0; i < g_ntint; i++)
     for (int ch = 0; ch < 3; ch++) {
-      /* knot colour at yc = the curve evaluated at the pixel row yc, whose centre is half a row below the edge knot: allow one row of slope */
-      float d = fabsf(Curve(yc, ch) - (float)Flat(g_tint[i].fix, ch));
-      CHECK(d <= kGrFitTol8 + 4.0f, "%s: run %d ch %d centre err %.1f", name, i, ch, d);
-    }
-    for (int y = g_tint[i].r0; y < g_tint[i].r1; y++)
-      for (int ch = 0; ch < 3; ch++) {
+      int lo = i, hi = i, jd = 1;
+      while (lo > 0 && g_tint[lo - 1].r1 == g_tint[lo].r0 && Lvl(lo - 1, ch) == Lvl(i, ch)) lo--;
+      while (hi + 1 < g_ntint && g_tint[hi].r1 == g_tint[hi + 1].r0 && Lvl(hi + 1, ch) == Lvl(i, ch)) hi++;
+      if (lo > 0 && g_tint[lo - 1].r1 == g_tint[lo].r0) { int d = abs(Lvl(lo - 1, ch) - Lvl(i, ch)); if (d < kGrEdgeLevels && d > jd) jd = d; }
+      if (hi + 1 < g_ntint && g_tint[hi].r1 == g_tint[hi + 1].r0) { int d = abs(Lvl(hi + 1, ch) - Lvl(i, ch)); if (d < kGrEdgeLevels && d > jd) jd = d; }
+      const float allow = 8.3f * (jd > 1 ? (float)jd / 2.0f : 0.5f) + g_gr_tolmax + 1.5f;
+      for (int y = g_tint[i].r0; y < g_tint[i].r1; y++) {
         float d = fabsf(Curve(y, ch) - (float)Flat(g_tint[i].fix, ch));
-        CHECK(d <= kGrFitTol8 + 9.0f + 4.0f, "%s: row %d ch %d err %.1f", name, y, ch, d);  /* tol + one level of step + one row of slope */
+        CHECK(d <= allow, "%s: run %d row %d ch %d err %.1f > %.1f", name, i, y, ch, d, allow);
       }
-  }
+    }
 }
 static void Plan(const char *name, bool want) { bool got = GrPlan(); CHECK(got == want, "%s: GrPlan=%d want %d", name, got, want); if (g_ngr) CheckStructure(name); if (got) CheckFit(name); }
 
@@ -108,8 +112,9 @@ static float BandingStd(int y0, int y1, int mode /* 0 SNES rows, 1 plan undither
 
 /* what the dither costs: standard deviation of the output inside a 4 x 4 block (a fine pattern), and the largest row-to-row jump of the
  * 8-pixel mean (how hard the contour of a step looks) */
+static float g_rmsjump;  /* RMS of the same row-to-row jumps: the max alone depends on which rows the dither phase happens to flip */
 static void Pattern(int y0, int y1, int mode, float *pat, float *jump) {
-  double acc = 0; int n = 0; float mj = 0, prev = -1;
+  double acc = 0, sj = 0; int n = 0, nj = 0; float mj = 0, prev = -1;
   for (int y = y0 + 1; y + 4 < y1 - 1; y++) {
     double s1 = 0, s2 = 0;
     for (int dy = 0; dy < 4; dy++) for (int x = 0; x < 4; x++) { double o = mode == 0 ? Out5((float)Flat(RowFix(y + dy), 0), x, y + dy, false) : Out5(Curve(y + dy, 0), x, y + dy, mode == 2); s1 += o; s2 += o * o; }
@@ -117,9 +122,9 @@ static void Pattern(int y0, int y1, int mode, float *pat, float *jump) {
   }
   for (int y = y0; y < y1; y++) {
     float sum = 0; for (int x = 0; x < 8; x++) sum += (float)(mode == 0 ? Out5((float)Flat(RowFix(y), 0), x, y, false) : Out5(Curve(y, 0), x, y, mode == 2));
-    sum /= 8; if (prev >= 0 && fabsf(sum - prev) > mj) mj = fabsf(sum - prev); prev = sum;
+    sum /= 8; if (prev >= 0) { if (fabsf(sum - prev) > mj) mj = fabsf(sum - prev); sj += (double)(sum - prev) * (sum - prev); nj++; } prev = sum;
   }
-  *pat = (float)(acc / n); *jump = mj;
+  *pat = (float)(acc / n); *jump = mj; g_rmsjump = (float)sqrt(sj / nj);
 }
 
 int main(void) {
@@ -128,13 +133,13 @@ int main(void) {
   OneRange(); Plan("long-gradient", true);
   { int gq = 0; for (int s = 0; s < g_ngr; s++) gq += g_grseg[s].ramp; printf("long gradient: %d runs -> %d quads (%d gradient)\n", g_ntint, g_ngr, gq); }
   CHECK(g_ngr <= 4, "long gradient needs %d quads, expected <= 4", g_ngr);
-  { int ya = g_tint[0].r0, yb = g_tint[g_ntint - 1].r1; float b[3], pt[3], jp[3];
-    for (int m = 0; m < 3; m++) { b[m] = BandingStd(ya, yb, m); Pattern(ya, yb, m, &pt[m], &jp[m]); }
+  { int ya = g_tint[0].r0, yb = g_tint[g_ntint - 1].r1; float b[3], pt[3], jp[3], rj[3];
+    for (int m = 0; m < 3; m++) { b[m] = BandingStd(ya, yb, m); Pattern(ya, yb, m, &pt[m], &jp[m]); rj[m] = g_rmsjump; }
     printf("  model of the GE, NOT hardware (R channel, levels): banding vs smooth curve (4x4 box, std) / step contour (max row-to-row jump) / fine pattern (std in 4x4)\n");
-    printf("    SNES rows        : %.3f / %.2f / %.3f\n    plan, no dither  : %.3f / %.2f / %.3f\n    plan + GE dither : %.3f / %.2f / %.3f\n", b[0], jp[0], pt[0], b[1], jp[1], pt[1], b[2], jp[2], pt[2]);
+    printf("    SNES rows        : %.3f / %.2f / %.3f   (rms jump %.3f)\n    plan, no dither  : %.3f / %.2f / %.3f   (rms jump %.3f)\n    plan + GE dither : %.3f / %.2f / %.3f   (rms jump %.3f)\n", b[0], jp[0], pt[0], rj[0], b[1], jp[1], pt[1], rj[1], b[2], jp[2], pt[2], rj[2]);
     CHECK(b[1] <= b[0], "undithered plan has more banding than the SNES rows (%.3f vs %.3f)", b[1], b[0]);
     CHECK(b[2] <= b[1] + 0.01f, "dither raised the banding (%.3f vs %.3f)", b[2], b[1]);
-    CHECK(jp[2] * 1.5f <= jp[1], "dither did not soften the step contour (%.2f vs %.2f)", jp[2], jp[1]); }
+    CHECK(jp[2] <= jp[1] && rj[2] * 1.15f <= rj[1], "dither did not soften the step contour (max %.2f vs %.2f, rms %.3f vs %.3f)", jp[2], jp[1], rj[2], rj[1]); }
   /* 2. hard edge: a 9-level jump inside the picture stays a step; both sides smooth */
   Begin(); for (int i = 0; i < 8; i++) Run(2 * i, 2 * i + 2, Fix(4 + i, 4, 4)); for (int i = 0; i < 8; i++) Run(16 + 2 * i, 18 + 2 * i, Fix(20 + i, 4, 4)); OneRange(); Plan("hard-edge", true);
   { int sa = SegAt(15), sb = SegAt(16); CHECK(sa != sb && g_grseg[sa].r1 == 16 && g_grseg[sb].r0 == 16, "hard edge not a quad boundary");
@@ -163,6 +168,31 @@ int main(void) {
   for (int s = 0; s < g_ngr; s++) CHECK(!(g_grseg[s].r0 < 16 && g_grseg[s].r1 > 16), "quad crosses a range border");
   /* 8. worst-case segment count: 1.5 per run, within kMaxGrSegs; every row of 256 distinct 2-level runs */
   Begin(); for (int i = 0; i < 128; i++) Run(2 * i, 2 * i + 2, Fix((i * 3) % 29 + 1, (i * 5) % 27, (i * 7) % 25)); OneRange(); { bool r = GrPlan(); (void)r; CHECK(g_ngr <= kMaxGrSegs, "segs %d", g_ngr); }
+  /* 8b. one continuous ramp (R 3.2 .. 24.6 levels over 200 rows, G/B slower), quantised to SNES bands at 6 different phases of the band
+   * edges: the plan must follow the underlying ramp whatever rows the bands happen to start on, with few quads and no run-edge ripple */
+  for (int ph = 0; ph < 6; ph++) {
+    Begin(); int prev = -1, start = 0;
+    for (int y = 0; y <= 200; y++) {
+      float yy = (float)y + 0.5f + (float)ph * 0.37f;
+      int r = (int)(3.2f + 0.107f * yy + 0.5f), g = (int)(9.0f + 0.031f * yy + 0.5f), b = (int)(20.0f - 0.052f * yy + 0.5f);
+      int fx = Fix(r, g, b);
+      if (y == 200) fx = -2;
+      if (fx != prev) { if (prev >= 0) Run(start, y, prev); start = y; prev = fx; }
+    }
+    OneRange(); Plan("synthetic", true);
+    float worst = 0; int gq = 0;
+    for (int y = g_tint[0].r0; y < g_tint[g_ntint - 1].r1; y++) {
+      float yy = (float)y + 0.5f + (float)ph * 0.37f, lvl[3] = {3.2f + 0.107f * yy, 9.0f + 0.031f * yy, 20.0f - 0.052f * yy};
+      for (int ch = 0; ch < 3; ch++) {
+        int l0 = (int)lvl[ch]; float ideal = (float)Flat(l0 | l0 << 5 | l0 << 10, 0) + (lvl[ch] - (float)l0) * (float)(Flat((l0 + 1) | (l0 + 1) << 5 | (l0 + 1) << 10, 0) - Flat(l0 | l0 << 5 | l0 << 10, 0));
+        float d = fabsf(Curve(y, ch) - ideal); if (d > worst) worst = d;
+      }
+    }
+    for (int s = 0; s < g_ngr; s++) gq += g_grseg[s].ramp;
+    printf("synthetic ramp phase %d: %d runs -> %d quads, worst distance to the underlying ramp %.1f (8-bit units)\n", ph, g_ntint, g_ngr, worst);
+    CHECK(worst <= (float)kGrFitTol8 + 2.0f, "synthetic: plan %.1f units off the underlying ramp", worst);
+    CHECK(g_ngr <= 6, "synthetic: %d quads for a straight ramp", g_ngr);
+  }
   /* 9. random stress: structure and fit hold; segments <= 1.5 per run */
   uint32_t x = 12345; long totq = 0, totr = 0;
   for (int it = 0; it < 30000; it++) {

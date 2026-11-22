@@ -35,6 +35,8 @@ void PspRenderer_DoorTransitionRef(uint16_t layer1_x, uint16_t layer1_y, unsigne
 void PspRenderer_DoorTransitionArm(const uint16_t *dest_palettes);          // new room's tiles + palettes are loaded
 void PspRenderer_DoorTransitionCamera(uint16_t layer1_x, uint16_t layer1_y);  // after every scroll step
 void PspRenderer_EndDoorTransition(void);                                     // fade-in done: release everything
+bool PspRenderer_DoorTransitionActive(void);                                  // Begin..End: a GE transition owns the screen
+bool PspRenderer_DoorTransitionArmed(void);                                   // new room is on screen under the sliding old room
 
 enum PspButtonIcon {
   PSP_BUTTON_ICON_CIRCLE,
