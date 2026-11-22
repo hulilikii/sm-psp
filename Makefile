@@ -25,11 +25,15 @@ PSP_GE_WIN ?= 1
 # VRAM region, is added/subtracted instead of constant-colour rectangles. Colour-window clipped tints use the same strip, drawn
 # as textured sprites over the window spans. 0 keeps the original constant-colour tint rectangles for every frame.
 PSP_GE_SMOOTH_TINT ?= 0
-# PSP_GE_GOURAUD_TINT=1 (experimental, off by default, not verified on hardware) draws fixed-colour tint rows that form a dense
-# monotone ramp (HDMA colour changing every few rows) as GE Gouraud triangles instead of one rectangle per band. The error vs the
-# SNES staircase is bounded below one 5-bit level (see GrFit); frames without such a ramp keep the flat rectangles, or the strip
-# when PSP_GE_SMOOTH_TINT=1. A boot self test of the GE primitive and the GeVerify audit can switch it off at run time.
+# PSP_GE_GOURAUD_TINT=1 (experimental, off by default, not verified on hardware) replaces the band-per-band HDMA fixed-colour tint
+# by smooth GE Gouraud gradients: runs of nearby colours are chained, simplified to a few knots (Ramer-Douglas-Peucker) and drawn as
+# triangles, so the gradient keeps the colours, ends and major transitions but not its 1-level bands. Colour jumps of 4+ levels stay
+# hard edges. Frames without a smoothable stretch keep the flat rectangles (or the strip when PSP_GE_SMOOTH_TINT=1). A boot self
+# test of the GE primitive and dither, and the GeVerify audit, can switch it off at run time.
 PSP_GE_GOURAUD_TINT ?= 0
+# PSP_GE_GOURAUD_DITHER=1: the GE ordered dither is enabled on the gradient triangles (not on flat bands), which is what makes the
+# gradient smoother than RGB565 steps. 0: plain Gouraud (ramps keep 5/6/5-bit steps, only evenly spaced).
+PSP_GE_GOURAUD_DITHER ?= 1
 PSP_VTX_POOL ?= 0
 # PSP_TRIPLE=1: three frame buffers. Below 60 fps the vblank wait is skipped, so the next frame must not draw into the buffer still on screen. 0: libgu double buffering.
 PSP_TRIPLE ?= 1
@@ -104,7 +108,7 @@ CFLAGS := -O2 -G0 -fno-strict-aliasing -Ibuild/generated -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 CFLAGS += -DSM_PSP_LOG=$(PSP_LOG) -DSM_PSP_LOG_FLUSH_FRAMES=$(PSP_LOG_FLUSH_FRAMES)
 CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS) -DSM_PSP_SW_PATH=$(PSP_SW_PATH) -DSM_PSP_GE_WIN=$(PSP_GE_WIN)
-CFLAGS += -DSM_PSP_GE_SMOOTH_TINT=$(PSP_GE_SMOOTH_TINT) -DSM_PSP_GE_GOURAUD_TINT=$(PSP_GE_GOURAUD_TINT)
+CFLAGS += -DSM_PSP_GE_SMOOTH_TINT=$(PSP_GE_SMOOTH_TINT) -DSM_PSP_GE_GOURAUD_TINT=$(PSP_GE_GOURAUD_TINT) -DSM_PSP_GE_GOURAUD_DITHER=$(PSP_GE_GOURAUD_DITHER)
 CFLAGS += -DSM_PSP_VTX_POOL=$(PSP_VTX_POOL)
 CFLAGS += -DSM_PSP_TRIPLE=$(PSP_TRIPLE)
 CFLAGS += -DSM_PSP_PROBES=$(PSP_PROBES) -DSM_PSP_VRAM_DIRTY=$(PSP_VRAM_DIRTY)
@@ -162,7 +166,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_gr$(PSP_GE_GOURAUD_TINT)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_gr$(PSP_GE_GOURAUD_TINT)d$(PSP_GE_GOURAUD_DITHER)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp

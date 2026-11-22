@@ -57,11 +57,14 @@
 #define SM_PSP_GE_SMOOTH_TINT 0  /* experimental, not verified on hardware: off unless the build asks for it (PSP_GE_SMOOTH_TINT=1) */
 #endif
 
-/* Gate 5x: GE Gouraud (GU_SMOOTH) fixed-colour tint ramps. Off unless the build asks (PSP_GE_GOURAUD_TINT=1). It only ever
- * draws frames whose tint rows contain a ramp that passes GrFit() (bounded error, see there); every other tint frame keeps the
- * flat rectangles (or the Gate 5t strip when SM_PSP_GE_SMOOTH_TINT=1). Needs the boot self test (GouraudSelfTest) to pass. */
+/* Gate 5x: GE Gouraud (GU_SMOOTH) fixed-colour tint gradients. Off unless the build asks (PSP_GE_GOURAUD_TINT=1). A frame is drawn
+ * with it only if GrPlan() finds a smoothable stretch of tint rows (see there); every other tint frame keeps the flat rectangles
+ * (or the Gate 5t strip when SM_PSP_GE_SMOOTH_TINT=1). Needs the boot self test (GouraudSelfTest) to pass. */
 #ifndef SM_PSP_GE_GOURAUD_TINT
 #define SM_PSP_GE_GOURAUD_TINT 0
+#endif
+#ifndef SM_PSP_GE_GOURAUD_DITHER
+#define SM_PSP_GE_GOURAUD_DITHER 1  /* GE ordered dither on the ramp triangles only (PSP_GE_GOURAUD_DITHER=0: plain Gouraud) */
 #endif
 
 #ifndef SM_PSP_MOS_GE
@@ -610,15 +613,19 @@ static int g_ntr;
 static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2, y2), 2 = (x, y, w, h) */
 static bool g_tint_ok;      /* smooth tint enabled at build time and the eDRAM holds the strip region (set at start-up) */
 static bool g_stint_frame;  /* this frame's tint is the smooth (dithered strip) one; GeVerify logs it but keeps the strict tolerance */
-/* Gate 5x: Gouraud tint. A segment is one polygon set covering rows [r0,r1) of one tint group (same half colour, same colour
- * window): either one run drawn flat (c0 == c1, bit exact as the rectangles) or a ramp of several runs. v0/vn: its
- * ColorVerts (6 per window span: two triangles). The segments of range k are g_grseg[g_grr0[k] .. + g_grn[k]). */
+/* Gate 5x: Gouraud tint. A segment is one quad of rows [r0,r1) of one tint group (same half colour, same colour window), drawn
+ * as two triangles per window span. c0 / c1: vertex colours at its top / bottom edge. c0 == c1: a flat quad (bit exact, never
+ * dithered); c0 != c1: a gradient quad (ramp = 1). v0/vn: its ColorVerts (6 per span). The segments of range k are
+ * g_grseg[g_grr0[k] .. + g_grn[k]). g_gr_row: rows covered by a gradient quad (GeVerify uses a looser tolerance there). */
 typedef struct GrSeg { uint16_t r0, r1, v0, vn; uint8_t half, ramp, cwm, cwl, cwr; uint32_t c0, c1; } GrSeg;
-enum { kGrMinRuns = 3, kGrMinRows = 4, kGrMaxRunRows = 8, kGrMaxRows = 96, kGrTol8 = 6, kGrVerify = 8, kGrBadMax = 600 };
-static GrSeg g_grseg[kMaxLines];
+enum { kGrEdgeLevels = 4, kGrFitTol8 = 10, kGrVerify = 8, kGrBadMax = 600, kGrAuditR = 4, kGrAuditG = 8,
+       kMaxGrSegs = 2 * kMaxLines };
+static GrSeg g_grseg[kMaxGrSegs];
+static uint8_t g_gr_row[kMaxLines];
 static int g_ngr;
 static uint16_t g_grr0[kMaxTintRanges], g_grn[kMaxTintRanges];
 static bool g_gr_ok;          /* build flag set, GE present and the boot self test passed (GouraudSelfTest) */
+static bool g_gr_dither;      /* the GE dither measured as working (self test): gradient quads are dithered */
 static bool g_gtint_frame;    /* this frame's tint is drawn with Gouraud segments */
 static uint32_t g_gr_vn, g_gr_vbad, g_frames_gr;
 /* Gate 4s: rows of one subscreen colour-math mask. The blend is drawn once; each band restores its own layers. */
@@ -821,69 +828,98 @@ static void TintStripBuild(void) {
    }
  }
 
- /* Gate 5x: Gouraud tint planning.
+/* Gate 5x: Gouraud tint planning.
  *
- * What the SNES does: HDMA writes the fixed colour per scanline, 5 bits per channel, so the tint is a staircase of
- * constant bands. The GE interpolates vertex colours in 8 bits, the target is RGB565 and flat bands are BakeColor() =
- * (l << 3 | l >> 2), whose steps (8, 8, 8, 9, ...) a linear ramp cannot hit exactly. A Gouraud ramp is therefore NOT bit
- * exact; only equal vertex colours are, and those are what the flat segments use. A ramp replaces a stretch of runs only
- * if all of the following hold (GrFit), otherwise the stretch stays flat, run by run:
- *   - 3 or more runs of one tint group, adjacent rows, one colour-window state, each run at most 8 rows, 4..96 rows in all;
- *   - every channel changes monotonically along the stretch (no overshoot at a colour stop);
- *   - the vertex colours are the first and last row colours extended half a row to the polygon edges (no clamping error), and
- *     the interpolated value at every row centre is within kGrTol8 (6 of 255, 0.75 of a 5-bit level) of that row's flat
- *     colour. 6 leaves 2 for GE fixed-point interpolation error; GouraudSelfTest measures the real GE.
- * A ramp therefore differs from the staircase by less than one 5-bit level (GeVerify's "near"), never by more. */
+ * What the SNES does: HDMA writes the fixed colour per scanline, 5 bits per channel, so a gradient is a staircase of
+ * constant bands (typically one level per step, step lengths uneven). The goal here is the opposite of reproducing that
+ * staircase: keep the gradient's colours, endpoints, direction and major transitions, and replace the bands by smooth
+ * ramps. Per frame, per tint group (same half colour, range and colour window):
+ *   1. Chains. Adjacent runs (touching rows, same colour window) form one chain, unless the colour jumps by kGrEdgeLevels (4)
+ *      or more levels in any channel between two runs. Such a jump is a genuine colour stop of the picture (a horizon, a
+ *      glow edge, a rainbow band), not banding: the chain ends there and both sides stay flat. Steps of 1-3 levels are
+ *      banding and get smoothed, whatever the length of the bands on either side.
+ *   2. Knots. A run is represented by one knot at the centre of its rows, with its exact SNES colour (8-bit expanded). The
+ *      curve through the knots is the "centre-to-centre" reading of the staircase: it hits the real band colours at the
+ *      band centres and lies half a step off at the band edges. The chain's top and bottom rows stay flat up to the first
+ *      and last knot, so the chain's end colours are the SNES end colours.
+ *   3. Simplification. Ramer-Douglas-Peucker on the knots, error = largest per-channel distance (8-bit) of a dropped knot
+ *      from the straight line between its neighbours, tolerance kGrFitTol8 (10 of 255, 1.2 five-bit levels = about one SNES
+ *      step). Ripples of one step vanish into long ramps; a knot survives wherever the gradient really bends (slope or hue
+ *      change larger than a step), so no major transition is lost and no stop is added that recreates banding.
+ *   4. Quads between consecutive kept knots, c0 / c1 = the knots' colours: neighbouring quads share their edge colour, so
+ *      there is no seam, jump or colour shift at a knot. The curve stays within kGrFitTol8 of every band centre and within
+ *      about one further step of every SNES row, never on the other side of a stop.
+ * The result is quantised to RGB565 by the GE; GE dither (GrSetDither, on gradient quads only) spreads the remaining
+ * sub-level steps, otherwise a ramp would only have evenly spaced instead of uneven 1-level steps.
+ * No limit on ramp length or on the number of runs: a whole sky gradient is a handful of quads. A group with no gradient
+ * quad (plateaus, steps of 4+ levels, single runs) is not planned: GrPlan returns false and the frame is drawn as before. */
 static inline int Expand5(int l) {
   return (l << 3) | (l >> 2);
 }
 
-__attribute__((unused)) static bool GrFit(int q, int m, uint32_t *c0, uint32_t *c1) {
-  const TintRun *f = &g_tint[q], *l = &g_tint[q + m - 1];
-  const int r0 = f->r0, n = (int)l->r1 - r0;
-  int top[3], bot[3];
-  if (n < 2)
-    return false;
+typedef struct GrKnot { int16_t y; uint8_t c[3]; } GrKnot;
+
+static inline int Lv(int fix, int ch) {
+  return (fix >> (5 * ch)) & 31;
+}
+
+static inline uint32_t GrCol(const GrKnot *k) {
+  return 0xff000000u | (uint32_t)k->c[2] << 16 | (uint32_t)k->c[1] << 8 | (uint32_t)k->c[0];
+}
+
+/* Largest per-channel distance of knot i from the straight line between knots a and b (a < i < b, y strictly increasing). */
+static float GrDev(const GrKnot *k, int a, int b, int i) {
+  const float t = (float)(k[i].y - k[a].y) / (float)(k[b].y - k[a].y);
+  float w = 0.0f;
   for (int c = 0; c < 3; c++) {
-    const int sh = c * 5;
-    int dir = 0;
-    for (int t = q + 1; t < q + m; t++) {
-      int d = ((g_tint[t].fix >> sh) & 31) - ((g_tint[t - 1].fix >> sh) & 31);
-      if (d) {
-        if (dir && ((d > 0) != (dir > 0)))
-          return false;
-        dir = d;
-      }
-    }
-    const float a = (float)Expand5((f->fix >> sh) & 31), b = (float)Expand5((l->fix >> sh) & 31);
-    const float d = (b - a) / (float)(n - 1);
-    float tp = a - 0.5f * d, bt = b + 0.5f * d;
-    if (tp < 0.0f || tp > 255.0f || bt < 0.0f || bt > 255.0f)
-      return false;  /* the ends would clamp: no ramp (a constant channel has d = 0 and never gets here) */
-    top[c] = (int)(tp + 0.5f);
-    bot[c] = (int)(bt + 0.5f);
-    const float slope = (float)(bot[c] - top[c]) / (float)n;
-    for (int t = q; t < q + m; t++) {
-      const int flat = Expand5((g_tint[t].fix >> sh) & 31);
-      for (int y = g_tint[t].r0; y < g_tint[t].r1; y++) {
-        float e = (float)top[c] + slope * ((float)(y - r0) + 0.5f) - (float)flat;
-        if (e < 0.0f)
-          e = -e;
-        if (e > (float)kGrTol8)
-          return false;
-      }
+    float d = (float)k[i].c[c] - ((float)k[a].c[c] + ((float)k[b].c[c] - (float)k[a].c[c]) * t);
+    if (d < 0.0f)
+      d = -d;
+    if (d > w)
+      w = d;
+  }
+  return w;
+}
+
+/* keep[] marks the knots of the simplified curve; keep[a] and keep[b] are set by the caller. Depth <= number of knots. */
+static void GrRdp(const GrKnot *k, uint8_t *keep, int a, int b) {
+  float worst = 0.0f;
+  int wi = -1;
+  for (int i = a + 1; i < b; i++) {
+    const float d = GrDev(k, a, b, i);
+    if (d > worst) {
+      worst = d;
+      wi = i;
     }
   }
-  *c0 = 0xff000000u | (uint32_t)top[2] << 16 | (uint32_t)top[1] << 8 | (uint32_t)top[0];
-  *c1 = 0xff000000u | (uint32_t)bot[2] << 16 | (uint32_t)bot[1] << 8 | (uint32_t)bot[0];
+  if (wi >= 0 && worst > (float)kGrFitTol8) {
+    keep[wi] = 1;
+    GrRdp(k, keep, a, wi);
+    GrRdp(k, keep, wi, b);
+  }
+}
+
+static bool GrPush(int r0, int r1, uint32_t c0, uint32_t c1, const TintRun *f, int *ramps) {
+  if (g_ngr >= kMaxGrSegs || r1 <= r0)
+    return false;
+  g_grseg[g_ngr++] = (GrSeg){(uint16_t)r0, (uint16_t)r1, 0, 0, f->half, (uint8_t)(c0 != c1), f->cwm, f->cwl, f->cwr, c0, c1};
+  if (c0 != c1) {
+    (*ramps)++;
+    for (int y = r0; y < r1 && y < kMaxLines; y++)
+      g_gr_row[y] = 1;
+  }
   return true;
 }
 
-/* Builds g_grseg for the frame's tint ranges. True when at least one ramp was found: then the frame is drawn with the
- * segments (flat ones included, so the ranges draw exactly as before apart from the ramps). False: nothing changes. */
+/* Builds g_grseg for the frame's tint ranges. True when at least one gradient quad exists: then the frame is drawn with the
+ * segments (flat ones included, so everything else draws exactly as before). False: nothing changes. */
 __attribute__((unused)) static bool GrPlan(void) {
-  int ramps = 0, ramp_rows = 0;
+  static GrKnot kn[kMaxLines];
+  static uint8_t keep[kMaxLines];
+  static int glogged;
+  int ramps = 0, chains = 0, knots = 0, kept = 0;
   g_ngr = 0;
+  memset(g_gr_row, 0, sizeof(g_gr_row));
   for (int k = 0; k < g_ntr; k++) {
     g_grr0[k] = (uint16_t)g_ngr;
     const int end = g_trange[k].first + g_trange[k].n;
@@ -893,46 +929,61 @@ __attribute__((unused)) static bool GrPlan(void) {
         j++;
       for (int q = i; q < j;) {
         const TintRun *f = &g_tint[q];
-        int bm = 0, brows = 0, rows = (int)f->r1 - (int)f->r0;
-        uint32_t bc0 = 0, bc1 = 0;
-        if (rows <= kGrMaxRunRows) {
-          for (int m = 2; q + m <= j; m++) {
-            const TintRun *p = &g_tint[q + m - 1];
-            const int len = (int)p->r1 - (int)p->r0;
-            rows += len;
-            if (p->r0 != p[-1].r1 || p->cwm != f->cwm || p->cwl != f->cwl || p->cwr != f->cwr || len > kGrMaxRunRows ||
-                rows > kGrMaxRows)
-              break;
-            uint32_t a, b;
-            if (!GrFit(q, m, &a, &b))
-              break;
-            bm = m;
-            brows = rows;
-            bc0 = a;
-            bc1 = b;
+        int m = 1;
+        for (; q + m < j; m++) {  /* the chain: touching rows, one colour window, no jump of kGrEdgeLevels or more */
+          const TintRun *p = &g_tint[q + m];
+          bool edge = p->r0 != p[-1].r1 || p->cwm != f->cwm || p->cwl != f->cwl || p->cwr != f->cwr;
+          for (int c = 0; c < 3 && !edge; c++) {
+            int d = Lv(p->fix, c) - Lv(p[-1].fix, c);
+            edge = (d < 0 ? -d : d) >= kGrEdgeLevels;
           }
+          if (edge)
+            break;
         }
-        GrSeg *sg = &g_grseg[g_ngr++];
-        if (bm >= kGrMinRuns && brows >= kGrMinRows) {
-          *sg = (GrSeg){f->r0, g_tint[q + bm - 1].r1, 0, 0, f->half, 1, f->cwm, f->cwl, f->cwr, bc0, bc1};
-          ramps++;
-          ramp_rows += brows;
-          q += bm;
-        } else {
+        const TintRun *l = &g_tint[q + m - 1];
+        chains++;
+        bool ok;
+        if (m == 1) {
           const uint32_t col = BakeColor(f->fix, 15, false);
-          *sg = (GrSeg){f->r0, f->r1, 0, 0, f->half, 0, f->cwm, f->cwl, f->cwr, col, col};
-          q++;
+          ok = GrPush(f->r0, f->r1, col, col, f, &ramps);
+        } else {
+          for (int t = 0; t < m; t++) {
+            const TintRun *r = &g_tint[q + t];
+            kn[t].y = (int16_t)(r->r0 + ((int)r->r1 - (int)r->r0) / 2);  /* strictly increasing: the next run starts at r1 */
+            for (int c = 0; c < 3; c++)
+              kn[t].c[c] = (uint8_t)Expand5(Lv(r->fix, c));
+            keep[t] = 0;
+          }
+          keep[0] = keep[m - 1] = 1;
+          GrRdp(kn, keep, 0, m - 1);
+          ok = true;
+          if (kn[0].y > f->r0)
+            ok = GrPush(f->r0, kn[0].y, GrCol(&kn[0]), GrCol(&kn[0]), f, &ramps);
+          int a = 0;
+          for (int t = 1; t < m && ok; t++)
+            if (keep[t]) {
+              ok = GrPush(kn[a].y, kn[t].y, GrCol(&kn[a]), GrCol(&kn[t]), f, &ramps);
+              a = t;
+              kept++;
+            }
+          if (ok)
+            ok = GrPush(kn[m - 1].y, l->r1, GrCol(&kn[m - 1]), GrCol(&kn[m - 1]), f, &ramps);
+          knots += m;
         }
+        if (!ok) {  /* cannot happen (<= 1.5 segments per run, kMaxGrSegs = 2 * kMaxLines); fall back rather than overrun */
+          g_ngr = 0;
+          return false;
+        }
+        q += m;
       }
       i = j;
     }
     g_grn[k] = (uint16_t)(g_ngr - g_grr0[k]);
   }
-  static int glogged;
-  if (ramps && (glogged < 24 && (g_frame & 31) == 0)) {
+  if (ramps && glogged < 24 && (g_frame & 31) == 0) {
     glogged++;
-    PspLog("grtint f=%u: runs=%d segs=%d ramps=%d ramprows=%d ranges=%d", (unsigned)g_frame, g_ntint, g_ngr, ramps,
-           ramp_rows, g_ntr);
+    PspLog("grtint f=%u: runs=%d chains=%d knots=%d kept=%d segs=%d gradient quads=%d ranges=%d", (unsigned)g_frame, g_ntint,
+           chains, knots, kept, g_ngr, ramps, g_ntr);
   }
   return ramps > 0;
 }
@@ -4044,8 +4095,11 @@ static void GeVerify(void) {
   uint16_t bsw = 0, bge = 0;
   static uint16_t rowbad[kMaxLines];
   memset(rowbad, 0, sizeof(rowbad));
-  const int tr = 1, tg = 2;
-  for (int y = 0; y < g_line_count; y++)
+  uint32_t badg = 0;  /* gate 5x: pixels of Gouraud gradient rows beyond their (looser) tolerance; not counted in bad */
+  for (int y = 0; y < g_line_count; y++) {
+    /* a gradient row is smoothed on purpose (curve within ~1.2 levels of the SNES bands + dither + quantisation) */
+    const bool grr = g_gtint_frame && g_gr_row[y];
+    const int tr = grr ? kGrAuditR : 1, tg = grr ? kGrAuditG : 2;
     for (int x = 0; x < kGameWidth; x++) {
       uint16_t sw = Rgb565(g_framebuffer + (y * kGameWidth + x) * 4), g = ge[(kTop + y) * 512 + kLeft + x];
       if (sw == g) {
@@ -4054,6 +4108,8 @@ static void GeVerify(void) {
         int dr = (sw & 31) - (g & 31), dg = ((sw >> 5) & 63) - ((g >> 5) & 63), db = (sw >> 11) - (g >> 11);
         if (dr >= -tr && dr <= tr && dg >= -tg && dg <= tg && db >= -tr && db <= tr) {
           near++;
+        } else if (grr) {
+          badg++;
         } else {
           rowbad[y]++;
           if (!bad) {
@@ -4066,13 +4122,14 @@ static void GeVerify(void) {
         }
       }
     }
+  }
   if (g_stint_frame)  /* smooth tint blends colour bands on purpose: this shows how far it departs from the strict comparison */
     PspLog("geaudit: smooth tint f=%u exact=%u near=%u bad=%u", (unsigned)g_frame, (unsigned)exact, (unsigned)near, (unsigned)bad);
-  if (g_gtint_frame) {  /* gate 5x: ramps differ from the staircase by < 1 level, so a frame with many bad pixels disables the path */
+  if (g_gtint_frame) {  /* gate 5x: gradient rows are audited with a loose tolerance; a frame with many bad ones disables the path */
     g_gr_vn++;
-    g_gr_vbad += bad;
-    PspLog("geaudit: gouraud tint f=%u exact=%u near=%u bad=%u", (unsigned)g_frame, (unsigned)exact, (unsigned)near,
-           (unsigned)bad);
+    g_gr_vbad += badg;
+    PspLog("geaudit: gouraud tint f=%u exact=%u near=%u bad=%u gradient-bad=%u", (unsigned)g_frame, (unsigned)exact,
+           (unsigned)near, (unsigned)bad, (unsigned)badg);
     if (g_gr_vn >= 3 && g_gr_vbad / g_gr_vn > (uint32_t)kGrBadMax) {
       g_gr_ok = false;
       PspLog("grverify: gouraud tint differs, GE Gouraud path disabled (flat / strip tint from now on)");
@@ -4472,6 +4529,23 @@ static inline void GeDraw(int vtype, int n, const void *v) {
 static inline void GeDrawTri(int vtype, int n, const void *v) {
   PROF(g_c_draws++; g_c_verts += (uint32_t)n;)
   sceGuDrawArray(GU_TRIANGLES, vtype, n, NULL, v);
+}
+
+/* Gate 5x: GE ordered-dither matrix, 4 x 4 Bayer spanning one 5-bit level (8 units of 8 bits): -4..3 + bias. Whether the GE
+ * truncates after adding it (then 0..7 is unbiased, bias 4) or rounds (then -4..3, bias 0) is measured by GouraudSelfTest, which
+ * stores the choice in g_gr_dbias. Set per list, like the rest of the scene state; GU_DITHER itself is enabled only around
+ * gradient quads. */
+static int g_gr_dbias;
+static void GrSetDither(int bias) {
+  static const uint8_t kB[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+  ScePspIMatrix4 m;
+#define GR_D(r, c) ((int)(kB[r][c] >> 1) - 4 + bias)
+  m.x.x = GR_D(0, 0); m.x.y = GR_D(0, 1); m.x.z = GR_D(0, 2); m.x.w = GR_D(0, 3);
+  m.y.x = GR_D(1, 0); m.y.y = GR_D(1, 1); m.y.z = GR_D(1, 2); m.y.w = GR_D(1, 3);
+  m.z.x = GR_D(2, 0); m.z.y = GR_D(2, 1); m.z.z = GR_D(2, 2); m.z.w = GR_D(2, 3);
+  m.w.x = GR_D(3, 0); m.w.y = GR_D(3, 1); m.w.z = GR_D(3, 2); m.w.w = GR_D(3, 3);
+#undef GR_D
+  sceGuSetDither(&m);
 }
 
 enum { kPspButtonIconSlots = 8 };
@@ -5781,11 +5855,14 @@ static uint32_t ListBytesNeeded(int total, int obj_quads, int obj_np, bool blend
   geom += (uint32_t)g_ntint * 4 * sizeof(ColorVert);
 #endif
 #if SM_PSP_GE_GOURAUD_TINT
-  geom += (uint32_t)g_ntint * 12 * sizeof(ColorVert);  /* gate 5x worst case: one segment per run, 2 window spans of 6 vertices each */
+  geom += (uint32_t)g_ntint * 18 * sizeof(ColorVert);  /* gate 5x worst case: 1.5 segments per run (chain of m runs: <= m + 1 quads), 2 window spans of 6 vertices each */
 #endif
   uint32_t passes = 1 + (blend ? (g_nbband > 1 ? (uint32_t)g_nbband : 1u) : 0u) + (tint ? (uint32_t)g_ntr : 0u);
   uint32_t per_pass = 2 * kLayers * 8 + 2 + mos_draws + (uint32_t)g_nspr * (uint32_t)obj_np + (uint32_t)g_m7_bnblk;  /* BG, M7 + backdrop (+ a bind and a draw per block), OBJ segments */
   uint32_t draws = passes * per_pass + 48 + (sobj ? (uint32_t)g_nspr : 0u) + (uint32_t)g_ntint + 16;
+#if SM_PSP_GE_GOURAUD_TINT
+  draws += 2u * (uint32_t)g_ntint;  /* gate 5x: a draw (and a dither toggle) per flat/gradient batch, <= 1.5 segments per run */
+#endif
   return geom + draws * kDrawCmdBytes + kListFixedBytes + kListAllocBytes + kListSlackBytes;
 }
 
@@ -7043,20 +7120,33 @@ static bool DrawGe(void) {
       } else {
         sceGuDisable(GU_TEXTURE_2D);
       }
-      if (gr_tint) {  /* gate 5x: same blend set-up as the flat rectangles; smooth shading only around the triangles */
+      if (gr_tint) {  /* gate 5x: same blend set-up as the flat rectangles; smooth shading, and dither on gradient quads, only around the triangles */
         sceGuShadeModel(GU_SMOOTH);
+        if (g_gr_dither)
+          GrSetDither(g_gr_dbias);
+        bool dith = false;
         for (int s = g_grr0[k]; s < g_grr0[k] + g_grn[k];) {
           int e = s;
-          while (e < g_grr0[k] + g_grn[k] && g_grseg[e].half == g_grseg[s].half)
+          while (e < g_grr0[k] + g_grn[k] && g_grseg[e].half == g_grseg[s].half && g_grseg[e].ramp == g_grseg[s].ramp)
             e++;
           const unsigned f = g_grseg[s].half ? 0x00808080u : 0x00ffffffu;
           const int nvert = g_grseg[e - 1].v0 + g_grseg[e - 1].vn - g_grseg[s].v0;
           if (nvert > 0) {
+            const bool want = g_gr_dither && g_grseg[s].ramp;  /* flat quads stay bit exact: never dithered */
+            if (want != dith) {
+              if (want)
+                sceGuEnable(GU_DITHER);
+              else
+                sceGuDisable(GU_DITHER);
+              dith = want;
+            }
             sceGuBlendFunc(rg->neg ? GU_REVERSE_SUBTRACT : GU_ADD, GU_FIX, GU_FIX, f, f);
             GeDrawTri(kVtColor, nvert, grv + g_grseg[s].v0);
           }
           s = e;
         }
+        if (dith)
+          sceGuDisable(GU_DITHER);
         sceGuShadeModel(GU_FLAT);
       }
       for (int i = rg->first; !gr_tint && i < rg->first + rg->n;) {  /* the segments above replace this loop */
@@ -7319,12 +7409,17 @@ static void UvSelfTest(void) {
 }
 
 /* Gate 5x boot self test of the GE Gouraud primitive in the exact state the tint uses (GU_TRIANGLES, GU_SMOOTH, through mode,
- * additive GU_FIX blend onto black, no dither, RGB565 draw buffer 0, read back through the uncached alias). Disables the path unless
+ * additive GU_FIX blend onto black, RGB565 draw buffer 0, read back through the uncached alias). Disables the path unless
  * (a) a flat quad of two triangles covers exactly its rectangle, once (a pixel on the shared diagonal blended twice would show as 2x,
- *     a gap as 0) and not one pixel beyond it, and (b) a vertical 0 -> 128 ramp follows the model within the same tolerances GeVerify
- *     uses (1 level on R/B, 2 on G) and is constant along x. Draws into the draw buffer before the first frame, like UvSelfTest. */
+ *     a gap as 0) and not one pixel beyond it, and
+ * (b) a vertical 0 -> 128 ramp without dither follows the model within the tolerances GeVerify uses (1 level on R/B, 2 on G) and is
+ *     constant along x, and
+ * (c) with SM_PSP_GE_GOURAUD_DITHER: a slow 0 -> 32 ramp over 64 rows, GU_DITHER on, is really dithered (rows mix two levels) and
+ *     unbiased (row averages follow the model within 0.3 level on R/B, 0.6 on G; no pixel more than 1.5 levels away). The whole
+ *     point of the gradients is sub-level smoothness; if the dither is not there the flat tint is the better picture.
+ * Draws into the draw buffer before the first frame, like UvSelfTest. */
 __attribute__((unused)) static bool GouraudSelfTest(void) {
-  enum { kX = 16, kW = 32, kYA = 40, kYB = 80, kH = 16 };
+  enum { kX = 16, kW = 32, kYA = 40, kYB = 80, kH = 16, kYC = 120, kHC = 64, kXC = 48 };
   const uint16_t *px = (const uint16_t *)g_vram_u;  /* draw buffer 0, 5650, stride 512 */
   sceGuStart(GU_DIRECT, g_gu_list);
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
@@ -7337,12 +7432,14 @@ __attribute__((unused)) static bool GouraudSelfTest(void) {
   sceGuEnable(GU_BLEND);
   sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x00ffffffu, 0x00ffffffu);
   sceGuShadeModel(GU_SMOOTH);
-  ColorVert *v = sceGuGetMemory(12 * sizeof(ColorVert));
-  const uint32_t flat = 0xff202020u, lo = 0xff000000u, hi = 0xff808080u;
-  const int16_t xa = kX, xb = kX + kW;
-  const struct { int16_t y0, y1; uint32_t c0, c1; } q[2] = {{kYA, kYA + kH, flat, flat}, {kYB, kYB + kH, lo, hi}};
-  for (int i = 0; i < 2; i++) {
+  ColorVert *v = sceGuGetMemory(24 * sizeof(ColorVert));
+  const uint32_t flat = 0xff202020u, lo = 0xff000000u, hi = 0xff808080u, hi2 = 0xff202020u;
+  const struct { int16_t x0, y0, y1; uint32_t c0, c1; } q[4] = {
+      {kX, kYA, kYA + kH, flat, flat}, {kX, kYB, kYB + kH, lo, hi},      /* (a), (b): no dither */
+      {kX, kYC, kYC + kHC, lo, hi2}, {kX + kXC, kYC, kYC + kHC, lo, hi2}};  /* (c): the two dither biases */
+  for (int i = 0; i < 4; i++) {
     ColorVert *c = v + 6 * i;
+    const int16_t xa = q[i].x0, xb = (int16_t)(q[i].x0 + kW);
     c[0] = (ColorVert){q[i].c0, xa, q[i].y0, 0};
     c[1] = (ColorVert){q[i].c0, xb, q[i].y0, 0};
     c[2] = (ColorVert){q[i].c1, xa, q[i].y1, 0};
@@ -7351,6 +7448,14 @@ __attribute__((unused)) static bool GouraudSelfTest(void) {
     c[5] = (ColorVert){q[i].c1, xb, q[i].y1, 0};
   }
   GeDrawTri(kVtColor, 12, v);
+#if SM_PSP_GE_GOURAUD_DITHER
+  for (int cand = 0; cand < 2; cand++) {
+    GrSetDither(cand ? 4 : 0);
+    sceGuEnable(GU_DITHER);
+    GeDrawTri(kVtColor, 6, v + 12 + 6 * cand);
+    sceGuDisable(GU_DITHER);
+  }
+#endif
   sceGuShadeModel(GU_FLAT);
   sceGuDisable(GU_BLEND);
   sceGuFinish();
@@ -7382,9 +7487,59 @@ __attribute__((unused)) static bool GouraudSelfTest(void) {
         maxd = ad;
     }
   }
-  const bool ok = covbad == 0 && rampbad == 0;
-  PspLog("gouraud selftest: coverage bad=%d ramp bad=%d maxdiff=%d level(s) -> GE Gouraud tint %s", covbad, rampbad, maxd,
+  bool dither_ok = true;
+  int mixed = 0, dbad = 0, bias = 0;
+  float errr = 0.0f, errg = 0.0f;
+#if SM_PSP_GE_GOURAUD_DITHER
+  dither_ok = false;
+  for (int cand = 0; cand < 2; cand++) {
+    int cmixed = 0, cbad = 0;
+    float cr = 0.0f, cg = 0.0f;
+    for (int y = kYC; y < kYC + kHC; y++) {
+      const float m = 32.0f * ((float)(y - kYC) + 0.5f) / (float)kHC;  /* modelled 8-bit value at the row centre */
+      int sr = 0, sg = 0, rmin = 99, rmax = -1;
+      for (int x = kX + cand * kXC; x < kX + cand * kXC + kW; x++) {
+        const uint16_t g = px[y * 512 + x];
+        const int r5 = g & 31, g6 = (g >> 5) & 63;
+        sr += r5;
+        sg += g6;
+        if (r5 < rmin) rmin = r5;
+        if (r5 > rmax) rmax = r5;
+        const float dr = (float)r5 - m / 8.0f, dg = (float)g6 - m / 4.0f;
+        if (dr < -1.5f || dr > 1.5f || dg < -3.0f || dg > 3.0f)
+          cbad++;
+      }
+      if (rmax > rmin)
+        cmixed++;
+      if (y >= kYC + 4 && y < kYC + kHC - 4) {  /* away from the ends, where the 0 floor biases the mean */
+        const float e1 = (float)sr / (float)kW - m / 8.0f, e2 = (float)sg / (float)kW - m / 4.0f;
+        cr += e1 < 0.0f ? -e1 : e1;
+        cg += e2 < 0.0f ? -e2 : e2;
+      }
+    }
+    cr /= (float)(kHC - 8);
+    cg /= (float)(kHC - 8);
+    PspLog("gouraud selftest: dither bias %d: mixed rows=%d err r=%d g=%d (1/100 level) beyond 1.5 levels=%d", cand ? 4 : 0, cmixed,
+           (int)(cr * 100.0f), (int)(cg * 100.0f), cbad);
+    const bool good = cmixed >= 24 && cr <= 0.3f && cg <= 0.6f && cbad == 0;
+    if (good && (!dither_ok || cr + cg < errr + errg)) {  /* the unbiased one of the two */
+      dither_ok = true;
+      bias = cand ? 4 : 0;
+      mixed = cmixed;
+      dbad = cbad;
+      errr = cr;
+      errg = cg;
+    }
+  }
+  g_gr_dbias = bias;
+#endif
+  const bool base_ok = covbad == 0 && rampbad == 0;
+  const bool ok = base_ok && dither_ok;
+  g_gr_dither = SM_PSP_GE_GOURAUD_DITHER && ok;
+  PspLog("gouraud selftest: coverage bad=%d ramp bad=%d maxdiff=%d level(s); dither %s (bias %d) mixed rows=%d/%d -> GE Gouraud tint %s",
+         covbad, rampbad, maxd, SM_PSP_GE_GOURAUD_DITHER ? (dither_ok ? "ok" : "FAILED") : "off", bias, mixed, (int)kHC,
          ok ? "enabled" : "DISABLED");
+  (void)dbad;
   return ok;
 }
 
