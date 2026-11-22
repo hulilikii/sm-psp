@@ -4963,6 +4963,10 @@ static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1,
 // is clipped on the CPU to the gameplay viewport (no scissor needed); the image maps 256x192 -> 360x270 exactly like the
 // normal composition. Where the displaced image no longer covers the old room (the 32 source rows the HUD hides on an up
 // door, or the camera offset across the door) its nearest edge row/column is repeated, so tubes and walls continue.
+#ifndef SM_PSP_DOOR_UP_LIVE
+#define SM_PSP_DOOR_UP_LIVE 0  /* 1 = upward doors: no edge repeat above the old image, the live new room shows there (diagnostic) */
+#endif
+
 static int DoorDispPx(int src_px) {  /* source pixels -> viewport pixels (360/256 = 270/192 = 45/32), rounded */
   return (src_px * 45 + (src_px >= 0 ? 16 : -16)) / 32;
 }
@@ -4994,7 +4998,7 @@ static void DrawDoorTransition(const ComposeSrc *s) {
     if (g_door_armed) {
       const bool horiz = g_door_direction < 2;  /* horizontal door: the camera offset across it is vertical */
       const float top = 0.5f, bottom = (float)kDoorRows - 0.5f, left = 0.5f, right = (float)kGameWidth - 0.5f;
-      if (dy > vy0 && g_door_direction != 2) {  /* above the image: row 0 repeated */
+      if (dy > vy0 && g_door_direction != 2 && !(SM_PSP_DOOR_UP_LIVE && g_door_direction == 3)) {  /* above the image: row 0 repeated */
         int h = dy - vy0;
         if (!horiz && h > kHiddenRows)
           h = kHiddenRows;
