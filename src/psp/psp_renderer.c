@@ -95,6 +95,10 @@
 
 #define PSP_VBLANK_GATE 1  /* wait for vblank only when running ahead of the panel */
 
+#ifndef SM_PSP_VERIFY_GAP
+#define SM_PSP_VERIFY_GAP 12  /* frames between two software-PPU verification frames in steady state (0: back to back, as before) */
+#endif
+
 #ifndef SM_PSP_ASYNC
 #define SM_PSP_ASYNC 0  /* Present() queues a GE frame and returns; the next EndDraw waits for the GE and flips it. 1: scene list + compose list (g_gu_list2) queued back to back; 2: scene and compose in ONE list */
 #endif
@@ -504,6 +508,10 @@ static float g_uvh[2] = {0.5f, 0.5f}; /* texture coordinate offset in pixels at 
 static bool g_verify_now, g_audit_now;
 static bool g_multisub_ok = true;   /* cleared if the first verified multi-layer subscreen frames differ from software */
 static bool g_frame_multisub, g_want_ms_verify;
+/* Spacing of the software-PPU verification frames (see EndDraw): a verification frame costs 25-65 ms, and the first frames of
+ * a new class (kM7BVerify = 24 for the Mode 7 block path, 8 for most others) used to run on every second frame, which is a
+ * pause of about a second. */
+static uint32_t g_verify_next, g_verify_armed, g_verify_deferred;
 static uint32_t g_ms_vn, g_ms_vbad;
 static uint32_t g_bright_rows, g_br_vn;  /* rows drawn through the brightness multiply this frame; verified frames that had some */
 enum { kBrightVerify = 8 };
@@ -9094,10 +9102,16 @@ static void PspRenderer_EndDraw(void) {
     g_ovf_watch--;
     g_ppu_skip_draw = false;
   }
-  if (g_want_ms_verify) {  /* the first multi-layer subscreen frames are checked against the software image */
+  if (g_want_ms_verify) {  /* the first frames of each class are checked against the software image */
     g_want_ms_verify = false;
-    g_ppu_skip_draw = false;
-    g_audit_now = true;
+    if ((int32_t)(g_frame - g_verify_next) >= 0) {  /* at most one such frame per SM_PSP_VERIFY_GAP frames: a want that */
+      g_verify_next = g_frame + (uint32_t)SM_PSP_VERIFY_GAP;  /* falls inside the gap is dropped, the class asks again */
+      g_verify_armed++;                                       /* on the next frame it is still being verified */
+      g_ppu_skip_draw = false;
+      g_audit_now = true;
+    } else {
+      g_verify_deferred++;
+    }
   }
 #if SM_PSP_LOG
   if (g_ge_active && kAuditFrames && (g_frame + 1) % kAuditFrames == 0) {  /* next frame: software PPU draws too, GE image gets checked */
@@ -9184,6 +9198,8 @@ static void PspRenderer_EndDraw(void) {
            (unsigned)(g_peak_list >> 10), (int)(kListBytes >> 10), (unsigned)(g_peak_vtx >> 10),
            (int)(kVtxPoolBytes >> 10), (int)SM_PSP_VTX_POOL);
     g_peak_tiles = g_peak_list = g_peak_vtx = 0;
+    PspLog("  verify: gap=%d armed=%u deferred=%u", (int)SM_PSP_VERIFY_GAP, (unsigned)g_verify_armed, (unsigned)g_verify_deferred);
+    g_verify_armed = g_verify_deferred = 0;
     PspLog("  rowcache: hit=%u miss=%u", (unsigned)g_rc_hit, (unsigned)g_rc_miss);
     g_rc_hit = g_rc_miss = 0;
     PspLog("  capreuse: reused=%u full=%u chk=%u bad=%u on=%d win=%u winon=%d", (unsigned)g_cap_n_reuse,

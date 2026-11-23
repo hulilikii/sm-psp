@@ -33,7 +33,7 @@ PSP_GE_SMOOTH_TINT ?= 0
 PSP_GE_GOURAUD_TINT ?= 0
 # PSP_GE_GOURAUD_DITHER=1: the GE ordered dither is enabled on the gradient triangles (not on flat bands), which is what makes the
 # gradient smoother than RGB565 steps. 0: plain Gouraud (ramps keep 5/6/5-bit steps, only evenly spaced).
-PSP_GE_GOURAUD_DITHER ?= 1
+PSP_GE_GOURAUD_DITHER ?= 0
 PSP_VTX_POOL ?= 0
 # PSP_TRIPLE=1: three frame buffers. Below 60 fps the vblank wait is skipped, so the next frame must not draw into the buffer still on screen. 0: libgu double buffering.
 PSP_TRIPLE ?= 1
@@ -65,6 +65,8 @@ PSP_LAYER_IMG ?= 3
 PSP_TILE_GEN ?= 0
 # PSP_ASYNC=1 or 2: a GE frame is queued by Present() and completed (GE wait, vblank pacing, flip) at the next EndDraw, so the game logic overlaps GE drawing. Costs display latency when the frame was already vsync-bound. 1: scene list and compose list (own 256 KB list) queued back to back. 2: scene and compose commands in ONE list (no second list, no extra RAM). Both check a completion marker before each flip. 0: wait for the GE in the same frame.
 PSP_ASYNC ?= 0
+# PSP_VERIFY_GAP: while the GE draws without the software PPU, the first frames of each GE feature are still drawn by both and compared (a 25-65 ms frame each, 24 for the Mode 7 block path). At most one such frame per this many frames; 0 = every other frame as before. Coverage is unchanged, it just takes longer.
+PSP_VERIFY_GAP ?= 12
 # PSP_M7_REUSE=1 (Gate 5t): a mode 7 image row whose matrix/flags are unchanged since it was built and whose plane (VRAM pages 0-63) was not written keeps its pixels (exact; log builds re-render every 16th reusing frame and compare). 0: every row is rendered every frame.
 PSP_M7_REUSE ?= 1
 # PSP_SWIZZLE (Gate 5u) is a bit mask: 1 = swizzle the BG/OBJ tile atlases, 2 = swizzle the mode 7 tile atlas. 0 = linear (default until A/B timed on hardware).
@@ -123,6 +125,7 @@ CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
 CFLAGS += -DSM_PSP_TILE_GEN=$(PSP_TILE_GEN)
 CFLAGS += -DSM_PSP_ASYNC=$(PSP_ASYNC)
+CFLAGS += -DSM_PSP_VERIFY_GAP=$(PSP_VERIFY_GAP)
 CFLAGS += -DPSP_AUDIO_ENABLED=$(PSP_AUDIO) -DPSP_AUDIO_ME=$(PSP_AUDIO_ME) -DSM_PSP_ME_LOG=$(ME_LOG_ON)
 
 # SPC/DSP code runs on the Media Engine, which has no libc/syscalls: an assert()
@@ -166,7 +169,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_gr$(PSP_GE_GOURAUD_TINT)d$(PSP_GE_GOURAUD_DITHER)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_gr$(PSP_GE_GOURAUD_TINT)d$(PSP_GE_GOURAUD_DITHER)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_vg$(PSP_VERIFY_GAP)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
