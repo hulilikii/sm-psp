@@ -52,16 +52,20 @@ static void CheckStructure(const char *name) {
     const GrSeg *g = &g_grseg[s];
     if (!allow_gap || s == 0) CHECK(g->r0 == next, "%s: seg %d starts at %d, expected %d", name, s, g->r0, next);
     CHECK(g->r1 > g->r0, "%s: empty seg", name);
-    CHECK(g->ramp == (g->c0 != g->c1 || !GrExact(g->c0)), "%s: ramp flag", name);
-    CHECK(g->ramp || g->c0 == g->c1, "%s: flat quad with two colours", name);
+    CHECK(g->ramp || (g->c0 == g->c1 && GrExact(g->c0)), "%s: a ramp is not flagged for dither", name);
     next = g->r1;
     bool newrange = false;
     for (int k = 1; k < g_ntr; k++) if (s == g_grr0[k]) newrange = true;
     if (s > 0 && !newrange && g_grseg[s - 1].r1 == g->r0 && g_grseg[s - 1].half == g->half) {
-      /* continuity: shared edge colour, or a genuine edge of kGrEdgeLevels or more levels in some channel */
+      /* continuity: shared edge colour, or a genuine edge (summed colour difference above kGrEdgeSum) */
       const GrSeg *p = &g_grseg[s - 1];
       bool same = p->c1 == g->c0, edge = false;
-      for (int ch = 0; ch < 3; ch++) { int d = (int)((p->c1 >> (8 * ch)) & 255) - (int)((g->c0 >> (8 * ch)) & 255); if (d < 0) d = -d; if (d >= kGrEdgeLevels * 8) edge = true; }
+      int sum = 0;
+      for (int ch = 0; ch < 3; ch++) { int d = (int)((p->c1 >> (8 * ch)) & 255) - (int)((g->c0 >> (8 * ch)) & 255); sum += d < 0 ? -d : d; }
+      edge = sum > kGrEdgeSum;
+#if SM_PSP_GR_DITHER_CHAIN
+      CHECK(!same || p->cwm != g->cwm || p->cwl != g->cwl || p->cwr != g->cwr || p->ramp == g->ramp, "%s: dither state changes inside a chain (seg %d / %d)", name, s - 1, s);
+#endif
       CHECK(same || edge || p->cwm != g->cwm || p->cwl != g->cwl || p->cwr != g->cwr, "%s: seam between seg %d and %d (%06x vs %06x)", name, s - 1, s, p->c1 & 0xffffff, g->c0 & 0xffffff);
     }
   }
@@ -73,7 +77,7 @@ static void CheckStructure(const char *name) {
 }
 /* fit checks. The profile of one channel stays within half the step to the neighbouring plateau of the plateau's level (a plateau = the
  * touching runs of equal level in that channel), so every row stays within that + the planner's tolerance + rounding of its SNES colour.
- * Neighbours across a hard edge (kGrEdgeLevels or more) or a row gap are not part of the chain and do not widen the allowance. */
+ * Neighbours across a hard edge (more than kGrEdgeSum) or a row gap are not part of the chain and do not widen the allowance. */
 static int Lvl(int i, int ch) { return (g_tint[i].fix >> (5 * ch)) & 31; }
 static void CheckFit(const char *name) {
   for (int i = 0; i < g_ntint; i++)
@@ -81,11 +85,11 @@ static void CheckFit(const char *name) {
       int lo = i, hi = i, jd = 1;
       while (lo > 0 && g_tint[lo - 1].r1 == g_tint[lo].r0 && Lvl(lo - 1, ch) == Lvl(i, ch)) lo--;
       while (hi + 1 < g_ntint && g_tint[hi].r1 == g_tint[hi + 1].r0 && Lvl(hi + 1, ch) == Lvl(i, ch)) hi++;
-      if (lo > 0 && g_tint[lo - 1].r1 == g_tint[lo].r0) { int d = abs(Lvl(lo - 1, ch) - Lvl(i, ch)); if (d < kGrEdgeLevels && d > jd) jd = d; }
-      if (hi + 1 < g_ntint && g_tint[hi].r1 == g_tint[hi + 1].r0) { int d = abs(Lvl(hi + 1, ch) - Lvl(i, ch)); if (d < kGrEdgeLevels && d > jd) jd = d; }
+      if (lo > 0 && g_tint[lo - 1].r1 == g_tint[lo].r0) { int d = abs(Lvl(lo - 1, ch) - Lvl(i, ch)); if (GrDiff8(g_tint[lo - 1].fix, g_tint[lo].fix) <= kGrEdgeSum && d > jd) jd = d; }
+      if (hi + 1 < g_ntint && g_tint[hi].r1 == g_tint[hi + 1].r0) { int d = abs(Lvl(hi + 1, ch) - Lvl(i, ch)); if (GrDiff8(g_tint[hi].fix, g_tint[hi + 1].fix) <= kGrEdgeSum && d > jd) jd = d; }
 #if SM_PSP_GR_RADIUS > 0
-      /* smoothed profile: a row stays within the level span of its smoothing window (kGrSmoothRange) of its own colour */
-      const float allow = 8.3f * (float)kGrSmoothRange + g_gr_tolmax + 1.5f; (void)jd;
+      /* smoothed profile: a window never takes a colour further than kGrEdgeSum from its centre, so a row stays that close + the fit tolerance */
+      const float allow = (float)kGrEdgeSum + g_gr_tolmax + 1.5f; (void)jd;
 #else
       const float allow = 8.3f * (jd > 1 ? (float)jd / 2.0f : 0.5f) + g_gr_tolmax + 1.5f;
 #endif
@@ -148,8 +152,8 @@ int main(void) {
     CHECK(b[1] <= b[0], "undithered plan has more banding than the SNES rows (%.3f vs %.3f)", b[1], b[0]);
     CHECK(b[2] <= b[1] + 0.01f, "dither raised the banding (%.3f vs %.3f)", b[2], b[1]);
     CHECK(jp[2] <= jp[1] && rj[2] * 1.15f <= rj[1], "dither did not soften the step contour (max %.2f vs %.2f, rms %.3f vs %.3f)", jp[2], jp[1], rj[2], rj[1]); }
-  /* 2. hard edge: a 9-level jump inside the picture stays a step; both sides smooth */
-  Begin(); for (int i = 0; i < 8; i++) Run(2 * i, 2 * i + 2, Fix(4 + i, 4, 4)); for (int i = 0; i < 8; i++) Run(16 + 2 * i, 18 + 2 * i, Fix(20 + i, 4, 4)); OneRange(); Plan("hard-edge", true);
+  /* 2. hard edge: an 11-level jump (summed difference 91 > 76) inside the picture stays a step; both sides smooth */
+  Begin(); for (int i = 0; i < 8; i++) Run(2 * i, 2 * i + 2, Fix(4 + i, 4, 4)); for (int i = 0; i < 8; i++) Run(16 + 2 * i, 18 + 2 * i, Fix(22 + i, 4, 4)); OneRange(); Plan("hard-edge", true);
   { int sa = SegAt(15), sb = SegAt(16); CHECK(sa != sb && g_grseg[sa].r1 == 16 && g_grseg[sb].r0 == 16, "hard edge not a quad boundary");
     CHECK((int)(g_grseg[sa].c1 & 255) == Flat(Fix(11, 4, 4), 0), "colour above the edge moved"); CHECK((int)(g_grseg[sb].c0 & 255) == Flat(Fix(20, 4, 4), 0) || g_grseg[sb].c0 == g_grseg[sb].c1 || 1, "x"); }
   /* 3. plateaus 1 level apart: smoothed into one ramp between the band centres, ends flat with the exact SNES colours */
@@ -157,7 +161,7 @@ int main(void) {
   CHECK(g_grseg[0].c0 == BakeColor(Fix(5, 5, 5), 15, false) && g_grseg[g_ngr - 1].c1 == BakeColor(Fix(6, 6, 6), 15, false), "end colours not the SNES colours");
   /* 4. single run / only hard edges: no plan */
   Begin(); Run(0, 60, Fix(9, 3, 3)); OneRange(); Plan("single", false);
-  Begin(); Run(0, 5, Fix(1, 1, 1)); Run(5, 10, Fix(9, 1, 1)); Run(10, 15, Fix(17, 1, 1)); Run(15, 20, Fix(25, 1, 1)); OneRange(); Plan("all-edges", false);
+  Begin(); Run(0, 5, Fix(1, 1, 1)); Run(5, 10, Fix(13, 1, 1)); Run(10, 15, Fix(25, 1, 1)); Run(15, 20, Fix(1, 1, 1)); OneRange(); Plan("all-edges", false);
   /* 5. a real bend is kept: slow rise then fast rise -> knot at the bend */
   Begin(); for (int i = 0; i < 12; i++) Run(3 * i, 3 * i + 3, Fix(2 + i / 3, 3, 3)); for (int i = 0; i < 12; i++) Run(36 + 3 * i, 39 + 3 * i, Fix(6 + i * 2 - (i > 1 ? 0 : 0), 3, 3)); OneRange(); Plan("bend", true);
   CHECK(g_ngr >= 3 || SM_PSP_GR_RADIUS > 0, "bend flattened (%d quads)", g_ngr);
@@ -209,7 +213,7 @@ int main(void) {
       bool near = y >= 80 - R - 1 && y < 80 + R + 1;
       for (int ch = 0; ch < 3 && !near; ch++) CHECK(fabsf(Curve(y, ch) - (float)Flat(y < 80 ? 5 : 6, 0)) < 0.5f, "plateau interior row %d ch %d moved: %.2f", y, ch, Curve(y, ch));
     }
-    int rq = 0; for (int s = 0; s < g_ngr; s++) if (g_grseg[s].ramp) { rq++; CHECK(g_grseg[s].r0 >= 80 - R && g_grseg[s].r1 <= 80 + R, "ramp [%d,%d) wider than the radius around the step", g_grseg[s].r0, g_grseg[s].r1); }
+    int rq = 0; for (int s = 0; s < g_ngr; s++) if (g_grseg[s].c0 != g_grseg[s].c1) { rq++; CHECK(g_grseg[s].r0 >= 80 - R && g_grseg[s].r1 <= 80 + R, "ramp [%d,%d) wider than the radius around the step", g_grseg[s].r0, g_grseg[s].r1); }
     CHECK(rq == 1 && g_ngr == 3, "plateau-1level: %d quads, %d ramps (want 3 / 1)", g_ngr, rq);
     CHECK(Curve(80 - 1, 0) < Curve(80, 0) && fabsf(0.5f * (Curve(79, 0) + Curve(80, 0)) - 0.5f * (float)(Flat(5, 0) + Flat(6, 0))) < 1.5f, "step is not centred");
     /* a 3-level step is still smoothed (banding), the colours on both sides stay */
@@ -220,6 +224,10 @@ int main(void) {
     Begin(); Run(0, 60, Fix(10, 10, 10)); for (int i = 0, y = 60; i < 10; i++, y += 4) Run(y, y + 4, Fix(11 + i, 11 + i, 11 + i)); OneRange(); Plan("flat-then-gradient", true);
     for (int y = 0; y < 60 - R - 1; y++) CHECK(fabsf(Curve(y, 0) - (float)Flat(10, 0)) < 0.5f, "flat region row %d moved", y);
     CHECK(g_ngr <= 4, "flat-then-gradient: %d quads", g_ngr);
+#if SM_PSP_GR_DITHER_CHAIN
+    for (int s = 0; s < g_ngr; s++) CHECK(g_grseg[s].ramp, "flat-then-gradient: quad %d is not dithered with its chain", s);
+#endif
+    Begin(); Run(0, 60, Fix(10, 10, 10)); OneRange(); Plan("flat-alone", false);
   }
 #endif
 #if SM_PSP_GR_RADIUS > 0
@@ -232,8 +240,8 @@ int main(void) {
     Begin(); Run(0, 40, Fix(8, 8, 8)); Run(40, 100, Fix(9, 8, 8)); Run(100, 140, Fix(8, 8, 8)); OneRange(); Plan("peak-plateau", true);
     CHECK(fabsf(Curve(70, 0) - (float)Flat(9, 0)) < 0.5f && fabsf(Curve(10, 0) - (float)Flat(8, 0)) < 0.5f, "isolated long band (peak) not kept flat"); }
 #endif
-  /* 8d. abrupt transitions: a step of kGrEdgeLevels or more is never smoothed, whatever the radius; the colours on both sides are exact */
-  for (int d = kGrEdgeLevels; d <= 12; d += 4) {
+  /* 8d. abrupt transitions: a step with a summed colour difference above kGrEdgeSum (here 10+ levels in R) is never smoothed, whatever the radius; the colours on both sides are exact */
+  for (int d = 10; d <= 14; d += 4) {
     Begin(); for (int i = 0; i < 12; i++) Run(5 * i, 5 * i + 5, Fix(2 + i / 2, 4, 4)); for (int i = 0; i < 12; i++) Run(60 + 5 * i, 65 + 5 * i, Fix(8 + d + i / 2, 4, 4)); OneRange(); Plan("abrupt", true);
     int sa = SegAt(59), sb = SegAt(60);
     CHECK(sa >= 0 && sb >= 0 && sa != sb && g_grseg[sa].r1 == 60 && g_grseg[sb].r0 == 60, "step of %d levels is not a quad border", d);
@@ -243,6 +251,18 @@ int main(void) {
     Begin(); for (int i = 0; i < 12; i++) Run(5 * i, 5 * i + 5, Fix(2 + i / 2, 4, 4)); OneRange(); Plan("abrupt-top-only", true);
     for (int y = 0; y < 60; y++) for (int ch = 0; ch < 3; ch++) CHECK(fabsf(up[y][ch] - Curve(y, ch)) < 0.01f, "abrupt: row %d ch %d changed by the part below the step", y, ch);
   }
+  /* 8d2. just below the threshold (R 7 -> 16 levels: 75 <= 76) the step is banding and is smoothed, as in bsnes-hd; so is a coarse HDMA staircase of 5-level steps */
+  Begin(); for (int i = 0; i < 12; i++) Run(5 * i, 5 * i + 5, Fix(2 + i / 2, 4, 4)); for (int i = 0; i < 12; i++) Run(60 + 5 * i, 65 + 5 * i, Fix(16 + i / 2, 4, 4)); OneRange(); Plan("soft-step", true);
+  { bool crossed = false; for (int s = 0; s < g_ngr; s++) if (g_grseg[s].r0 < 60 && g_grseg[s].r1 > 60) crossed = true; CHECK(crossed, "a step of 75 (<= 76) is a quad border: it was not smoothed"); }
+  Begin(); for (int i = 0; i < 6; i++) Run(6 * i, 6 * i + 6, Fix(2 + 5 * i, 8, 8)); OneRange(); Plan("coarse-hdma", true);
+  { CHECK(SM_PSP_GR_RADIUS == 1 || g_ngr <= 3, "coarse HDMA staircase (5-level steps, 6-row bands): %d quads", g_ngr);
+    for (int y = 1; y < 36; y++) CHECK(Curve(y, 0) >= Curve(y - 1, 0) - 0.01f, "coarse HDMA ramp not monotone at %d", y);
+    float worst = 0; for (int y = 0; y < 36; y++) { float lvl = 2.0f + 5.0f * ((float)y + 0.5f - 3.0f) / 6.0f; if (lvl < 2.0f) lvl = 2.0f; if (lvl > 27.0f) lvl = 27.0f; float d = fabsf(Curve(y, 0) - 8.226f * lvl); if (d > worst) worst = d; }
+    printf("coarse HDMA (5 levels / 6 rows): %d quads, worst distance to the straight line through the band centres %.1f units (a band step is %d)\n", g_ngr, worst, Flat(7, 0) - Flat(2, 0));
+    CHECK(worst <= 0.6f * (float)(Flat(7, 0) - Flat(2, 0)), "coarse HDMA ramp %.1f units from the line through the band centres", worst); }
+  /* 8d3. slow coarse table (4-level steps every 14 rows): the radius grows with the step, so it is a ramp, not eight terraces */
+  Begin(); for (int i = 0; i < 8; i++) Run(14 * i, 14 * i + 14, Fix(1 + 4 * i, 8, 8)); OneRange(); Plan("coarse-slow", true);
+  CHECK(SM_PSP_GR_RADIUS < 2 || SM_PSP_GR_RADIUS_MAX < 16 || g_ngr <= 4, "coarse slow table (4 levels / 14 rows): %d quads, terraced", g_ngr);
   /* 8e. window boundaries and gaps: colours at the borders are the SNES colours, nothing is smoothed across; neither side depends on the other */
   Begin(); for (int i = 0; i < 12; i++) Run(i * 3, i * 3 + 3, Fix(3 + i / 2, 3, 3)); g_tint[6].cwm = 1; g_tint[6].cwl = 4; g_tint[6].cwr = 9; OneRange(); Plan("cw-border", true);
   { int sa = SegAt(17), sb = SegAt(18); CHECK(sa != sb && g_grseg[sa].r1 == 18 && g_grseg[sb].r0 == 18, "window change is not a quad border");
@@ -270,41 +290,55 @@ int main(void) {
     Begin(); for (int i = 0; i < 20; i++) Run(i * 5, i * 5 + 5, Fix(3 + i / 2, 12 + (i % 2), 20 - (i % 3 == 0))); OneRange(); Plan("rgb-all-vary", true);
     /* G toggling by one level and B by one level every few runs must not displace R by more than the smoothing window allows */
     for (int y = 0; y < 100; y++) CHECK(fabsf(Curve(y, 0) - r_only[y]) <= 9.0f, "R at row %d moved %.1f by G/B steps", y, fabsf(Curve(y, 0) - r_only[y])); }
-  { Begin(); for (int i = 0; i < 12; i++) Run(5 * i, 5 * i + 5, Fix(2 + i / 2, 4, 4)); for (int i = 0; i < 12; i++) Run(60 + 5 * i, 65 + 5 * i, Fix(2 + i / 2, 4, 4 + 8)); OneRange(); Plan("rgb-b-edge", true);
+  { Begin(); for (int i = 0; i < 12; i++) Run(5 * i, 5 * i + 5, Fix(2 + i / 2, 4, 4)); for (int i = 0; i < 12; i++) Run(60 + 5 * i, 65 + 5 * i, Fix(2 + i / 2, 4, 4 + 12)); OneRange(); Plan("rgb-b-edge", true);
     float a[kMaxLines]; for (int y = 0; y < 120; y++) a[y] = Curve(y, 0);
     int sa = SegAt(59), sb = SegAt(60); CHECK(sa != sb && g_grseg[sa].r1 == 60, "a hard edge in B only does not split the chain");
     CHECK((int)(g_grseg[sa].c1 & 255) == Flat(Fix(7, 4, 4), 0) && (int)(g_grseg[sb].c0 & 255) == Flat(Fix(2, 4, 4), 0), "R colours at the B edge are not the SNES colours"); (void)a; }
-  /* 8h. the smoothing window is edge-aware: compare GrProfile with a brute-force reading of the rule on random chains (steps of up to 3 levels) */
+  /* 8h. the smoothing window is edge-aware: compare GrProfile with a brute-force reading of bsnes-hd's rule (threshold 76 written out here on purpose) on random chains */
 #if SM_PSP_GR_RADIUS > 0
   { uint32_t xr = 777; int chk = 0;
     for (int it = 0; it < 4000; it++) {
-      Begin(); int row = 5, lv[3] = {12, 12, 12}, n = 2 + (int)(xr % 14);
+      Begin(); int row = 5, lv[3] = {14, 14, 14}, n = 2 + (int)(xr % 14);
       for (int i = 0; i < n; i++) {
         xr = xr * 1664525u + 1013904223u; int len = 1 + (int)((xr >> 8) % 9);
-        for (int ch = 0; ch < 3; ch++) { int d = (int)((xr >> (12 + 3 * ch)) % 7) - 3; if (d == 0 && ((xr >> 20) & 1)) d = ((xr >> 21) & 1) ? 1 : -1; lv[ch] += d; if (lv[ch] < 1) lv[ch] = 1; if (lv[ch] > 30) lv[ch] = 30; }
-        /* adjacent runs must differ by less than kGrEdgeLevels (one chain) and must not be identical (runs are maximal) */
-        if (g_ntint) { int same = 1, ok = 1; for (int ch = 0; ch < 3; ch++) { int d = lv[ch] - ((g_tint[g_ntint - 1].fix >> (5 * ch)) & 31); if (d) same = 0; if (d >= kGrEdgeLevels || d <= -kGrEdgeLevels) ok = 0; } if (same || !ok) { i--; continue; } }
+        int nl[3];
+        for (int ch = 0; ch < 3; ch++) { int d = (int)((xr >> (12 + 3 * ch)) % 13) - 6; if (d == 0 && ((xr >> 20) & 1)) d = ((xr >> 21) & 1) ? 1 : -1; nl[ch] = lv[ch] + d; if (nl[ch] < 1) nl[ch] = 1; if (nl[ch] > 30) nl[ch] = 30; }
+        /* adjacent runs must be one chain (summed difference <= 76) and must not be identical (runs are maximal) */
+        if (g_ntint) { int sum = 0; for (int ch = 0; ch < 3; ch++) { int pl = (g_tint[g_ntint - 1].fix >> (5 * ch)) & 31; int d = Flat(nl[ch] | nl[ch] << 5 | nl[ch] << 10, 0) - Flat(pl | pl << 5 | pl << 10, 0); sum += d < 0 ? -d : d; }
+          if (sum == 0 || sum > 76) { i--; continue; } }
+        for (int ch = 0; ch < 3; ch++) lv[ch] = nl[ch];
         Run(row, row + len, Fix(lv[0], lv[1], lv[2])); row += len;
       }
       if (g_ntint < 2) continue;
       const int top = g_tint[0].r0, rows = g_tint[g_ntint - 1].r1 - top;
-      for (int ch = 0; ch < 3; ch++) {
-        GrProfile(g_tint, g_ntint, ch);
-        int rl[kMaxLines]; for (int y = 0; y < rows; y++) { int r = RowFix(top + y); rl[y] = (r >> (5 * ch)) & 31; }
+      int stepsum = 0;  /* the chain radius, written out independently: radius * round(mean largest-channel step in levels), at least 1, capped */
+      for (int i = 1; i < g_ntint; i++) { int mx = 0; for (int ch = 0; ch < 3; ch++) { int d = abs(Lvl(i, ch) - Lvl(i - 1, ch)); if (d > mx) mx = d; } stepsum += mx; }
+      int avg = (2 * stepsum + (g_ntint - 1)) / (2 * (g_ntint - 1)); if (avg < 1) avg = 1;
+      int R = SM_PSP_GR_RADIUS * avg, cap = SM_PSP_GR_RADIUS_MAX > SM_PSP_GR_RADIUS ? SM_PSP_GR_RADIUS_MAX : SM_PSP_GR_RADIUS; if (R > cap) R = cap;
+      CHECK(R == GrChainRadius(g_tint, g_ntint), "chain radius %d vs %d", R, GrChainRadius(g_tint, g_ntint));
+      GrProfile(g_tint, g_ntint, R);
+      int E[3][kMaxLines];
+      for (int y = 0; y < rows; y++) for (int ch = 0; ch < 3; ch++) { int l = (RowFix(top + y) >> (5 * ch)) & 31; E[ch][y] = Flat(l | l << 5 | l << 10, 0); }
+      for (int ch = 0; ch < 3; ch++)
         for (int p = 0; p <= rows; p++) {
           float want;
-          if (p == 0) want = (float)Flat(rl[0] | rl[0] << 5 | rl[0] << 10, 0);
-          else if (p == rows) want = (float)Flat(rl[rows - 1] | rl[rows - 1] << 5 | rl[rows - 1] << 10, 0);
+          if (p == 0) want = (float)E[ch][0];
+          else if (p == rows) want = (float)E[ch][rows - 1];
           else {
-            int k = SM_PSP_GR_RADIUS; if (k > p) k = p; if (k > rows - p) k = rows - p;
-            while (k > 1) { int mn = 99, mx = -1; for (int y = p - k; y < p + k; y++) { if (rl[y] < mn) mn = rl[y]; if (rl[y] > mx) mx = rl[y]; } if (mx - mn <= 3) break; k--; }  /* the rule: 3 levels, written out here on purpose */
-            double sum = 0; for (int y = p - k; y < p + k; y++) sum += (double)Flat(rl[y] | rl[y] << 5 | rl[y] << 10, 0);
+            int kmax = R; if (kmax > p) kmax = p; if (kmax > rows - p) kmax = rows - p;
+            int k = 1;
+            for (int i = 2; i <= kmax; i++) {  /* ring i: rows p - i and p + i - 1 against the colour at the edge */
+              int su = 0, sd = 0;
+              for (int c = 0; c < 3; c++) { int base2 = E[c][p - 1] + E[c][p]; su += abs(2 * E[c][p - i] - base2); sd += abs(2 * E[c][p + i - 1] - base2); }
+              if (su > 2 * 76 || sd > 2 * 76) break;
+              k = i;
+            }
+            double sum = 0; for (int y = p - k; y < p + k; y++) sum += E[ch][y];
             want = (float)(sum / (2 * k));
           }
           CHECK(fabsf(g_gr_q[p][ch] - want) < 0.01f, "smoothing differs from the rule at edge %d ch %d: %.2f vs %.2f", p, ch, g_gr_q[p][ch], want);
           chk++;
         }
-      }
     }
     printf("smoothing rule: %d edge samples compared\n", chk); }
 #endif
