@@ -7,7 +7,6 @@ PSPSDK := $(shell psp-config --pspsdk-path)
 SRCS := $(filter-out src/opengl.c,$(wildcard src/*.c src/snes/*.c))
 SRCS += src/psp/psp_renderer.c
 SRCS += src/psp/psp_input.c
-SRCS += src/psp/psp_haze_assets.S
 
 # Logging and profiling. PSP_LOG_FLUSH_FRAMES is how often the buffered log is written to the memory stick; 0 flushes every line (survives a crash, but every write stalls the frame).
 PSP_LOG ?= 1
@@ -54,6 +53,8 @@ PSP_CAP_WIN ?= 1
 PSP_BENCH ?= 0
 # PSP_BENCH_M7=1: Gate 5r-a boot-time benchmark of GE-native mode 7 rotation (row strips from a 1024x1024 plane), about 3 s at boot (log builds only). Off by default.
 PSP_BENCH_M7 ?= 0
+# PSP_BENCH_COMPOSE=1: boot-time GE timing of the pieces of the composition pass (clear, copy, bilinear / nearest sprite, strips), about 1 s at boot (log builds only). Off by default.
+PSP_BENCH_COMPOSE ?= 0
 # PSP_MOS_GE=1: Gate 5s: the mosaic source image is rendered by the GE (no CPU pixels). 0: previous CPU-built image (MosBuild).
 PSP_MOS_GE ?= 1
 # PSP_DOOR_GE=1 enables the experimental GE door transition.
@@ -120,7 +121,7 @@ CFLAGS += -DSM_PSP_CAP_REUSE=$(PSP_CAP_REUSE)
 CFLAGS += -DSM_PSP_VTX16=$(PSP_VTX16)
 CFLAGS += -DSM_PSP_STATS=$(PSP_STATS)
 CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
-CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7)
+CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7) -DSM_PSP_BENCH_COMPOSE=$(PSP_BENCH_COMPOSE)
 CFLAGS += -DSM_PSP_M7_REUSE=$(PSP_M7_REUSE) -DSM_PSP_SWIZZLE=$(PSP_SWIZZLE) -DSM_PSP_M7_PROBE=$(PSP_M7_PROBE) -DSM_PSP_M7_ROW4=$(PSP_M7_ROW4) -DSM_PSP_M7_BLK=$(PSP_M7_BLK)
 CFLAGS += -DSM_PSP_MOS_GE=$(PSP_MOS_GE)
 CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE)
@@ -185,6 +186,14 @@ $(BENCH_M7_STAMP):
 	@rm -f build/bench_m7_*.stamp
 	@touch $@
 src/psp/psp_renderer.o: $(BENCH_M7_STAMP)
+
+# Its own stamp (like BENCH_M7_STAMP): toggling PSP_BENCH_COMPOSE rebuilds the renderer.
+BENCH_CMP_STAMP := build/bench_cmp_$(PSP_BENCH_COMPOSE).stamp
+$(BENCH_CMP_STAMP):
+	@mkdir -p build
+	@rm -f build/bench_cmp_*.stamp
+	@touch $@
+src/psp/psp_renderer.o: $(BENCH_CMP_STAMP)
 
 # Compile-time PNG texture pipeline. Generated headers are searched before src/.
 PYTHON ?= python3

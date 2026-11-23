@@ -95,6 +95,10 @@
 
 #define PSP_VBLANK_GATE 1  /* wait for vblank only when running ahead of the panel */
 
+#ifndef SM_PSP_BENCH_COMPOSE
+#define SM_PSP_BENCH_COMPOSE 0  /* 1 (log builds): boot-time GE timing of the pieces of the composition pass */
+#endif
+
 #ifndef SM_PSP_VERIFY_GAP
 #define SM_PSP_VERIFY_GAP 12  /* frames between two software-PPU verification frames in steady state (0: back to back, as before) */
 #endif
@@ -8873,6 +8877,98 @@ static void Bench5r(void) {
 }
 #endif
 
+#if SM_PSP_LOG && SM_PSP_BENCH_COMPOSE
+/* Boot-time GE timing of the composition pass (PSP_BENCH_COMPOSE=1, log builds). The pass costs about 6.7 ms of GE time per
+ * frame in every scene; this times its pieces one by one on the real GE: one list per measurement (start, finish, sync),
+ * 24 repeats, the first dropped. Draws into draw buffer 0 before the first frame; the source is g_texture (VRAM). The
+ * strip rows draw the same pixels as the single sprite (ComposeQuad keeps the sampling positions), in columns of 64 / 32 /
+ * 16 destination pixels. Times include the CPU building the (tiny) list, about 30 us: compare rows, not absolutes. */
+enum { kCbReps = 24 };
+enum { kCbEmpty, kCbClear, kCbClearFast, kCbCopy, kCbLinear, kCbNearest, kCbStrip64, kCbStrip32, kCbStrip16, kCbFull,
+       kCbFullStrip32, kCbKinds };
+static const char *const kCbName[kCbKinds] = {"empty list     ", "clear 480x272  ", "clear fast     ", "copy 256x224   ",
+                                              "bilinear sprite", "nearest sprite ", "bilinear 64col ", "bilinear 32col ",
+                                              "bilinear 16col ", "full compose   ", "full, 32col    "};
+
+static uint32_t CbOnce(int kind) {
+  const uint32_t t0 = Now();
+  sceGuStart(GU_DIRECT, g_gu_list);
+  SelectDrawBuffer();
+  sceGuEnable(GU_SCISSOR_TEST);
+  sceGuScissor(0, 0, kPspWidth, kPspHeight);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuDisable(GU_STENCIL_TEST);
+  sceGuDisable(GU_DITHER);
+  sceGuDisable(GU_CULL_FACE);
+  sceGuDisable(GU_TEXTURE_2D);
+  const bool full = kind == kCbFull || kind == kCbFullStrip32;
+  if (kind == kCbClear || full) {
+    sceGuClearColor(0xff000000);
+    sceGuClear(GU_COLOR_BUFFER_BIT);
+  }
+  if (kind == kCbClearFast) {
+    sceGuClearColor(0xff000000);
+    sceGuClear(GU_COLOR_BUFFER_BIT | GU_FAST_CLEAR_BIT);
+  }
+  if (kind == kCbCopy || full) {
+    sceGuCopyImage(GU_PSM_5650, kLeft, kTop, kGameWidth, kSrcRows, 512, (void *)(uintptr_t)(0x04000000u | g_draw_off), 0, 0,
+                   kGameWidth, (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramTexture));
+    sceGuTexSync();
+  }
+  if (kind >= kCbLinear) {
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+    sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+    sceGuTexImage(0, kGameWidth, 256, kGameWidth, g_texture);
+    sceGuTexFlush();
+    sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+    sceGuTexScale(1.0f, 1.0f);
+    sceGuTexOffset(0.0f, 0.0f);
+    sceGuTexFilter(kind == kCbNearest ? GU_NEAREST : GU_LINEAR, kind == kCbNearest ? GU_NEAREST : GU_LINEAR);
+    const int strip = kind == kCbStrip64 ? 64 : (kind == kCbStrip32 || kind == kCbFullStrip32) ? 32 : kind == kCbStrip16 ? 16 : 0;
+    if (!strip) {
+      TileVert *v = sceGuGetMemory(2 * (int)sizeof(TileVert));
+      ComposeQuad(v, 0.5f, 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX, kCompY, kCompW, kCompH);
+      GeDraw(kVtTile, 2, v);
+    } else {
+      const int n = (kCompW + strip - 1) / strip;
+      TileVert *v = sceGuGetMemory(2 * n * (int)sizeof(TileVert));
+      const float sx = ((float)kGameWidth - 1.0f) / (float)(kCompW - 1);
+      for (int k = 0; k < n; k++) {
+        const int i0 = k * strip, w = kCompW - i0 < strip ? kCompW - i0 : strip;
+        const float u0 = 0.5f + (float)i0 * sx;
+        ComposeQuad(&v[2 * k], u0, 0.5f, u0 + (float)(w - 1) * sx, (float)kSrcRows - 0.5f, kCompX + i0, kCompY, w, kCompH);
+      }
+      GeDraw(kVtTile, 2 * n, v);
+    }
+  }
+  sceGuFinish();
+  sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+  return Now() - t0;
+}
+
+static void BenchCompose(void) {
+  uint16_t *tex = g_texture;
+  for (int i = 0; i < kGameWidth * 256; i++)  /* not a flat colour: every texel fetch is a different value */
+    tex[i] = (uint16_t)(i * 2654435761u >> 16);
+  PspLog("cbench: composition pass on the GE (us per list, %d repeats, first dropped), sprite 360x270 from 256x224", kCbReps);
+  for (int kind = 0; kind < kCbKinds; kind++) {
+    uint32_t sum = 0, mn = 0xffffffffu, mx = 0;
+    CbOnce(kind);
+    for (int i = 1; i < kCbReps; i++) {
+      const uint32_t t = CbOnce(kind);
+      sum += t;
+      mn = t < mn ? t : mn;
+      mx = t > mx ? t : mx;
+    }
+    PspLog("cbench: %s avg %u min %u max %u", kCbName[kind], (unsigned)(sum / (kCbReps - 1)), (unsigned)mn, (unsigned)mx);
+  }
+  memset(g_texture, 0, 256 * 256 * 2);
+}
+#endif
+
 static bool PspRenderer_Initialize(void) {
   uintptr_t vram = (uintptr_t)sceGeEdramGetAddr() | 0x40000000U;
   g_atlas2 = (uint8_t *)(vram + kVramAtlas2);
@@ -8942,6 +9038,9 @@ static bool PspRenderer_Initialize(void) {
     memset(g_atlas4, 0, kAtlas4Bytes);
     memset(g_atlas7, 0, kAtlas7Bytes);
     UvSelfTest();
+#if SM_PSP_LOG && SM_PSP_BENCH_COMPOSE
+    BenchCompose();
+#endif
 #if SM_PSP_GE_GOURAUD_TINT
     g_gr_ok = GouraudSelfTest();
 #endif
