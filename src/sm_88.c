@@ -2452,10 +2452,7 @@ void sub_88DE18(uint16 k, uint16 a) {  // 0x88DE18
   int v2 = (uint8)k >> 1;
   hdma_object_B[v2] = a;
   hdma_object_A[v2] = 0;
-  const bool door_ge = PspRenderer_DoorTransitionArmed();  // new room on screen during the scroll: haze fully on, no ramp
-  if (door_ge || door_transition_function == FUNC16(DoorTransition_FadeInScreenAndFinish)) {
-    if (door_ge)
-      hdma_object_A[v2] = 15;
+  if (door_transition_function == FUNC16(DoorTransition_FadeInScreenAndFinish)) {
     hdma_object_pre_instructions[v2] = FUNC16(HdmaobjPreInstr_HazeColorMathSubscreen_FadingIn);
     HdmaobjPreInstr_HazeColorMathSubscreen_FadingIn(k);
   }
