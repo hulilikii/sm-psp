@@ -542,7 +542,7 @@ static int g_m7_bnseg, g_m7_bnblk;  /* row segments and window blocks of this fr
 /* The plane is 1024 x 1024 plus 128 pixels of its own start repeated at the right and at the bottom (kM7PlaneP = 1152, 72
  * swizzle blocks of 16 B per block row), so a window of up to kM7WinMax pixels that crosses the edge of a wrapping plane reads
  * the repeated texels instead of needing a second bind. */
-enum { kM7PlaneW = 1024, kM7PlaneP = 1024 + 128, kM7WinMax = 128, kM7MaxBlk = 256, kM7BVerify = 24, kM7PlFull = 32 };
+enum { kM7PlaneW = 1024, kM7PlaneP = 1024 + 128, kM7WinMax = 128, kM7MaxBlk = 256, kM7BVerify = 24, kM7PlFull = 32, kM7BlkBackoff = 8 };
 typedef struct M7BSeg { float u0, v0, u1, v1; int16_t x0, x1, y, pad; } M7BSeg;
 typedef struct M7BBlk { int16_t wx, wy; uint16_t first, n; } M7BBlk;
 static uint8_t g_m7pl[kM7PlaneP * kM7PlaneP] __attribute__((aligned(64)));  /* swizzled in 16 x 8 blocks, pitch kM7PlaneP */
@@ -3943,6 +3943,10 @@ static void M7BlkRefused(const int16_t *m, const int *ext) {
 }
 #endif
 
+static int g_m7b_skip_n, g_m7b_skip_mag;  /* refusal backoff: frames still to refuse unseen, matrix size at the refusal */
+#if SM_PSP_LOG
+static uint32_t g_m7b_fast;  /* frames refused without trying a block size (backoff) */
+#endif
 /* M7BLK-BEGIN */
 /* Gate 5w. Hardware bench (gate 5t-b/c, PSP-1000 222 MHz, 4 matrices): the CPU image costs 9.2-11.1 ms + 1.4 ms drawing it; a
  * swizzled 1024x1024 plane drawn with one bind per 64x16 block of rows, one GU_TRIANGLES quad per row and block, costs 2.1-3.1
@@ -4190,9 +4194,26 @@ static bool M7PrepareBlk(void) {
     BLK_WHY(kBlkFlags);
     return false;
   }
+  const int16_t *m = g_m7c.m;
+  /* Backoff. A refused frame costs the three block-size attempts (about 5 ms) before the CPU image is built, and the zoom /
+   * rotation sequences that are refused stay refused for many frames. After a refusal the next kM7BlkBackoff frames whose
+   * matrix is not smaller (by more than 1/16) go straight to the CPU image; a smaller matrix, or the end of the backoff,
+   * tries the block sizes again. The CPU image is the exact path: this only decides how much work is spent on finding out
+   * that the block path does not fit. */
+  int mag = 0;
+  for (int i = 0; i < 4; i++) {
+    const int v = m[i] < 0 ? -m[i] : m[i];
+    mag = v > mag ? v : mag;
+  }
+  if (g_m7b_skip_n > 0 && mag * 16 >= g_m7b_skip_mag * 15) {
+    g_m7b_skip_n--;
+    BLK_WHY(kBlkWindow);
+    PROF(g_m7b_fast++;)
+    return false;
+  }
+  g_m7b_skip_n = 0;
   PROF(uint32_t t0 = Now();)
   static const int kCfg[3][2] = {{64, 16}, {32, 16}, {32, 8}};
-  const int16_t *m = g_m7c.m;
   M7Res ru, rv;
   int resbw = 0, nseg = 0, nblk = 0, cfg = -1;
   PROF(int ext[3] = {0, 0, 0};)
@@ -4209,6 +4230,10 @@ static bool M7PrepareBlk(void) {
   if (cfg < 0 || nseg == 0) {
     BLK_WHY(kBlkWindow);
     PROF(M7BlkRefused(m, ext);)
+    if (cfg < 0) {  /* a window that did not fit (nseg == 0: nothing of the frame is visible, no backoff) */
+      g_m7b_skip_n = kM7BlkBackoff;
+      g_m7b_skip_mag = mag;
+    }
     return false;
   }
   PROF(uint32_t t1 = Now();)
@@ -9248,6 +9273,8 @@ static void PspRenderer_EndDraw(void) {
       PspLog("  m7blk time per frame (us): prep=%u plane=%u vertices=%u draw=%u (%u frames)", (unsigned)(g_m7b_t_prep / g_m7b_tn),
              (unsigned)(g_m7b_t_plane / g_m7b_tn), (unsigned)(g_m7b_t_vtx / g_m7b_tn), (unsigned)(g_m7b_t_draw / g_m7b_tn),
              (unsigned)g_m7b_tn);
+    PspLog("  m7blk backoff: %u frames went to the CPU image without trying a block size", (unsigned)g_m7b_fast);
+    g_m7b_fast = 0;
     if (g_m7b_rf_n)
       PspLog("  m7blk refused: n=%u max|a|=%d max|b|=%d max|c|=%d max|d|=%d | 32x8 first window px %d..%d (limit %d)",
              (unsigned)g_m7b_rf_n, g_m7b_rf_a, g_m7b_rf_b, g_m7b_rf_c, g_m7b_rf_d, g_m7b_rf_e8min, g_m7b_rf_e8max,

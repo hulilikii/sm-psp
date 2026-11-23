@@ -14,7 +14,8 @@
 #include <math.h>
 
 enum { kGameWidth = 256, kMaxLines = 240, kM7Pages = 64, kVramPageWords = 256, kVramPages = 128 };
-enum { kM7PlaneW = 1024, kM7PlaneP = 1152, kM7WinMax = 128, kM7MaxBlk = 256, kM7PlFull = 32 };
+enum { kM7PlaneW = 1024, kM7PlaneP = 1152, kM7WinMax = 128, kM7MaxBlk = 256, kM7PlFull = 32, kM7BlkBackoff = 8 };
+static int g_m7b_skip_n, g_m7b_skip_mag;
 #define PROF(...)
 typedef struct LineSnap { uint8_t mossize, mosstart, m7on, m7fl; int16_t m7m[8]; } LineSnap;
 typedef struct M7Cfg { int16_t m[8]; uint8_t fl; } M7Cfg;
@@ -198,6 +199,42 @@ static int TestFrames(double eps, long *accepted, long *rejected, long *pixels) 
   return bad != 0 ? (int)(bad > 1000000 ? 1000000 : bad) : 0;
 }
 
+/* Refusal backoff: a window that does not fit is refused unseen for kM7BlkBackoff frames while the matrix does not shrink; a
+ * smaller matrix tries the block sizes at once (and is drawn), and the backoff ends by itself. */
+static void SetFrame(int a) {
+  int16_t m[8] = {(int16_t)a, 0, 0, (int16_t)a, 512, 512, 512, 512};
+  g_line_count = 224;
+  g_m7_rows = 0;
+  for (int r = 0; r < kMaxLines; r++) {
+    memset(&g_lines[r], 0, sizeof g_lines[r]);
+    if (r < g_line_count) { g_lines[r].m7on = 1; g_lines[r].m7fl = 0; memcpy(g_lines[r].m7m, m, sizeof m); g_m7_rows++; }
+  }
+  memcpy(g_m7c.m, m, sizeof m);
+  g_m7c.fl = 0;
+  g_m7_same = true;
+}
+static int TestBackoff(void) {
+  int bad = 0;
+  for (int i = 0; i < 0x8000; i++) g_vram[i] = (uint16_t)R();
+  g_m7pl_valid = false;
+  memset(g_m7pl_dirty, 1, sizeof g_m7pl_dirty);
+  g_m7b_skip_n = 0;
+  SetFrame(3000);  /* 11.7x: every window is far over kM7WinMax */
+  if (M7PrepareBlk() || g_m7b_skip_n != kM7BlkBackoff) { printf("  backoff: first refusal did not arm it (skip_n %d)\n", g_m7b_skip_n); bad = 1; }
+  for (int k = 1; k <= kM7BlkBackoff; k++) {
+    SetFrame(3000 + k * 40);  /* growing: still skipped */
+    if (M7PrepareBlk() || g_m7b_skip_n != kM7BlkBackoff - k) { printf("  backoff: frame %d not skipped (skip_n %d)\n", k, g_m7b_skip_n); bad = 1; }
+  }
+  SetFrame(3000);  /* backoff over: the block sizes are tried again, refused again, re-armed */
+  if (M7PrepareBlk() || g_m7b_skip_n != kM7BlkBackoff) { printf("  backoff: no retry after the backoff (skip_n %d)\n", g_m7b_skip_n); bad = 1; }
+  SetFrame(3000 * 14 / 16);  /* more than 1/16 smaller: tried at once, still too big */
+  if (M7PrepareBlk() || g_m7b_skip_n != kM7BlkBackoff) { printf("  backoff: smaller matrix was not retried (skip_n %d)\n", g_m7b_skip_n); bad = 1; }
+  SetFrame(256);  /* 1x: fits, drawn from the plane, backoff cleared */
+  if (!M7PrepareBlk() || g_m7b_skip_n != 0) { printf("  backoff: small matrix not drawn after a refusal\n"); bad = 1; }
+  printf("  refusal backoff: %s\n", bad ? "FAIL" : "ok");
+  return bad;
+}
+
 int main(int argc, char **argv) {
   if (argc > 1 && !strcmp(argv[1], "--negative")) {
     int bad = TestPlane(true);
@@ -209,6 +246,7 @@ int main(int argc, char **argv) {
   printf("  plane maintenance (full, partial, many pages): %s\n", bad ? "FAIL" : "ok");
   bad |= TestRes();
   bad |= TestClip();
+  bad |= TestBackoff();
   const double eps_list[] = {0.0, 1.0 / 2048, 1.0 / 1024};
   for (int i = 0; i < 3; i++) {
     long acc, rej, px;
