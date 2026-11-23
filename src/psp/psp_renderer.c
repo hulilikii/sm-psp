@@ -703,8 +703,13 @@ static uint32_t g_frames_ge, g_frames_sw, g_reason_counts[kReasonCount];
 
 //profiling
 
-enum { kSkipAfter = 8 };  /* consecutive GE frames before the software PPU is skipped */
+#ifndef SM_PSP_SKIP_AFTER
+#define SM_PSP_SKIP_AFTER 8
+#endif
+enum { kSkipAfter = SM_PSP_SKIP_AFTER };  /* consecutive GE frames before the software PPU is skipped (after a refusal the software PPU
+                                           * draws every frame until then: about 35 ms each on a PSP-1000) */
 static uint32_t g_streak;
+static int g_last_reason;  /* mask of the last CountReasons call; cleared when DrawGe starts (log only) */
 static uint32_t g_t_draw_start, g_t_list_start;
 static uint32_t g_prep_us, g_build_us, g_gewait_us, g_vbwait_us;
 #if SM_PSP_LOG
@@ -4884,6 +4889,7 @@ static int SubRunContributes(int l, const LineSnap *ls, int r0, int r1, bool all
 }
 
 static void CountReasons(int mask) {
+  g_last_reason = mask;
   for (int i = 0; i < kReasonCount; i++)
     if (mask & (1 << i))
       g_reason_counts[i]++;
@@ -6487,6 +6493,7 @@ static void S5iLog(void) {
 // Returns false (nothing drawn, GE idle) if the frame must use the software image.
 static bool DrawGe(void) {
   g_t_draw_start = Now();
+  g_last_reason = 0;
   g_ent_top = 0;
   g_rows_top = 0;
   g_m7_nq = 0;
@@ -9160,6 +9167,22 @@ static void ProfLog(void) {
 }
 #endif
 
+#if SM_PSP_LOG
+/* Every frame that leaves the GE path while the GE is active (first 80): which kind, why, and where in the game. After one
+ * such frame the software PPU draws kSkipAfter frames, which is the burst of ~35 ms ppu hitches. */
+static void NoteFallback(const char *kind) {
+  static unsigned n;
+  if (n++ >= 80)
+    return;
+  PspLog("fallback f=%u %s lines=%d frame_reasons=0x%x last_reason=0x%x streak=%u mosaic=%d gs=%04x room=%04x door=%04x area=%02x",
+         (unsigned)g_frame, kind, g_line_count, (unsigned)g_frame_reasons, (unsigned)g_last_reason, (unsigned)g_streak,
+         g_mosaic_size, GameRam16(0x998), GameRam16(0x79B), GameRam16(0x78D), (unsigned)g_ram[0x79F]);
+}
+#define NOTE_FALLBACK(kind) NoteFallback(kind)
+#else
+#define NOTE_FALLBACK(kind) ((void)0)
+#endif
+
 static void PspRenderer_EndDraw(void) {
   PROF(uint32_t t_enter = Now();)
   g_frame++;
@@ -9187,6 +9210,7 @@ static void PspRenderer_EndDraw(void) {
     /* Misprediction: repeat the previous image for one frame (nothing is drawn
      * or swapped, so the panel keeps showing it), keep the pacing, and let the
      * software PPU draw the next frames until the GE has been stable again. */
+    NOTE_FALLBACK("held");
     g_frames_sw++;
     PROF(g_holds++;)
     g_streak = 0;
@@ -9197,8 +9221,10 @@ static void PspRenderer_EndDraw(void) {
   } else {
     /* Software path (unchanged behaviour). Also used when the GE path hands a
      * frame back, and for the first frame after a toggle. */
-    if (g_ge_active)
+    if (g_ge_active) {
+      NOTE_FALLBACK(g_line_count > 0 ? "refused" : "nolines");
       g_frames_sw++;
+    }
     g_streak = 0;
     g_t_draw_start = Now();
     int swpath = g_swpath >= 0 ? g_swpath : (int)((g_cal_frames / kSwCalFrames) % kSwPaths);
