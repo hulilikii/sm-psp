@@ -99,6 +99,10 @@
 #define SM_PSP_BENCH_COMPOSE 0  /* 1 (log builds): boot-time GE timing of the pieces of the composition pass */
 #endif
 
+#ifndef SM_PSP_COMPOSE_STRIP
+#define SM_PSP_COMPOSE_STRIP 32  /* destination columns per sprite of the main composition quad (0: one 360 px sprite). Hardware: one wide scaled sprite 5.7 ms of GE time, 32 px columns 1.1 ms (cbench) */
+#endif
+
 #ifndef SM_PSP_VERIFY_GAP
 #define SM_PSP_VERIFY_GAP 12  /* frames between two software-PPU verification frames in steady state (0: back to back, as before) */
 #endif
@@ -5064,6 +5068,32 @@ static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1,
   w[1] = (TileVert){u0 + (float)dw * sx, v0 + (float)dh * sy, (int16_t)(dx + dw), (int16_t)(dy + dh), 0};
 }
 
+/* Number of sprites ComposeQuadStrips writes for a dw px wide destination. */
+#define COMPOSE_STRIPS(dw) ((SM_PSP_COMPOSE_STRIP) > 0 ? ((dw) + (SM_PSP_COMPOSE_STRIP) - 1) / (SM_PSP_COMPOSE_STRIP) : 1)
+enum { kComposeStrips = COMPOSE_STRIPS(kCompW) };
+
+/* ComposeQuad split into columns of SM_PSP_COMPOSE_STRIP destination pixels. Pixel i of the whole quad samples the same
+ * (su0 + i * stepx, sv0 + j * stepy) as ComposeQuad gives it, so the picture is unchanged; only the GE's texture cache sees
+ * narrower sprites. Writes 2 * COMPOSE_STRIPS(dw) vertices, returns how many. */
+static int ComposeQuadStrips(TileVert *w, float su0, float sv0, float su1, float sv1, int dx, int dy, int dw, int dh) {
+  const int strip = SM_PSP_COMPOSE_STRIP;
+  if (strip <= 0 || dw <= strip) {
+    ComposeQuad(w, su0, sv0, su1, sv1, dx, dy, dw, dh);
+    return 2;
+  }
+  const float sx = dw > 1 ? (su1 - su0) / (float)(dw - 1) : 0.0f;
+  const float sy = dh > 1 ? (sv1 - sv0) / (float)(dh - 1) : 0.0f;
+  const float v0 = sv0 - g_uvh[1] * sy, v1 = v0 + (float)dh * sy;
+  const int n = (dw + strip - 1) / strip;
+  for (int k = 0; k < n; k++) {
+    const int i0 = k * strip, cw = dw - i0 < strip ? dw - i0 : strip;
+    const float u0 = su0 + ((float)i0 - g_uvh[0]) * sx;
+    w[2 * k] = (TileVert){u0, v0, (int16_t)(dx + i0), (int16_t)dy, 0};
+    w[2 * k + 1] = (TileVert){u0 + (float)cw * sx, v1, (int16_t)(dx + i0 + cw), (int16_t)(dy + dh), 0};
+  }
+  return 2 * n;
+}
+
 #if SM_PSP_DOOR_GE
 // Old gameplay image (256x192 RGB565 in slot 0) drawn over the live new room. While armed it is displaced by the opposite
 // of the game camera's movement since the scroll started, so it stays glued to the new room whatever the easing. The rect
@@ -5530,18 +5560,18 @@ static void ComposeDraw(const ComposeSrc *s) {
   }
 #endif
 
-  TileVert *base = sceGuGetMemory((int)((1 + kHudRectN + 2) * 2 * sizeof(TileVert)));
+  TileVert *base = sceGuGetMemory((int)((kComposeStrips + kHudRectN + 2) * 2 * sizeof(TileVert)));
   const int srow0 = hud ? 32 : 0;
-  ComposeQuad(base, 0.5f, (float)srow0 + 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX, kCompY, kCompW,
-              kCompH);
+  const int nbase = ComposeQuadStrips(base, 0.5f, (float)srow0 + 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX,
+                                      kCompY, kCompW, kCompH);
   sceGuTexFilter(GU_LINEAR, GU_LINEAR);
-  GeDraw(kVtTile, 2, base);
+  GeDraw(kVtTile, nbase, base);
 #if SM_PSP_DOOR_GE
   if (g_door_reserved && g_door_snapshot_valid && !g_door_live)
     DrawDoorTransition(s);
 #endif
   if (hud) {
-    TileVert *w = base + 2;
+    TileVert *w = base + nbase;
     int nv = 0;
     for (int k = 0; k < kHudRectN; k++) {
       const HudRect *r = &kHudRects[k];
@@ -5575,7 +5605,7 @@ static void ComposeDraw(const ComposeSrc *s) {
        16, 16, kHudSpeedX, kHudSpeedY, ss != 0},
     };
 
-    TileVert *iv = base + 2 + 2 * kHudRectN;
+    TileVert *iv = base + nbase + 2 * kHudRectN;
     sceGuEnable(GU_ALPHA_TEST);
     sceGuAlphaFunc(GU_NOTEQUAL, 0, 0xff);
     const unsigned brightness = (unsigned)g_hud.brightness * 17;
@@ -5755,7 +5785,7 @@ static void ApplyMosaicTransition(void) {
  * kGuCallMax, from a complete audit of what ComposeGeAsync, ComposeDraw, DrawDoorTransition and DrawNativeMessage emit:
  *
  * mem (exact, from sizeof; every sceGuGetMemory is GuMem: size rounded up to 4 plus an 8 byte header):
- *   ComposeDraw: source quad + HUD rects + icons ((1 + kHudRectN + 2) * 2 TileVert); DrawDoorTransition: 2 TileVert;
+ *   ComposeDraw: source quad (kComposeStrips sprites) + HUD rects + icons ((kComposeStrips + kHudRectN + 2) * 2 TileVert); DrawDoorTransition: 2 TileVert;
  *   DrawNativeMessage: dim quad (2 ColorVert); sceGuClear (libgu): kGuClearBytes;
  *   button overlay: one run per source row at most (a run is >= 1 row), a run has <= 2 spans = 4 TileVert;
  *   message: per MsgDrawRun / MsgDrawStr the glyph vertices, per icon token 2 TileVert. Both are counted by the
@@ -5799,7 +5829,7 @@ static void MsgRunBound(const char *s, const char *e, uint32_t *mem, uint32_t *c
 }
 
 static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
-  uint32_t mem = GuMem((1 + kHudRectN + 2) * 2 * sizeof(TileVert)) + GuMem(2 * sizeof(TileVert)) +
+  uint32_t mem = GuMem((kComposeStrips + kHudRectN + 2) * 2 * sizeof(TileVert)) + GuMem(2 * sizeof(TileVert)) +
                  GuMem(2 * sizeof(ColorVert)) + GuMem(2 * sizeof(ColorVert)) + GuMem(kGuClearBytes);
   uint32_t calls = kComposeFixedCalls + kComposeEvolutionCalls;
   for (int i = 0; i < kPspButtonIconSlots; i++) {
