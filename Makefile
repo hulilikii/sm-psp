@@ -107,7 +107,6 @@ endif
 
 OBJS := $(SRCS:%.c=%.o)
 OBJS += src/psp/psp_message_assets.o
-OBJS += src/psp/psp_haze_assets.o
 
 CFLAGS := -O2 -G0 -fno-strict-aliasing -Ibuild/generated -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
@@ -200,16 +199,14 @@ PYTHON ?= python3
 PSP_TEXTURE_DIR := assets/psp/textures
 PSP_TEXTURE_PNGS := $(wildcard $(PSP_TEXTURE_DIR)/buttons/*.png) \
                     $(wildcard $(PSP_TEXTURE_DIR)/hud/*.png) \
-                    $(wildcard $(PSP_TEXTURE_DIR)/message/*.png) \
-                    $(wildcard $(PSP_TEXTURE_DIR)/title/*.png)
+                    $(wildcard $(PSP_TEXTURE_DIR)/message/*.png)
 PSP_TEXTURE_STAMP := build/psp_textures.stamp
 $(PSP_TEXTURE_STAMP): tools/gen_psp_textures.py $(PSP_TEXTURE_PNGS)
 	@mkdir -p build
 	@$(PYTHON) tools/gen_psp_textures.py --source $(PSP_TEXTURE_DIR) --output build/generated
 	@touch $@
 
-src/psp/psp_renderer.o src/psp/psp_message_assets.o \
-src/psp/psp_haze_assets.o: $(PSP_TEXTURE_STAMP)
+src/psp/psp_renderer.o src/psp/psp_message_assets.o: $(PSP_TEXTURE_STAMP)
 
 include $(PSPSDK)/lib/build.mak
 
