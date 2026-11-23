@@ -5042,7 +5042,7 @@ static void ComposeQuad(TileVert *w, float su0, float sv0, float su1, float sv1,
 // normal composition. Where the displaced image no longer covers the old room (the 32 source rows the HUD hides on an up
 // door, or the camera offset across the door) its nearest edge row/column is repeated, so tubes and walls continue.
 #ifndef SM_PSP_DOOR_UP_LIVE
-#define SM_PSP_DOOR_UP_LIVE 0  /* 1 = upward doors: no edge repeat above the old image, the live new room shows there (diagnostic) */
+#define SM_PSP_DOOR_UP_LIVE 1  /* 1 = upward doors: no edge repeat above the old image, the live new room shows there (diagnostic) */
 #endif
 
 static int DoorDispPx(int src_px) {  /* source pixels -> viewport pixels (360/256 = 270/192 = 45/32), rounded */
