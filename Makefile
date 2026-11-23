@@ -7,6 +7,7 @@ PSPSDK := $(shell psp-config --pspsdk-path)
 SRCS := $(filter-out src/opengl.c,$(wildcard src/*.c src/snes/*.c))
 SRCS += src/psp/psp_renderer.c
 SRCS += src/psp/psp_input.c
+SRCS += src/psp/psp_haze_assets.S
 
 # Logging and profiling. PSP_LOG_FLUSH_FRAMES is how often the buffered log is written to the memory stick; 0 flushes every line (survives a crash, but every write stalls the frame).
 PSP_LOG ?= 1
@@ -105,6 +106,7 @@ endif
 
 OBJS := $(SRCS:%.c=%.o)
 OBJS += src/psp/psp_message_assets.o
+OBJS += src/psp/psp_haze_assets.o
 
 CFLAGS := -O2 -G0 -fno-strict-aliasing -Ibuild/generated -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
@@ -189,14 +191,16 @@ PYTHON ?= python3
 PSP_TEXTURE_DIR := assets/psp/textures
 PSP_TEXTURE_PNGS := $(wildcard $(PSP_TEXTURE_DIR)/buttons/*.png) \
                     $(wildcard $(PSP_TEXTURE_DIR)/hud/*.png) \
-                    $(wildcard $(PSP_TEXTURE_DIR)/message/*.png)
+                    $(wildcard $(PSP_TEXTURE_DIR)/message/*.png) \
+                    $(wildcard $(PSP_TEXTURE_DIR)/title/*.png)
 PSP_TEXTURE_STAMP := build/psp_textures.stamp
 $(PSP_TEXTURE_STAMP): tools/gen_psp_textures.py $(PSP_TEXTURE_PNGS)
 	@mkdir -p build
 	@$(PYTHON) tools/gen_psp_textures.py --source $(PSP_TEXTURE_DIR) --output build/generated
 	@touch $@
 
-src/psp/psp_renderer.o src/psp/psp_message_assets.o: $(PSP_TEXTURE_STAMP)
+src/psp/psp_renderer.o src/psp/psp_message_assets.o \
+src/psp/psp_haze_assets.o: $(PSP_TEXTURE_STAMP)
 
 include $(PSPSDK)/lib/build.mak
 

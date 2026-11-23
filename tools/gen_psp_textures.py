@@ -31,6 +31,30 @@ HUD = [
 MESSAGE = [("font", 256, 256), ("grapple", 16, 16), ("missile", 32, 16),
            ("powerbomb", 16, 16), ("supermissile", 16, 16), ("xray", 16, 16)]
 
+TITLE_HAZE_SIZE = (256, 256)
+TITLE_HAZE_DARK = (0, 80, 80)       # #005050
+TITLE_HAZE_LIGHT = (48, 144, 144)    # #309090
+TITLE_HAZE_ALPHA_MAX = 68
+
+
+def colorize_title_haze(rgba: bytes) -> bytes:
+    """Convert grayscale haze to a subtle teal RGBA overlay."""
+    if len(rgba) != 256 * 256 * 4:
+        raise ValueError("title haze must be 256x256 RGBA")
+
+    out = bytearray(len(rgba))
+    for i in range(0, len(rgba), 4):
+        r, g, b, _ = rgba[i:i + 4]
+        lum = (r * 299 + g * 587 + b * 114 + 500) // 1000
+
+        for c in range(3):
+            out[i + c] = (
+                TITLE_HAZE_DARK[c] +
+                (TITLE_HAZE_LIGHT[c] - TITLE_HAZE_DARK[c]) * lum // 255
+            )
+        out[i + 3] = lum * TITLE_HAZE_ALPHA_MAX // 255
+    return bytes(out)
+
 
 def decode_rgba_png(path: Path):
     data = path.read_bytes()
@@ -141,6 +165,11 @@ def main():
     msg_out.mkdir(parents=True, exist_ok=True)
     for filename, w, h in MESSAGE:
         (msg_out / f"{filename}.rgba").write_bytes(load(args.source / "message" / f"{filename}.png", w, h))
+
+    title_out = args.output / "assets/psp/title"
+    title_out.mkdir(parents=True, exist_ok=True)
+    title_rgba = load(args.source / "title/title_haze.png", *TITLE_HAZE_SIZE)
+    (title_out / "title_haze.rgba").write_bytes(colorize_title_haze(title_rgba))
 
 if __name__ == "__main__":
     main()
