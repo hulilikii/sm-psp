@@ -2257,27 +2257,103 @@ static bool ImgTilePagesDirty(int slot) {
   return false;
 }
 
+#ifndef SM_PSP_VERIFY
+#define SM_PSP_VERIFY 1
+#endif
+/* Planar to chunky for one image row. g_img_spread[hf][b][0 / 1] holds bit (hf ? x : 7 - x) of the byte b as byte x (0 or 1) of
+ * pixels 0-3 / 4-7, so a row of 8 pixels is a few table loads and ORs. g_img_fast = false (a log build found a difference): the
+ * pixel by pixel conversion below is used. */
+static uint32_t g_img_spread[2][256][2];
+static bool g_img_spread_ok, g_img_fast = true;
+
+static void ImgSpreadInit(void) {
+  for (int hf = 0; hf < 2; hf++)
+    for (int v = 0; v < 256; v++) {
+      uint32_t lo = 0, hi = 0;
+      for (int x = 0; x < 8; x++) {
+        const uint32_t bit = ((uint32_t)v >> (hf ? x : 7 - x)) & 1;
+        if (x < 4)
+          lo |= bit << (8 * x);
+        else
+          hi |= bit << (8 * (x - 4));
+      }
+      g_img_spread[hf][v][0] = lo;
+      g_img_spread[hf][v][1] = hi;
+    }
+  g_img_spread_ok = true;
+}
+
+/* Row of 8 pixels: a = pixels 0-3, b = pixels 4-7, one byte each: 0 for a transparent pixel, else tag | pixel. */
+static void ImgRowRef(uint32_t w0, uint32_t w1, bool bpp4, bool hf, uint32_t tag, uint32_t *oa, uint32_t *ob) {
+  uint32_t a = 0, b = 0;
+  for (int x = 0; x < 8; x++) {
+    int s = hf ? x : 7 - x;
+    uint32_t px = ((w0 >> s) & 1) | ((w0 >> (s + 7)) & 2);
+    if (bpp4)
+      px |= (((w1 >> s) & 1) << 2) | ((w1 >> (s + 5)) & 8);
+    uint32_t v = px ? (tag | px) : 0;
+    if (x < 4)
+      a |= v << (8 * x);
+    else
+      b |= v << (8 * (x - 4));
+  }
+  *oa = a;
+  *ob = b;
+}
+
+static inline void ImgRowFast(uint32_t w0, uint32_t w1, bool bpp4, bool hf, uint32_t tag, uint32_t *oa, uint32_t *ob) {
+  const uint32_t *p0 = g_img_spread[hf][w0 & 0xff], *p1 = g_img_spread[hf][(w0 >> 8) & 0xff];
+  uint32_t pa = p0[0] | p1[0] << 1, pb = p0[1] | p1[1] << 1;
+  if (bpp4) {
+    const uint32_t *p2 = g_img_spread[hf][w1 & 0xff], *p3 = g_img_spread[hf][(w1 >> 8) & 0xff];
+    pa |= p2[0] << 2 | p3[0] << 3;
+    pb |= p2[1] << 2 | p3[1] << 3;
+  }
+  const uint32_t tg = tag * 0x01010101u;
+  uint32_t ma = pa, mb = pb;  /* 0xff in every byte whose pixel is not 0 */
+  ma |= ma >> 1;
+  ma |= ma >> 2;
+  mb |= mb >> 1;
+  mb |= mb >> 2;
+  *oa = (pa | tg) & ((ma & 0x01010101u) * 0xffu);
+  *ob = (pb | tg) & ((mb & 0x01010101u) * 0xffu);
+}
+
 /* One tilemap cell into the image (same plane decode as EnsureTile, flips applied here). stride: 512 (wide) or 256. */
 static void ImgRenderCell(int slot, bool bpp4, int tx, int ty, unsigned t, int tileadr, int stride) {
   int base = tileadr + (int)(t & 0x3ff) * (bpp4 ? 16 : 8);
   unsigned tag = ((t >> 6) & 0x80) | (((t >> 10) & 7) << (bpp4 ? 4 : 2));
   bool hf = (t & 0x4000) != 0, vf = (t & 0x8000) != 0;
   uint32_t *d = (uint32_t *)(g_img_tex[slot] + ty * 8 * stride + tx * 8);
+  if (!g_img_spread_ok)
+    ImgSpreadInit();
   for (int y = 0; y < 8; y++, d += stride / 4) {
     int row = vf ? 7 - y : y;
     uint32_t w0 = g_vram[(base + row) & 0x7fff], w1 = bpp4 ? g_vram[(base + 8 + row) & 0x7fff] : 0;
-    uint32_t a = 0, b = 0;
-    for (int x = 0; x < 8; x++) {
-      int s = hf ? x : 7 - x;
-      uint32_t px = ((w0 >> s) & 1) | ((w0 >> (s + 7)) & 2);
-      if (bpp4)
-        px |= (((w1 >> s) & 1) << 2) | ((w1 >> (s + 5)) & 8);
-      uint32_t v = px ? (tag | px) : 0;
-      if (x < 4)
-        a |= v << (8 * x);
-      else
-        b |= v << (8 * (x - 4));
+    uint32_t a, b;
+    if (g_img_fast)
+      ImgRowFast(w0, w1, bpp4, hf, tag, &a, &b);
+    else
+      ImgRowRef(w0, w1, bpp4, hf, tag, &a, &b);
+#if SM_PSP_LOG && SM_PSP_VERIFY
+    {  /* the first rows of a log build are compared with the pixel by pixel conversion; a difference switches it back */
+      static uint32_t nchk;
+      if (g_img_fast && nchk < 200000) {
+        nchk++;
+        uint32_t ra, rb;
+        ImgRowRef(w0, w1, bpp4, hf, tag, &ra, &rb);
+        if (ra != a || rb != b) {
+          PspLog("imgrow MISMATCH f=%u bpp4=%d hf=%d w0=%04x w1=%04x tag=%02x fast=%08x/%08x ref=%08x/%08x, pixel by pixel conversion restored",
+                 (unsigned)g_frame, (int)bpp4, (int)hf, (unsigned)w0, (unsigned)w1, tag, (unsigned)a, (unsigned)b, (unsigned)ra, (unsigned)rb);
+          g_img_fast = false;
+          a = ra;
+          b = rb;
+        }
+        if (nchk == 200000)
+          PspLog("imgrow check: 200000 rows compared, %s", g_img_fast ? "no difference" : "restored");
+      }
     }
+#endif
     d[0] = a;  /* two 32 bit stores per row into the uncached VRAM mirror (the GE is idle here) */
     d[1] = b;
   }
@@ -2452,6 +2528,12 @@ static void ImgUpdate(int l, const BgSnap *s) {
   PROF(if (!fresh && g_img_skip_ok) { g_li_blkm += mapd ? 1u : 0u; g_li_blkt += tiled ? 1u : 0u; })
   PROF(uint32_t us = Now() - t0; g_li_n++; g_li_skip += skip ? 1u : 0u; g_li_upd += (uint32_t)nupd; if ((uint32_t)nupd > g_li_updmax) g_li_updmax = (uint32_t)nupd;
        g_li_us += us; if (us > g_li_usmax) g_li_usmax = us;)
+  PROF(if (fresh) {  /* a new tilemap set-up: every cell is built */
+    static unsigned nfresh;
+    if (nfresh++ < 60)
+      PspLog("imgfresh f=%u BG%d %dx%d cells=%d built=%d us=%u fast=%d", (unsigned)g_frame, l + 1, cols, rows, cols * rows, nupd, (unsigned)us,
+             (int)g_img_fast);
+  })
 }
 
 /* One strip per run and window span and priority pass. Screen row r shows image row (r + 1 + vscroll) & (height - 1) (the SNES
