@@ -719,7 +719,7 @@ static uint32_t g_gws_scene, g_gws_compose, g_gws_mosaic, g_gws_n;
 #endif
 
 #if SM_PSP_LOG
-enum { kLateUs = 17000, kMissUs = 33800, kHitchUs = 24000, kHitchPerWindow = 8 };
+enum { kLateUs = 17000, kMissUs = 33800, kHitchUs = 24000, kHitchPerWindow = 24 };
 
 typedef struct Stat { uint32_t n, sum, max; } Stat;
 typedef struct Prof {
@@ -738,6 +738,23 @@ static uint32_t g_c_tseen, g_c_tdec, g_c_draws, g_c_clut, g_c_verts;
 static uint32_t g_t_prev_end, g_holds;
 static uint32_t g_hitch_n;
 static bool g_hit_verified;  /* this frame was compared with the software image (audit frame) */
+
+/* Frame-rate diagnostic: per-window and whole-run frame-time histogram, the time spent over one vblank by cause, and a summary
+ * of every scene (game state, room, cinematic function). Log output only. */
+enum { kDgBins = 6, kDgCause = 7, kVblankUs = 16683 };
+typedef struct DgAcc {
+  uint32_t n, max, bin[kDgBins];
+  uint64_t sum, lost[kDgCause];  /* us; lost = time beyond one vblank, by the first matching cause */
+} DgAcc;
+typedef struct DgScene {
+  uint32_t f0, n, worst, slow;
+  uint64_t sum;
+  unsigned gs, room, cin, area;
+} DgScene;
+static DgAcc g_dg_win, g_dg_all;
+static DgScene g_dg_sc;
+static uint8_t g_dg_why;     /* why the software PPU draws (or not) in the NEXT frame: 0 skipped, 1 streak, 2 overflow watch, 3 verify, 4 audit */
+static uint16_t g_dg_vclass; /* which verification classes asked for this frame to be compared (0 with ver=1: another class) */
 
 static inline uint32_t Now(void) {
   return sceKernelGetSystemTimeLow();
@@ -7682,6 +7699,14 @@ static bool DrawGe(void) {
   bool cwwant = g_cw_rows != 0 && g_cw_vn < kCwVerify;
   bool m7wwant = g_m7w_frame && g_m7w_vn < kM7WVerify;
   g_verify_now = !g_ppu_skip_draw && ((g_m7_nq > 0 && !g_m7w_frame && g_m7_vn < kM7Verify) || m7wwant || m7iwant || m7big || (g_frame_multisub && g_ms_vn < 6) || brwant || winwant || ovfwant || moswant || bandwant || prevwant || cwwant || g_audit_now);
+#if SM_PSP_LOG
+  /* diagnostic: which classes asked for this frame to be compared (bits: m7 m7w m7i m7big multisub br win ovf mos band prev cw audit) */
+  g_dg_vclass = (uint16_t)(g_ppu_skip_draw ? 0
+                           : ((g_m7_nq > 0 && !g_m7w_frame && g_m7_vn < kM7Verify ? 1 : 0) | (m7wwant ? 2 : 0) | (m7iwant ? 4 : 0) |
+                              (m7big ? 8 : 0) | ((g_frame_multisub && g_ms_vn < 6) ? 16 : 0) | (brwant ? 32 : 0) | (winwant ? 64 : 0) |
+                              (ovfwant ? 128 : 0) | (moswant ? 256 : 0) | (bandwant ? 512 : 0) | (prevwant ? 1024 : 0) |
+                              (cwwant ? 2048 : 0) | (g_audit_now ? 4096 : 0)));
+#endif
   if (((g_frame_multisub && g_ms_vn < 6) || m7big || m7iwant || m7wwant || brwant || winwant || moswant || bandwant || prevwant || cwwant) && g_ppu_skip_draw)
     g_want_ms_verify = true;  /* no software image this frame: have the next one drawn by both */
   if (g_sf_frame && (g_sfo_frame ? g_sfo_vn : g_sf_zero ? g_sf0_vn : g_sf_vn) < kSfVerify) {  /* gates 4t-c/5b/5e: first frames of each class are checked */
@@ -9168,6 +9193,79 @@ static void ProfLog(void) {
 #endif
 
 #if SM_PSP_LOG
+#define DG_WHY(x) (g_dg_why = (uint8_t)(x))
+static const char *const kDgCauseName[kDgCause] = {"ver", "swppu", "m7img", "gewait", "logic", "prep", "other"};
+
+static void DgAdd(DgAcc *a, uint32_t period, unsigned cause) {
+  static const uint32_t kEdge[kDgBins - 1] = {17000, 25000, 34000, 50000, 67000};
+  unsigned b = 0;
+  while (b < kDgBins - 1 && period > kEdge[b])
+    b++;
+  a->n++;
+  a->sum += period;
+  if (period > a->max)
+    a->max = period;
+  a->bin[b]++;
+  if (period > (uint32_t)kLateUs)
+    a->lost[cause] += period - (uint32_t)kVblankUs;
+}
+
+static void DgSceneLog(void) {
+  const DgScene *c = &g_dg_sc;
+  static unsigned lines;
+  if (c->n < 20 || lines++ >= 400)  /* very short scenes and a flood of them are not worth a line */
+    return;
+  unsigned fps100 = (unsigned)((uint64_t)c->n * 100000000ull / c->sum);
+  PspLog("SCENE f=%u..%u gs=%04x room=%04x cin=%04x area=%02x frames=%u fps=%u.%02u worst=%ums slow(>25ms)=%u", (unsigned)c->f0,
+         (unsigned)(c->f0 + c->n - 1), c->gs, c->room, c->cin, c->area, (unsigned)c->n, fps100 / 100, fps100 % 100,
+         (unsigned)(c->worst / 1000), (unsigned)c->slow);
+}
+
+/* Once per frame, after the period is known: accumulate, and close the scene summary when the scene changes. */
+static void DgFrame(uint32_t period, unsigned cause) {
+  DgAdd(&g_dg_win, period, cause);
+  DgAdd(&g_dg_all, period, cause);
+  const unsigned gs = GameRam16(0x998), room = GameRam16(0x79B), cin = GameRam16(0x1F51), area = g_ram[0x79F];
+  DgScene *c = &g_dg_sc;
+  if (c->n && (gs != c->gs || room != c->room || cin != c->cin)) {
+    DgSceneLog();
+    memset(c, 0, sizeof(*c));
+  }
+  if (!c->n) {
+    c->f0 = (uint32_t)g_frame;
+    c->gs = gs;
+    c->room = room;
+    c->cin = cin;
+    c->area = area;
+  }
+  c->n++;
+  c->sum += period;
+  if (period > c->worst)
+    c->worst = period;
+  if (period > 25000u)
+    c->slow++;
+}
+
+/* Every 300 frames: frame rate of the window and of the whole run at the current clock, the frame-time histogram (a frame of
+ * 33 ms is a dropped vblank, 50 ms and more is a visible freeze) and which cause the time over one vblank went to. */
+static void DgWindowLog(void) {
+  const DgAcc *w = &g_dg_win, *a = &g_dg_all;
+  if (!w->n || !a->sum)
+    return;
+  unsigned wf = (unsigned)((uint64_t)w->n * 100000000ull / w->sum), af = (unsigned)((uint64_t)a->n * 100000000ull / a->sum);
+  PspLog("FPS f=%u win=%u.%02u mean=%uus max=%ums | all=%u.%02u | <=17ms=%u <=25=%u <=34=%u <=50=%u <=67=%u >67=%u | gs=%04x room=%04x cin=%04x area=%02x",
+         (unsigned)g_frame, wf / 100, wf % 100, (unsigned)(w->sum / w->n), (unsigned)(w->max / 1000), af / 100, af % 100,
+         (unsigned)w->bin[0], (unsigned)w->bin[1], (unsigned)w->bin[2], (unsigned)w->bin[3], (unsigned)w->bin[4],
+         (unsigned)w->bin[5], GameRam16(0x998), GameRam16(0x79B), GameRam16(0x1F51), (unsigned)g_ram[0x79F]);
+  char buf[128];
+  int len = 0;
+  buf[0] = 0;
+  for (unsigned i = 0; i < kDgCause; i++)
+    len += snprintf(buf + len, sizeof(buf) - (size_t)len, " %s=%u", kDgCauseName[i], (unsigned)(w->lost[i] / 1000));
+  PspLog("  lost ms over one vblank:%s", buf);
+  memset(&g_dg_win, 0, sizeof(g_dg_win));
+}
+
 /* Every frame that leaves the GE path while the GE is active (first 80): which kind, why, and where in the game. After one
  * such frame the software PPU draws kSkipAfter frames, which is the burst of ~35 ms ppu hitches. */
 static void NoteFallback(const char *kind) {
@@ -9181,11 +9279,15 @@ static void NoteFallback(const char *kind) {
 #define NOTE_FALLBACK(kind) NoteFallback(kind)
 #else
 #define NOTE_FALLBACK(kind) ((void)0)
+#define DG_WHY(x) ((void)0)
 #endif
 
 static void PspRenderer_EndDraw(void) {
   PROF(uint32_t t_enter = Now();)
   g_frame++;
+#if SM_PSP_LOG
+  const unsigned dg_why_this = g_dg_why;  /* the decision the previous frame made for this one's software PPU */
+#endif
   g_prep_us = g_build_us = g_gewait_us = g_vbwait_us = 0;
   /* Before anything writes a buffer the GE may still read (atlases, CLUTs, layer images, g_m7img, g_texture, g_gu_list)
    * and before the software path starts a list. Its waits are the previous frame's (see GeWait). */
@@ -9280,9 +9382,11 @@ static void PspRenderer_EndDraw(void) {
 
   /* Decide for the NEXT frame whether the software PPU may skip its drawing. */
   g_ppu_skip_draw = g_ge_active && g_streak >= kSkipAfter;
+  DG_WHY(g_ppu_skip_draw ? 0 : 1);
   if (g_ovf_watch) {
     g_ovf_watch--;
     g_ppu_skip_draw = false;
+    DG_WHY(2);
   }
   if (g_want_ms_verify) {  /* the first frames of each class are checked against the software image */
     g_want_ms_verify = false;
@@ -9290,6 +9394,7 @@ static void PspRenderer_EndDraw(void) {
       g_verify_next = g_frame + (uint32_t)SM_PSP_VERIFY_GAP;  /* falls inside the gap is dropped, the class asks again */
       g_verify_armed++;                                       /* on the next frame it is still being verified */
       g_ppu_skip_draw = false;
+      DG_WHY(3);
       g_audit_now = true;
     } else {
       g_verify_deferred++;
@@ -9298,6 +9403,7 @@ static void PspRenderer_EndDraw(void) {
 #if SM_PSP_LOG
   if (g_ge_active && kAuditFrames && (g_frame + 1) % kAuditFrames == 0) {  /* next frame: software PPU draws too, GE image gets checked */
     g_ppu_skip_draw = false;
+    DG_WHY(4);
     g_audit_now = true;
   }
 #endif
@@ -9340,18 +9446,26 @@ static void PspRenderer_EndDraw(void) {
       p->miss++;
     if (held)
       p->hold++;
+    {
+      const uint32_t dg_game = t_enter - g_t_prev_end;
+      const uint32_t dg_logic = dg_game > g_cap_us + g_ppu_us ? dg_game - g_cap_us - g_ppu_us : 0;
+      DgFrame(period, g_hit_verified ? 0u : g_ppu_us ? 1u : g_m7i_us ? 2u : g_gewait_us > 3000 ? 3u : dg_logic > 8000 ? 4u
+                      : (g_prep_us + g_build_us) > 6000 ? 5u : 6u);
+    }
     if (period > kHitchUs && g_hitch_n++ < (uint32_t)kHitchPerWindow) {
       uint32_t game = t_enter - g_t_prev_end;
       uint32_t logic = game > g_cap_us + g_ppu_us ? game - g_cap_us - g_ppu_us : 0;
-      PspLog("HITCH f=%u period=%u logic=%u cap=%u ppu=%u prep=%u build=%u gewait=%u vb=%u | ge=%d held=%d ver=%d tint=%d bruns=%d m7=%d/%d ovf=%d mos=%d sh=%d sf=%d w2=%d",
+      PspLog("HITCH f=%u period=%u logic=%u cap=%u ppu=%u prep=%u build=%u gewait=%u vb=%u | ge=%d held=%d ver=%d tint=%d bruns=%d m7=%d/%d ovf=%d mos=%d sh=%d sf=%d w2=%d | why=%u vc=%x st=%u gs=%04x room=%04x cin=%04x",
              (unsigned)g_frame, (unsigned)period, (unsigned)logic, (unsigned)g_cap_us, (unsigned)g_ppu_us,
              (unsigned)g_prep_us, (unsigned)g_build_us, (unsigned)g_gewait_us, (unsigned)g_vbwait_us,
              drew_ge, held, g_hit_verified, g_ntint, g_nbruns, g_m7_nq, g_m7_img, g_ovf_rows, g_mos_frame,
-             g_sh_frame, g_sf_frame, g_w2_frame);
+             g_sh_frame, g_sf_frame, g_w2_frame, dg_why_this, (unsigned)g_dg_vclass, (unsigned)g_streak, GameRam16(0x998),
+             GameRam16(0x79B), GameRam16(0x1F51));
     }
   }
   g_ppu_us = g_cap_us = g_cpy_us = g_m7i_us = 0;
   g_hit_verified = false;
+  g_dg_vclass = 0;
   g_pc_class = g_pc_bg = g_pc_obj = g_pc_emit = 0;
   g_c_tseen = g_c_tdec = g_c_draws = g_c_clut = g_c_verts = 0;
   g_t_prev_end = t_end;
@@ -9461,6 +9575,7 @@ static void PspRenderer_EndDraw(void) {
     S5I_LOG();
   }
   if ((g_frame % 300) == 0) {
+    DgWindowLog();
     if (g_hitch_n > (uint32_t)kHitchPerWindow)
       PspLog("hitches: %u in the last 300 frames (first %d shown)", (unsigned)g_hitch_n, (int)kHitchPerWindow);
     g_hitch_n = 0;
