@@ -103,6 +103,10 @@
 #define SM_PSP_COMPOSE_STRIP 32  /* destination columns per sprite of the main composition quad (0: one 360 px sprite). Hardware: one wide scaled sprite 5.7 ms of GE time, 32 px columns 1.1 ms (cbench) */
 #endif
 
+#ifndef SM_PSP_VERIFY
+#define SM_PSP_VERIFY 1  /* 0: play build, no verification or audit frames (the software PPU still draws until the GE streak is reached) */
+#endif
+
 #ifndef SM_PSP_VERIFY_GAP
 #define SM_PSP_VERIFY_GAP 12  /* frames between two software-PPU verification frames in steady state (0: back to back, as before) */
 #endif
@@ -7782,6 +7786,11 @@ static bool DrawGe(void) {
 #endif
   if (g_m7w_frame)
     g_frames_m7w++;
+#if !SM_PSP_VERIFY
+  g_verify_now = false;  /* play build: nothing is compared, so the frame can be queued asynchronously */
+  g_want_ms_verify = false;
+  g_ovf_watch = 0;
+#endif
   g_audit_now = false;
   Present(true);
   return true;
@@ -9400,7 +9409,7 @@ static void PspRenderer_EndDraw(void) {
       g_verify_deferred++;
     }
   }
-#if SM_PSP_LOG
+#if SM_PSP_LOG && SM_PSP_VERIFY
   if (g_ge_active && kAuditFrames && (g_frame + 1) % kAuditFrames == 0) {  /* next frame: software PPU draws too, GE image gets checked */
     g_ppu_skip_draw = false;
     DG_WHY(4);
