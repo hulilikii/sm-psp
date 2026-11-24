@@ -1365,12 +1365,43 @@ void InitializeHud(void) {  // 0x809A79
     DrawTwoHudDigits(addrl_kDigitTilesetsWeapon, samus_super_missiles, 0x9C);
   if (samus_max_power_bombs)
     DrawTwoHudDigits(addrl_kDigitTilesetsWeapon, samus_power_bombs, 0xA2);
+  // Initial ammo digits are drawn immediately; synchronize animation state
+  // so HandleHudTilemap doesn't animate them from zero during HUD setup.
+  samus_prev_missiles = samus_missiles;
+  samus_prev_super_missiles = samus_super_missiles;
+  samus_prev_power_bombs = samus_power_bombs;
   ToggleHudItemHighlight(hud_item_index, 0x1000);
   ToggleHudItemHighlight(samus_prev_hud_item_index, 0x1400);
   HandleHudTilemap();
 }
 
 static const uint16 kEnergyTankIconTilemapOffsets[14] = { 0x42, 0x44, 0x46, 0x48, 0x4a, 0x4c, 0x4e, 2, 4, 6, 8, 0xa, 0xc, 0xe };
+
+// Animate HUD counters using the original SNES frame counter.
+// A mask of 0 updates every frame; mask 3 updates every fourth frame.
+static uint16 UpdateHudCounterScaled(uint16 previous, uint16 current, uint16 frame_mask) {
+  if (frame_mask && (nmi_frame_counter_word & frame_mask))
+    return previous;
+
+  if (previous == current)
+    return previous;
+
+  uint16 delta = previous < current ? current - previous : previous - current;
+  delta >>= 2;
+  if (!delta)
+    delta = 1;
+
+  if (previous < current) {
+    previous += delta;
+    if (previous > current)
+      previous = current;
+  } else {
+    previous -= delta;
+    if (previous < current)
+      previous = current;
+  }
+  return previous;
+}
 
 void HandleHudTilemap(void) {  // 0x809B44
   if (reserve_health_mode == 1) {
@@ -1385,10 +1416,11 @@ void HandleHudTilemap(void) {  // 0x809B44
     hud_tilemap[73] = v1[5];
   }
   if (samus_health != samus_prev_health) {
-    samus_prev_health = samus_health;
+    samus_prev_health = UpdateHudCounterScaled(
+        samus_prev_health, samus_health, 0);
 
-    uint16 r20 = SnesDivide(samus_health, 100);
-    uint16 r18 = SnesModulus(samus_health, 100);
+    uint16 r20 = SnesDivide(samus_prev_health, 100);
+    uint16 r18 = SnesModulus(samus_prev_health, 100);
     int v2 = 0;
     int n = SnesDivide(samus_max_health, 100) + 1;
     do {
@@ -1405,19 +1437,22 @@ void HandleHudTilemap(void) {  // 0x809B44
     DrawTwoHudDigits(addrl_kDigitTilesetsHealth, r18, 0x8C);
   }
   if (samus_max_missiles && samus_missiles != samus_prev_missiles) {
-    samus_prev_missiles = samus_missiles;
-    DrawThreeHudDigits(addrl_kDigitTilesetsWeapon, samus_missiles, 0x94);
+    samus_prev_missiles = UpdateHudCounterScaled(
+        samus_prev_missiles, samus_missiles, 3);
+    DrawThreeHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_missiles, 0x94);
   }
   if (samus_max_super_missiles && samus_super_missiles != samus_prev_super_missiles) {
-    samus_prev_super_missiles = samus_super_missiles;
+    samus_prev_super_missiles = UpdateHudCounterScaled(
+        samus_prev_super_missiles, samus_super_missiles, 3);
     if ((joypad_dbg_flags & 0x1F40) != 0)
       DrawThreeHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_super_missiles, 0x9C);
     else
       DrawTwoHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_super_missiles, 0x9C);
   }
   if (samus_max_power_bombs && samus_power_bombs != samus_prev_power_bombs) {
-    samus_prev_power_bombs = samus_power_bombs;
-    DrawTwoHudDigits(addrl_kDigitTilesetsWeapon, samus_power_bombs, 0xA2);
+    samus_prev_power_bombs = UpdateHudCounterScaled(
+        samus_prev_power_bombs, samus_power_bombs, 3);
+    DrawTwoHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_power_bombs, 0xA2);
   }
   if (hud_item_index != samus_prev_hud_item_index) {
     ToggleHudItemHighlight(hud_item_index, 0x1000);
