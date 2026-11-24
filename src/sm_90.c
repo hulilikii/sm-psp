@@ -2137,11 +2137,10 @@ void Samus_Movement_13_SpringBallFalling(void) {  // 0x90A703
 }
 
 void Samus_Movement_14_WallJumping(void) {  // 0x90A734
-  if (sign16(samus_anim_frame - 23)) {
-    if (!sign16(samus_anim_frame - 3) && !sign16(flare_counter - 60))
-      samus_contact_damage_index = 4;
-  } else {
+  if ((equipped_items & 0x0008) != 0) {
     samus_contact_damage_index = 3;
+  } else if (!sign16(flare_counter - 60)) {
+    samus_contact_damage_index = 4;
   }
   Samus_JumpingMovement();
 }

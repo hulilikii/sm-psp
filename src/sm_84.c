@@ -2240,15 +2240,8 @@ uint8 PlmSetup_RespawningShotBlock(uint16 j) {  // 0x84CE6B
 }
 
 uint8 PlmSetup_RespawningBombBlock(uint16 j) {  // 0x84CE83
-  if ((speed_boost_counter & 0xF00) == 1024
-      || samus_pose == kPose_81_FaceR_Screwattack
-      || samus_pose == kPose_82_FaceL_Screwattack
-      || samus_pose == kPose_C9_FaceR_Shinespark_Horiz
-      || samus_pose == kPose_CA_FaceL_Shinespark_Horiz
-      || samus_pose == kPose_CB_FaceR_Shinespark_Vert
-      || samus_pose == kPose_CC_FaceL_Shinespark_Vert
-      || samus_pose == kPose_CD_FaceR_Shinespark_Diag
-      || samus_pose == kPose_CE_FaceL_Shinespark_Diag) {
+if (samus_contact_damage_index >= 1 &&
+    samus_contact_damage_index <= 3) {
     int v2 = j >> 1;
     int v3 = plm_block_indices[v2] >> 1;
     uint16 v4 = level_data[v3] & 0xF000 | 0x58;
