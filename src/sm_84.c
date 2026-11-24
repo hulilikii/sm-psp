@@ -746,6 +746,7 @@ const uint8 *PlmInstr_ActivateEnergyStation(const uint8 *plmp, uint16 k) {  // 0
       samus_max_reserve_health != samus_reserve_health) {
     samus_health = samus_max_health;
     samus_reserve_health = samus_max_reserve_health;
+    HandleHudTilemapForRefillStation();
     DisplayMessageBox(0x15);
   }
   CallSomeSamusCode(1);
@@ -759,6 +760,7 @@ const uint8 *PlmInstr_ActivateMissileStation(const uint8 *plmp, uint16 k) {  // 
     samus_missiles = samus_max_missiles;
     samus_super_missiles = samus_max_super_missiles;
     samus_power_bombs = samus_max_power_bombs;
+    HandleHudTilemapForRefillStation();
     DisplayMessageBox(0x16);
   }
   CallSomeSamusCode(1);

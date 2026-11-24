@@ -880,7 +880,7 @@ CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
     DrawSamusEnemiesAndProjectiles();
     QueueEnemyBG2TilemapTransfers();
   }
-  HandleHudTilemap();
+  HandleHudTilemapForGameFrame();
   CalculateLayer2PosAndScrollsWhenScrolling();
   RunRoomMainCode();
   HandleSamusOutOfHealthAndGameTile();
