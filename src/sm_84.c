@@ -484,6 +484,7 @@ const uint8 *PlmInstr_CollectHealthEnergyTank(const uint8 *plmp, uint16 k) {  //
   bool first = samus_max_health < 100;
   samus_max_health += GET_WORD(plmp);
   samus_health = samus_max_health;
+  samus_reserve_health = samus_max_reserve_health;
   PlayRoomMusicTrackAfterAFrames(0x168);
   if (first)
     DisplayMessageBox(1);
@@ -493,6 +494,7 @@ const uint8 *PlmInstr_CollectHealthEnergyTank(const uint8 *plmp, uint16 k) {  //
 const uint8 *PlmInstr_CollectHealthReserveTank(const uint8 *plmp, uint16 k) {  // 0x848986
   bool first = samus_max_reserve_health == 0;
   samus_max_reserve_health += GET_WORD(plmp);
+  samus_reserve_health = samus_max_reserve_health;
   if (!reserve_health_mode)
     ++reserve_health_mode;
   PlayRoomMusicTrackAfterAFrames(0x168);
@@ -740,9 +742,11 @@ const uint8 *PlmInstr_ActivateMapStation(const uint8 *plmp, uint16 k) {  // 0x84
 }
 
 const uint8 *PlmInstr_ActivateEnergyStation(const uint8 *plmp, uint16 k) {  // 0x848CAF
-  if (samus_max_health != samus_health) {
-    DisplayMessageBox(0x15);
+  if (samus_max_health != samus_health ||
+      samus_max_reserve_health != samus_reserve_health) {
     samus_health = samus_max_health;
+    samus_reserve_health = samus_max_reserve_health;
+    DisplayMessageBox(0x15);
   }
   CallSomeSamusCode(1);
   return plmp;
@@ -750,8 +754,8 @@ const uint8 *PlmInstr_ActivateEnergyStation(const uint8 *plmp, uint16 k) {  // 0
 
 const uint8 *PlmInstr_ActivateMissileStation(const uint8 *plmp, uint16 k) {  // 0x848CD0
   if (samus_max_missiles != samus_missiles) {
-    DisplayMessageBox(0x16);
     samus_missiles = samus_max_missiles;
+    DisplayMessageBox(0x16);
   }
   CallSomeSamusCode(1);
   return plmp;
@@ -1114,7 +1118,8 @@ const uint8 *PlmInstr_Draw0x38FramesOfLeftTreadmill(const uint8 *plmp, uint16 k)
 }
 
 const uint8 *PlmInstr_GotoIfSamusHealthFull(const uint8 *plmp, uint16 k) {  // 0x84AE35
-  if (samus_max_health != samus_health)
+  if (samus_max_health != samus_health ||
+      samus_max_reserve_health != samus_reserve_health)
     return plmp + 2;
   CallSomeSamusCode(1);
   return INSTRB_RETURN_ADDR(GET_WORD(plmp));
@@ -1252,7 +1257,8 @@ uint8 PlmSetup_B6E3_EnergyStationRightAccess(uint16 j) {  // 0x84B26D
   if ((samus_collision_direction & 0xF) != 0
       || samus_pose != kPose_8A_FaceL_Ranintowall
       || (samus_pose_x_dir & 4) == 0
-      || samus_health == samus_max_health) {
+      || (samus_health == samus_max_health &&
+          samus_reserve_health == samus_max_reserve_health)) {
     plm_header_ptr[j >> 1] = 0;
     return 1;
   } else {
@@ -1264,7 +1270,8 @@ uint8 PlmSetup_B6E7_EnergyStationLeftAccess(uint16 j) {  // 0x84B29D
   if ((samus_collision_direction & 0xF) == 1
       && samus_pose == kPose_89_FaceR_Ranintowall
       && (samus_pose_x_dir & 8) != 0
-      && samus_health != samus_max_health) {
+      && (samus_health != samus_max_health ||
+          samus_reserve_health != samus_max_reserve_health)) {
     return ActivateStationIfSamusCannonLinedUp(plm_block_indices[j >> 1] + 2, j);
   }
   plm_header_ptr[j >> 1] = 0;

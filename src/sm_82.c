@@ -2412,6 +2412,8 @@ static Func_V *const kEquipmentScreenCategories[4] = {  // 0x82AC4F
   EquipmentScreenCategory_Boots,
 };
 void EquipmentScreenMain(void) {
+  if (pausemenu_equipment_category_item != 0x0100)
+    pausemenu_reserve_tank_delay_ctr = 0;
   kEquipmentScreenCategories[(uint8)pausemenu_equipment_category_item]();
   EquipmentScreenDrawItemSelector();
   EquipmentScreenDisplayReserveTankAmount();
@@ -2607,24 +2609,39 @@ void EquipmentScreenHudReserveAutoTilemap_Off(void) {  // 0x82AF33
   hud_tilemap[73] = 11279;
 }
 static const uint16 kReserveTankEnergyTransferPerFrame = 1;
+
+// Mirrors MainReserveRoutine in the reserve-tank improvement ASM patch by nodever2.
+// Completion is reported on the next call after the last reserve unit is used.
+static bool TransferHealthFromReserveTank(void) {
+  if (!samus_reserve_health)
+    return true;
+
+  uint16 next_health = samus_health + kReserveTankEnergyTransferPerFrame;
+  if ((int16)(next_health - samus_max_health) > 0)
+    return true;
+
+  samus_health = next_health;
+  --samus_reserve_health;
+  return false;
+}
+
 void EquipmentScreenCategory_Tanks_1(void) {  // 0x82AF4F
   if (!pausemenu_reserve_tank_delay_ctr) {
     if ((joypad1_newkeys & kButton_A) == 0)
       return;
     pausemenu_reserve_tank_delay_ctr = (samus_reserve_health + 7) & 0xFFF8;
+  } else if ((joypad1_newkeys & kButton_A) != 0) {
+    pausemenu_equipment_category_item = 0;
+    pausemenu_reserve_tank_delay_ctr = 0;
+    return;
   }
+  
   if ((--pausemenu_reserve_tank_delay_ctr & 7) == 7)
     QueueSfx3_Max6(0x2D);
-  samus_health += kReserveTankEnergyTransferPerFrame;
-  if ((int16)(samus_health - samus_max_health) < 0) {
-    samus_reserve_health -= kReserveTankEnergyTransferPerFrame;
-    if ((int16)samus_reserve_health > 0)
-      return;
-    samus_health += samus_reserve_health;
-  } else {
-    samus_health = samus_max_health;
-  }
-  samus_reserve_health = 0;
+    
+  if (!TransferHealthFromReserveTank())
+    return;
+
   pausemenu_reserve_tank_delay_ctr = 0;
   EquipmentScreenEnergyArrowGlow_Off();
   pausemenu_equipment_category_item = 0;
@@ -3432,13 +3449,13 @@ void sub_82DB41(void) {  // 0x82DB41
 
 void HandleSamusOutOfHealthAndGameTile(void) {  // 0x82DB69
   if ((int16)samus_health <= 0) {
+    if (game_state != kGameState_8_MainGameplay)
+      return;
     if ((reserve_health_mode & 1) != 0 && samus_reserve_health) {
       time_is_frozen_flag = 0x8000;
       game_state = kGameState_27_ReserveTanksAuto;
       CallSomeSamusCode(0x1B);
     } else {
-      if (game_state != kGameState_8_MainGameplay)
-        return;
       time_is_frozen_flag = 0x8000;
       CallSomeSamusCode(0x11);
       game_state = kGameState_19_SamusNoHealth;
@@ -3475,24 +3492,13 @@ CoroutineRet GameState_27_ReserveTanksAuto(void) {  // 0x82DC10
 }
 
 uint8 RefillHealthFromReserveTanks(void) {  // 0x82DC31
-  if (samus_reserve_health) {
-    if ((nmi_frame_counter_word & 7) == 0)
-      QueueSfx3_Max3(0x2D);
-    if ((int16)(++samus_health - samus_max_health) >= 0) {
-      samus_health = samus_max_health;
-LABEL_9:
-      samus_reserve_health = 0;
-      return samus_reserve_health == 0;
-    }
-    bool v0 = (--samus_reserve_health & 0x8000) != 0;
-    if (!samus_reserve_health)
-      goto LABEL_9;
-    if (v0) {
-      samus_health += samus_reserve_health;
-      goto LABEL_9;
-    }
-  }
-  return samus_reserve_health == 0;
+  samus_periodic_subdamage = 0;
+  ++samus_invincibility_timer;
+
+  if ((nmi_frame_counter_word & 7) == 0)
+    QueueSfx3_Max3(0x2D);
+
+  return TransferHealthFromReserveTank();
 }
 
 CoroutineRet GameState_19_SamusNoHealth(void) {  // 0x82DC80
