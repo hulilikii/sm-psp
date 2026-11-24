@@ -9190,12 +9190,14 @@ static void PspRenderer_EndDraw(void) {
   /* Before anything writes a buffer the GE may still read (atlases, CLUTs, layer images, g_m7img, g_texture, g_gu_list)
    * and before the software path starts a list. Its waits are the previous frame's (see GeWait). */
   const bool waited = GeWait();
-  bool drew_ge = false, held = false;
+  bool drew_ge = false, held = false, handoff = false;
 
   if (g_ge_active && g_line_count > 0) {
-    if (g_mosaic_size > 1 && g_lines[0].forced)
+    if (g_mosaic_size > 1 && g_lines[0].forced) {
       held = true;  /* mosaic handoff: the screen is blanked while the next scene loads; keep showing the last (peak mosaic) image */
-    else if (DrawGe())
+      handoff = true;  /* expected, not a GE misprediction: the GE streak and the PPU skip stay (the log showed each handoff
+                        * cost 8 software-PPU frames of ~35 ms) */
+    } else if (DrawGe())
       drew_ge = true;
     else if (g_ppu_skip_draw)
       held = true;  /* the software PPU skipped this frame, so there is no software image to fall back to */
@@ -9210,11 +9212,11 @@ static void PspRenderer_EndDraw(void) {
     /* Misprediction: repeat the previous image for one frame (nothing is drawn
      * or swapped, so the panel keeps showing it), keep the pacing, and let the
      * software PPU draw the next frames until the GE has been stable again. */
-    NOTE_FALLBACK("held");
+    NOTE_FALLBACK(handoff ? "handoff" : "held");
     g_frames_sw++;
     PROF(g_holds++;)
-    g_streak = 0;
-    g_ppu_skip_draw = false;
+    if (!handoff)
+      g_streak = 0;  /* a misprediction: draw the next frames in software until the GE has been stable again */
     if (!waited)  /* GeWait() has just waited for a vblank (if ahead) and queued a frame */
       Pace();
     g_vcount_last = sceDisplayGetVcount();
