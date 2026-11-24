@@ -526,14 +526,12 @@ void GrappleBeamFunc_BD95(void) {  // 0x9BBD95
   uint16 v1;
 
   if (!sign16(v0 - 64)) {
-    slow_grabble_scrolling_flag = 1;
-LABEL_7:
+  LABEL_7:
     samus_anim_frame_timer = 15;
     v1 = kGrappleBeam_SwingingData[HIBYTE(grapple_beam_end_angles_mirror)];
     samus_anim_frame = v1;
     goto LABEL_8;
   }
-  slow_grabble_scrolling_flag = 0;
   if (grapple_beam_end_angle_hi << 8 != 0x8000)
     goto LABEL_7;
   if (sign16(samus_anim_frame - 64)) {
@@ -766,7 +764,6 @@ void GrappleBeamFunc_FireGoToCancel(void) {  // 0x9BC51E
   grapple_beam_grapple_start_x = 0;
   grapple_beam_unkD38 = 0;
   grapple_beam_unkD36 = 0;
-  slow_grabble_scrolling_flag = 0;
   GrappleFunc_AF87();
   samus_draw_handler = FUNC16(sub_90EB86);
   grapple_walljump_timer = 0;
@@ -803,6 +800,72 @@ uint8 ClearCarry_12(void) {  // 0x9BC701
   return 0;
 }
 
+static uint16 GrappleBeam_SetupSwing(void) {
+  uint16 x_subspeed = samus_x_base_subspeed;
+  uint16 y_subspeed = samus_y_subspeed;
+
+  // Match the two ASL/ROL pairs in the original 65816 patch.
+  samus_x_base_speed = (uint16)((samus_x_base_speed << 2) | (x_subspeed >> 14));
+  samus_x_base_subspeed = (uint16)(x_subspeed << 2);
+  samus_y_speed = (uint16)((samus_y_speed << 2) | (y_subspeed >> 14));
+  samus_y_subspeed = (uint16)(y_subspeed << 2);
+
+  Point16U base = { samus_x_pos, samus_y_pos };
+  Point16U velocity_endpoint = base;
+  if ((samus_pose_x_dir & 8) != 0)
+    velocity_endpoint.x = (uint16)(velocity_endpoint.x + samus_x_base_speed);
+  else
+    velocity_endpoint.x = (uint16)(velocity_endpoint.x - samus_x_base_speed);
+  if ((samus_y_dir & 2) != 0)
+    velocity_endpoint.y = (uint16)(velocity_endpoint.y + samus_y_speed);
+  else
+    velocity_endpoint.y = (uint16)(velocity_endpoint.y - samus_y_speed);
+
+  PairU16 distance_and_angle = EnemyFunc_ACA8(base, velocity_endpoint);
+  // XBA followed by three logical shifts converts the distance to angular
+  // speed (distance * 32 for the normal < 256px velocity vector).
+  uint16 swapped_distance = (uint16)((distance_and_angle.k << 8) |
+                                     (distance_and_angle.k >> 8));
+  uint16 angular_speed = swapped_distance >> 3;
+  uint16 angle = distance_and_angle.j;
+  bool invert = false;
+
+  switch (grapple_beam_direction) {
+  case 0:
+  case 5:
+    invert = true;
+    break;
+  case 1:
+  case 2:
+  case 3:
+    invert = angle >= 0x40 && angle < 0xC0;
+    break;
+  case 6:
+  case 7:
+  case 8:
+    invert = angle < 0x40 || angle >= 0xC0;
+    break;
+  default:
+    break;
+  }
+  grapple_beam_unkD26 = invert ? (uint16)(0 - angular_speed) : angular_speed;
+
+  // Check the tile directly below the grapple anchor before choosing the
+  // initial beam-length delta. Treat an out-of-room position as solid rather
+  // than indexing beyond level_data.
+  uint32 below_y = (uint32)grapple_beam_end_y_pos + 16;
+  bool solid_below = true;
+  if (below_y <= 0xFFFF &&
+      (grapple_beam_end_x_pos >> 4) < room_width_in_blocks &&
+      (below_y >> 4) < room_height_in_blocks) {
+    solid_below = GrappleBeam_IsSolidBlockAt(grapple_beam_end_x_pos, (uint16)below_y);
+  }
+
+  if (solid_below || grapple_beam_length >= 64)
+    return (uint16)-8;
+  return 2;
+}
+
 void GrappleBeamFunc_Firing(void) {  // 0x9BC703
   if ((button_config_shoot_x & joypad1_lastkeys) == 0) {
     grapple_beam_function = FUNC16(GrappleBeamFunc_Cancel);
@@ -831,7 +894,7 @@ void GrappleBeamFunc_Firing(void) {  // 0x9BC703
   }
   QueueSfx1_Max6(6);
   HandleConnectingGrapple();
-  grapple_beam_length_delta = -8;
+  grapple_beam_length_delta = GrappleBeam_SetupSwing();
   samus_grapple_flags |= 1;
 }
 
@@ -902,7 +965,6 @@ void GrappleBeamFunc_Cancel(void) {  // 0x9BC856
   grapple_beam_direction = 0;
   grapple_beam_unkD36 = 0;
   grapple_walljump_timer = 0;
-  slow_grabble_scrolling_flag = 0;
   grapple_varCF6 = 0;
   grapple_beam_flags = 0;
   flare_counter = 0;
@@ -1073,7 +1135,6 @@ void GrappleBeamFunc_ReleaseFromSwing(void) {  // 0x9BCB8B
   grapple_beam_direction = 0;
   grapple_beam_unkD36 = 0;
   grapple_walljump_timer = 0;
-  slow_grabble_scrolling_flag = 0;
   grapple_varCF6 = 0;
   grapple_beam_flags = 0;
   flare_counter = 0;

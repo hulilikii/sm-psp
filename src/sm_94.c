@@ -2051,6 +2051,41 @@ static uint8 BlockReactGrapple_SpikeBlock(CollInfo *ci) {  // 0x94A7FD
     return SpawnPLM(kBlockReactGrapple_SpikeBlockPlm[BTS[cur_block_index]]);
 }
 
+static bool GrappleBeam_PositionInRoom(uint16 x, uint16 y) {
+  return (x >> 4) < room_width_in_blocks && (y >> 4) < room_height_in_blocks;
+}
+
+static uint8 BlockReactGrappleWithAdjacentTiles(void) {
+  static const int16 kOffsets[4][2] = {
+    { -12, 0 }, { 0, -12 }, { 12, 0 }, { 0, 12 },
+  };
+  uint16 original_x = grapple_beam_end_x_pos;
+  uint16 original_y = grapple_beam_end_y_pos;
+
+  // The centre is checked first, exactly as in the original collision path.
+  uint8 result = BlockReactGrapple();
+  if ((result & 0x40) != 0)
+    return result;
+
+  for (uint32 i = 0; i < arraysize(kOffsets); i++) {
+    uint16 x = (uint16)(original_x + kOffsets[i][0]);
+    uint16 y = (uint16)(original_y + kOffsets[i][1]);
+    if (!GrappleBeam_PositionInRoom(x, y))
+      continue;
+
+    grapple_beam_end_x_pos = x;
+    grapple_beam_end_y_pos = y;
+    result = BlockReactGrapple();
+    if ((result & 0x40) != 0)
+      return result;
+  }
+
+  // Recheck the centre last so its collision flags are returned on a miss.
+  grapple_beam_end_x_pos = original_x;
+  grapple_beam_end_y_pos = original_y;
+  return BlockReactGrapple();
+}
+
 uint8 BlockCollGrappleBeam(void) {  // 0x94A85B
   int32 grapple_vel_x = (int32)(int16)grapple_beam_extension_x_velocity * 64;
   int32 grapple_vel_y = (int32)(int16)grapple_beam_extension_y_velocity * 64;
@@ -2062,7 +2097,7 @@ uint8 BlockCollGrappleBeam(void) {  // 0x94A85B
         __PAIR32__(grapple_beam_end_x_offset, grapple_beam_end_x_suboffset) + __PAIR32__(samus_x_pos, samus_x_subpos) + ((uint32)grapple_beam_origin_x_offset << 16));
     SetHiLo(&grapple_beam_end_y_pos, &grapple_beam_end_y_subpos,
         __PAIR32__(grapple_beam_end_y_offset, grapple_beam_end_y_suboffset) + __PAIR32__(samus_y_pos, samus_y_subpos) + ((uint32)grapple_beam_origin_y_offset << 16));
-    result = BlockReactGrapple();
+    result = BlockReactGrappleWithAdjacentTiles();
     if ((result & 0x40) != 0 && (result & 1) != 0) {
       grapple_beam_end_x_pos = grapple_beam_end_x_pos & 0xFFF0 | 8;
       grapple_beam_end_y_pos = grapple_beam_end_y_pos & 0xFFF0 | 8;
@@ -2070,6 +2105,69 @@ uint8 BlockCollGrappleBeam(void) {  // 0x94A85B
     }
   }
   return result;
+}
+
+// Read-only solid-tile classification for the grapple anchor length check.
+// Unlike BlockReactGrapple(), this must not spawn PLMs or change cur_block_index
+// or grapple_beam_flags. Reactive spike/grapple blocks count as solid when BTS
+// permits their reaction, independent of whether a PLM slot is currently free.
+bool GrappleBeam_IsSolidBlockAt(uint16 x, uint16 y) {
+  uint32 width = room_width_in_blocks;
+  uint32 height = room_height_in_blocks;
+  uint32 block_x = x >> 4;
+  uint32 block_y = y >> 4;
+
+  if (block_x >= width || block_y >= height || width == 0)
+    return false;
+
+  uint32 block_index = block_y * width + block_x;
+  uint32 block_count = width * height;
+  // level_data occupies 0x3200 words before the BTS array in WRAM.
+  if (block_count > 0x3200)
+    return false;
+
+  for (uint32 n = 0; n < block_count; n++) {
+    if (block_index >= block_count)
+      return false;
+
+    uint16 block_type = (level_data[block_index] & 0xF000) >> 12;
+    uint8 bts = BTS[block_index];
+    switch (block_type) {
+    case 1:  // Solid block.
+    case 8:  // BlockReactGrapple returns carry set.
+    case 9:  // BlockReactGrapple returns carry set.
+    case 11: // BlockReactGrapple returns carry set.
+    case 12: // Shootable solid block.
+    case 15: // Bombable solid block.
+      return true;
+
+    case 10: // Spike block: only reacts when BTS bit 7 is clear.
+    case 14: // Grapple block: only reacts when BTS bit 7 is clear.
+      return (bts & 0x80) == 0;
+
+    case 5: { // Horizontal extension; follow the signed BTS block offset.
+      int32 next_x = (int32)(block_index % width) + (int8)bts;
+      if (bts == 0 || next_x < 0 || (uint32)next_x >= width)
+        return false;
+      block_index = (uint32)((int32)block_index + (int8)bts);
+      break;
+    }
+
+    case 13: { // Vertical extension; follow the signed BTS row offset.
+      int32 next_y = (int32)(block_index / width) + (int8)bts;
+      if (bts == 0 || next_y < 0 || (uint32)next_y >= height)
+        return false;
+      block_index = (uint32)((int32)block_index + (int32)(int8)bts * (int32)width);
+      break;
+    }
+
+    default: // Air, shootable/bombable air, and non-solid block types.
+      return false;
+    }
+  }
+
+  // Malformed extension cycles must not loop indefinitely.
+  return false;
 }
 
 uint8 BlockReactGrapple(void) {  // 0x94A91F
@@ -2318,7 +2416,12 @@ uint8 BlockFunc_AC31(void) {  // 0x94AC31
 
   uint16 end = grapple_beam_length_delta + grapple_beam_length;
   if ((grapple_beam_length_delta & 0x8000) != 0) {
-    if (end < 8) {
+    if (grapple_beam_length >= 64) {
+      if (end < 63) {
+        grapple_beam_length_delta = 0;
+        end = 63;
+      }
+    } else if (end < 8) {
       grapple_beam_length_delta = 0;
       end = 8;
     }

@@ -1692,6 +1692,7 @@ uint8 BlockCollWaveBeamHoriz(uint16 k);
 uint8 BlockCollWaveBeamVert(uint16 k);
 uint8 BlockFunc_AC31(void);
 uint8 BlockReactGrapple(void);
+bool GrappleBeam_IsSolidBlockAt(uint16 x, uint16 y);
 uint8 HandleMovementAndCollForSamusGrapple(void);
 int32 Samus_CollDetectChangedPose(int32 amt);
 int32 Samus_MoveDown_NoSolidColl(int32 amt);
