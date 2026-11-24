@@ -84,6 +84,25 @@
 #define SM_PSP_ASYNC 0  /* Present() queues a GE frame and returns; the next EndDraw waits for the GE and flips it. 1: scene list + compose list (g_gu_list2) queued back to back; 2: scene and compose in ONE list */
 #endif
 
+/* Glow (PSP_GE_GLOW=1, compile time, off by default; experimental, not verified on hardware): light spreading from the bright parts of
+ * the picture, made by the GE in the composition list (ComposeGlow), with no CPU pixel work. THRESH: per channel level (0..254) below
+ * which a pixel does not emit; GAIN: percent of emitted light that is spread (1..400; 100 = as bright as the source above THRESH). */
+#ifndef SM_PSP_GE_GLOW
+#define SM_PSP_GE_GLOW 0
+#endif
+#ifndef SM_PSP_GE_GLOW_THRESH
+#define SM_PSP_GE_GLOW_THRESH 144
+#endif
+#ifndef SM_PSP_GE_GLOW_GAIN
+#define SM_PSP_GE_GLOW_GAIN 300
+#endif
+#if SM_PSP_GE_GLOW && SM_PSP_ASYNC
+#error "PSP_GE_GLOW needs the synchronous composition (SM_PSP_ASYNC 0): ComposeBytesBound does not count its commands"
+#endif
+#if SM_PSP_GE_GLOW_THRESH < 0 || SM_PSP_GE_GLOW_THRESH > 254 || SM_PSP_GE_GLOW_GAIN < 1 || SM_PSP_GE_GLOW_GAIN > 400
+#error "SM_PSP_GE_GLOW_THRESH is 0..254, SM_PSP_GE_GLOW_GAIN 1..400"
+#endif
+
 enum {
   kPspWidth = 480,
   kPspHeight = 272,
@@ -128,6 +147,17 @@ enum {
   kVramImg0 = kVramBuf2 + kBufBytes, kVramImgEnd = kVramImg0 + kImgSlots * kImgBytes,
   kVramTint = kVramImgEnd, kVramTintEnd = kVramTint + kTintTexBytes,
 };
+
+/* Glow buffers (ComposeGlow), behind everything else: 8888 render targets of 128x128 (half resolution), 64x64 (quarter) and 32x32 (eighth).
+ * 2 KB aligned like the frame buffers; the end must stay inside the 2 MB of eDRAM every PSP has (checked again at start-up against
+ * sceGeEdramGetSize). */
+enum {
+  kGlowW1 = 128, kGlowW2 = 64, kGlowW3 = 32, kGlowS3 = 64,  /* kGlowS3: stride of the 32 px target (draw buffer widths are multiples of 64) */
+  kVramGlow1 = kVramTintEnd, kVramGlow2 = kVramGlow1 + kGlowW1 * kGlowW1 * 4, kVramGlow3 = kVramGlow2 + kGlowW2 * kGlowW2 * 4,
+  kVramGlowEnd = kVramGlow3 + kGlowS3 * kGlowW3 * 4,
+};
+_Static_assert(kVramGlow1 % 2048 == 0 && kVramGlow2 % 2048 == 0 && kVramGlow3 % 2048 == 0 && kVramGlowEnd <= 2 * 1024 * 1024,
+               "glow buffers do not fit the eDRAM");
 
 // Reasons a frame is handed back to the software renderer. 
 enum {
@@ -643,6 +673,7 @@ enum { kMaxTintRanges = 6 };
 static TintRange g_trange[kMaxTintRanges];
 static int g_ntr;
 static int g_scissor_mode;  /* from the boot self test: 0 unknown, 1 = (x, y, x2, y2), 2 = (x, y, w, h) */
+static bool g_glow_ok;      /* built with PSP_GE_GLOW and the eDRAM holds the glow buffers (set at start-up) */
 static bool g_tint_ok;      /* smooth tint enabled at build time and the eDRAM holds the strip region (set at start-up) */
 static bool g_stint_frame;  /* this frame's tint is the smooth (dithered strip) one; GeVerify logs it but keeps the strict tolerance */
 /* Gate 4s: rows of one subscreen colour-math mask. The blend is drawn once; each band restores its own layers. */
@@ -5123,6 +5154,113 @@ static void DrawNativeMessage(void) {
   }
 }
 
+#if SM_PSP_GE_GLOW
+/* Glow, all on the GE, in the composition list after the scaled picture and before the HUD:
+ *  1. half-resolution bright pass: a black 128x128 target, the source rows of the gameplay rectangle averaged 2x2 into it (bilinear sample
+ *     on the texel boundary), then THRESH subtracted per channel (one reverse-subtract sprite: dst - THRESH, clamped at 0 by the blend).
+ *     Colours keep their hue, so a fire glows orange and a beam glows its own colour. Small details (under about 2x2 pixels) do not emit.
+ *  2. quarter-resolution blur: four additive taps of the half-resolution image, each a bilinear sample on a texel corner offset by one texel,
+ *     together a 4x4 box average (weight 1/4 per tap: blend factor 0x40).
+ *  3. eighth-resolution blur: the same four taps of that, now carrying GAIN / 4 of their colour (blend factor), so the sum is the gain.
+ *  4. one additive (GU_FIX 1 + 1) bilinear sprite of the eighth-resolution image over the gameplay rectangle: its 8x upscale is the soft
+ *     falloff, a halo of about 15-20 screen pixels around a bright object. Strips of SM_PSP_COMPOSE_STRIP columns, like the picture itself
+ *     (a wide scaled sprite is slow on the GE texture cache).
+ * Only the gameplay rectangle is lit (the source rows the picture shows: HUD rows and side panels are outside it). Nothing reads the
+ * frame buffer; the targets live in their own eDRAM (kVramGlow1..3). The texture and blend state is put back for the HUD. */
+static void ComposeGlowTaps(TileVert *v, int n, int rows, int src_w, uint32_t weight) {
+  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, weight * 0x010101u, 0x00ffffffu);
+  for (int t = 0; t < 4; t++) {
+    const float tx = (t & 1) ? 1.0f : -1.0f, ty = (t & 2) ? 1.0f : -1.0f;
+    const int nv = ComposeQuadStrips(v, 1.0f + tx, 1.0f + ty, (float)(src_w - 1) + tx, 1.0f + ty + 2.0f * (float)(rows - 1), 0, 0, n, rows);
+    GeDraw(kVtTile, nv, v);
+    v += nv;
+  }
+}
+
+static void ComposeGlow(const ComposeSrc *s, int srow0) {
+  enum { kThr = SM_PSP_GE_GLOW_THRESH, kGain = (SM_PSP_GE_GLOW_GAIN * 255 + 200) / 400, kStrips = COMPOSE_STRIPS(kCompW) };
+  const int nr = (kSrcRows - srow0) / 2;  /* half-resolution rows covering the source rows the picture shows */
+  const int nr2 = (nr + 1) / 2;           /* quarter-resolution rows */
+  const int nr3 = (nr2 + 1) / 2;          /* eighth-resolution rows */
+  TileVert *tv = sceGuGetMemory((int)((8 + 4 * 2 * COMPOSE_STRIPS(kGlowW2) + 4 * 2 * COMPOSE_STRIPS(kGlowW3) + 2 * kStrips + 4) *
+                                      sizeof(TileVert)));
+  ColorVert *cv = sceGuGetMemory((int)(8 * sizeof(ColorVert)));
+  TileVert *vd = tv, *v2 = vd + 8, *v3 = v2 + 4 * 2 * COMPOSE_STRIPS(kGlowW2), *vc = v3 + 4 * 2 * COMPOSE_STRIPS(kGlowW3);
+  const uint32_t thr = 0xff000000u | (uint32_t)kThr * 0x010101u;
+  cv[0] = (ColorVert){0xff000000u, 0, 0, 0};
+  cv[1] = (ColorVert){0xff000000u, kGlowW1, kGlowW1, 0};
+  cv[2] = (ColorVert){thr, 0, 0, 0};
+  cv[3] = (ColorVert){thr, kGlowW1, (int16_t)nr, 0};
+  cv[4] = (ColorVert){0xff000000u, 0, 0, 0};
+  cv[5] = (ColorVert){0xff000000u, kGlowW2, kGlowW2, 0};
+  cv[6] = (ColorVert){0xff000000u, 0, 0, 0};
+  cv[7] = (ColorVert){0xff000000u, kGlowW3, kGlowW3, 0};
+
+  /* 1. bright pass into the half-resolution target */
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_TEXTURE_2D);
+  sceGuDrawBufferList(GU_PSM_8888, (void *)(uintptr_t)kVramGlow1, kGlowW1);
+  GeDraw(kVtColor, 2, &cv[0]);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexMode(s->psm, 0, 0, GU_FALSE);
+  sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
+  sceGuTexFlush();
+  sceGuTexFilter(GU_LINEAR, GU_LINEAR);
+  sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+  sceGuTexScale(1.0f, 1.0f);
+  sceGuTexOffset(0.0f, 0.0f);
+  GeDraw(kVtTile, ComposeQuadStrips(vd, 1.0f, (float)srow0 + 1.0f, 255.0f, (float)(srow0 + 2 * nr) - 1.0f, 0, 0, kGlowW1, nr), vd);
+  sceGuDisable(GU_TEXTURE_2D);
+  sceGuEnable(GU_BLEND);
+  sceGuBlendFunc(GU_REVERSE_SUBTRACT, GU_FIX, GU_FIX, 0x00ffffffu, 0x00ffffffu);  /* dst - THRESH, as the subtractive tint */
+  GeDraw(kVtColor, 2, &cv[2]);
+
+  /* 2. quarter-resolution blur */
+  sceGuDisable(GU_BLEND);
+  sceGuDrawBufferList(GU_PSM_8888, (void *)(uintptr_t)kVramGlow2, kGlowW2);
+  GeDraw(kVtColor, 2, &cv[4]);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+  sceGuTexImage(0, kGlowW1, kGlowW1, kGlowW1, g_vram_u + kVramGlow1);
+  sceGuTexFlush();
+  sceGuTexSync();  /* the half-resolution target has been rendered by the GE */
+  sceGuEnable(GU_BLEND);
+  ComposeGlowTaps(v2, kGlowW2, nr2, kGlowW1, 0x40);
+
+  /* 3. eighth-resolution blur, with the gain */
+  sceGuDisable(GU_BLEND);
+  sceGuDisable(GU_TEXTURE_2D);
+  sceGuDrawBufferList(GU_PSM_8888, (void *)(uintptr_t)kVramGlow3, kGlowS3);
+  GeDraw(kVtColor, 2, &cv[6]);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexImage(0, kGlowW2, kGlowW2, kGlowW2, g_vram_u + kVramGlow2);
+  sceGuTexFlush();
+  sceGuTexSync();  /* the quarter-resolution target has been rendered by the GE */
+  sceGuEnable(GU_BLEND);
+  ComposeGlowTaps(v3, kGlowW3, nr3, kGlowW2, kGain);
+
+  /* 4. add it to the picture, back in the frame buffer */
+  sceGuDrawBufferList(GU_PSM_5650, (void *)(uintptr_t)g_draw_off, 512);
+  sceGuTexImage(0, kGlowW3, kGlowW3, kGlowS3, g_vram_u + kVramGlow3);
+  sceGuTexFlush();
+  sceGuTexSync();  /* the eighth-resolution target has been rendered by the GE */
+  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x00ffffffu, 0x00ffffffu);
+  GeDraw(kVtTile,
+         ComposeQuadStrips(vc, 0.5f / 8.0f, 0.5f / 8.0f, 255.5f / 8.0f, ((float)(kSrcRows - srow0) - 0.5f) / 8.0f, kCompX, kCompY, kCompW,
+                           kCompH),
+         vc);
+
+  /* state for what follows (the HUD samples the source image again) */
+  sceGuDisable(GU_BLEND);
+  sceGuTexMode(s->psm, 0, 0, GU_FALSE);
+  sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
+  sceGuTexFlush();
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  sceGuTexFilter(GU_LINEAR, GU_LINEAR);
+}
+#endif
+
 /* Appends the composition of the source image s (256 wide, rows 0-223 valid) to the open list: black panel, then Layout A
  * (HUD present: source rows 32-223 -> 360x270, original HUD elements in the side panels) or Layout B (rows 0-223 -> 360x270,
  * empty margins). The list is open and the source is complete; exactly one Present() follows. */
@@ -5209,6 +5347,10 @@ static void ComposeDraw(const ComposeSrc *s) {
 #if SM_PSP_DOOR_GE
   if (g_door_reserved && g_door_snapshot_valid && !g_door_live)
     DrawDoorTransition(s);
+#endif
+#if SM_PSP_GE_GLOW
+  if (g_glow_ok)
+    ComposeGlow(s, srow0);
 #endif
   if (hud) {
     TileVert *w = base + nbase;
@@ -8445,6 +8587,9 @@ static bool PspRenderer_Initialize(void) {
   g_ge_ok = (unsigned)sceGeEdramGetSize() >= (unsigned)kVramNeeded;
   PspLog("edram size=%u needed=%u ge_ok=%d", (unsigned)sceGeEdramGetSize(),
          (unsigned)kVramNeeded, (int)g_ge_ok);
+  g_glow_ok = SM_PSP_GE_GLOW && g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)kVramGlowEnd;
+  PspLog("glow: build=%d ok=%d (buffers %u..%u of %u) thresh=%d gain=%d%%", (int)SM_PSP_GE_GLOW, (int)g_glow_ok, (unsigned)kVramGlow1,
+         (unsigned)kVramGlowEnd, (unsigned)sceGeEdramGetSize(), (int)SM_PSP_GE_GLOW_THRESH, (int)SM_PSP_GE_GLOW_GAIN);
   g_tint_ok = SM_PSP_GE_SMOOTH_TINT && g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)kVramTintEnd;
   PspLog("smooth tint: %d (strip %u..%u of %u)", (int)g_tint_ok, (unsigned)kVramTint, (unsigned)kVramTintEnd,
          (unsigned)sceGeEdramGetSize());
