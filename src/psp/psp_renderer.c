@@ -18,6 +18,7 @@
 #include "src/psp/psp_button_icons.h"
 #include "src/psp/psp_message_font.h"
 #include "src/psp/psp_message_text.h"
+#include "src/psp/psp_gl_guard.h"  /* last: from here every emitting sceGu call is bounds-checked (see the header) */
 
 #if SM_PSP_LOG
 #define PROF(...) __VA_ARGS__
@@ -263,6 +264,13 @@ static inline void BgQuad(BgVert *w, int ul, int vt, int ur, int vb, int x0, int
 typedef struct Geom { BgVert *v; int n; } Geom;
 
 static uint32_t g_gu_list[kListWords] __attribute__((aligned(16)));
+
+/* Boot-time and benchmark lists (nothing recovers a frame there): a call the list cannot take is a Die before it writes,
+ * never an overflow. Frame lists use GlStart + a recovery point instead (DrawGe, ComposeGeFrame, SwFrameList...). */
+static void GuStartBoot(void) {
+  if (GlStartFatal(g_gu_list, kListBytes) < 0)
+    Die("sceGuStart failed");
+}
 
 #if SM_PSP_ASYNC
 /* Async present. g_ge_pending: a frame is queued, so until GeWait() the GE may still read everything its two lists
@@ -6118,15 +6126,49 @@ static void ComposeDraw(const ComposeSrc *s) {
   sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
 }
 
+static uint32_t g_gl_aborts, g_gl_start_fail;  /* frame lists abandoned after a refused call / that could not start (log) */
+
+/* Starts a frame list; false (logged, counted) if the GE would not take it: the caller draws nothing. */
+static bool FrameListStart(void *list, uint32_t cap, const char *what) {
+  if (GlStart(list, cap) >= 0)
+    return true;
+  if (g_gl_start_fail++ < 16)
+    PspLog("gl: %s: sceGuStart failed, nothing drawn f=%u", what, (unsigned)g_frame);
+  return false;
+}
+
+/* A frame list refused a call (never expected: the sizes are checked before the frame is built, see GlTrip): it is finished
+ * and the GE waited for, so the caller can fall back with the GE idle. Logged (first 16) and counted. */
+static void GlAborted(const char *what) {
+  GlAbortList();
+  if (g_gl_aborts++ < 16)
+    PspLog("gl: %s list refused a call (trips %u, cap %u B), frame abandoned f=%u", what, (unsigned)g_gl_trips,
+           (unsigned)g_gl_cap, (unsigned)g_frame);
+}
+
+/* ComposeGeAsync was abandoned after the copy (scene -> texture region) went into the list the GE then ran: the draw buffer
+ * may hold part of the composition, so ComposeGeFrame composes from that copy instead of copying the draw buffer. */
+static bool g_compose_copied, g_compose_resume;
+
 /* GE scene: it is complete in the draw buffer (previous list synced, so the multisub / mosaic users of the texture region are
  * done). Copy its 256x224 to the texture region, wait for the copy (TexSync), then compose into the same draw buffer from the
  * copy. Own short list; g_gu_list is idle here. */
 static void ComposeGeFrame(void) {
-  sceGuStart(GU_DIRECT, g_gu_list);
+  const bool resume = g_compose_resume;
+  g_compose_resume = false;
+  if (!FrameListStart(g_gu_list, kListBytes, "compose"))
+    return;
+  if (setjmp(g_gl_jb)) {
+    GlAborted("compose");  /* the draw buffer shows what the GE drew: one frame, not flipped back */
+    return;
+  }
+  GL_ARM();
   SelectDrawBuffer();
-  sceGuCopyImage(GU_PSM_5650, kLeft, kTop, kGameWidth, kSrcRows, 512, (void *)(uintptr_t)(0x04000000u | g_draw_off), 0, 0,
-                 kGameWidth, (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramTexture));
-  sceGuTexSync();
+  if (!resume) {
+    sceGuCopyImage(GU_PSM_5650, kLeft, kTop, kGameWidth, kSrcRows, 512, (void *)(uintptr_t)(0x04000000u | g_draw_off), 0, 0,
+                   kGameWidth, (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramTexture));
+    sceGuTexSync();
+  }
   const ComposeSrc src = {g_texture, GU_PSM_5650, kGameWidth, 256, kGameWidth};
   ComposeDraw(&src);
   sceGuFinish();
@@ -6139,7 +6181,13 @@ static void ApplyMosaicTransition(void) {
   const int cw = (kPspWidth + size - 1) / size, ch = (kPspHeight + size - 1) / size;
   const float inv = 1.0f / (float)size;
 
-  sceGuStart(GU_DIRECT, g_gu_list);
+  if (!FrameListStart(g_gu_list, kListBytes, "mosaic"))
+    return;
+  if (setjmp(g_gl_jb)) {
+    GlAborted("mosaic");
+    return;
+  }
+  GL_ARM();
   sceGuEnable(GU_SCISSOR_TEST);
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_DEPTH_TEST);
@@ -6201,7 +6249,8 @@ static void ApplyMosaicTransition(void) {
  * Assumed of libgu, not provable from this source: every call above emits <= kGuCallMax (128) bytes (a draw ~20 B,
  * a texture image ~16 B, sceGuCopyImage ~40 B, sceGuClear ~64 B) and sceGuClear allocates <= kGuClearBytes.
  * ComposeCheckUsed measures the real list after every compose; if it ever exceeds the bound (an audit or libgu
- * assumption is wrong) async is switched off for good. That is a detector, not the guard: the guard is the bound. */
+ * assumption is wrong) async is switched off for good. That is a detector. The guard is psp_gl_guard.h, which refuses any
+ * call that would not fit before it writes (and ComposeGeAsync then falls back to the synchronous compose). */
 enum { kGuCallMax = 128, kGuClearBytes = 16 * 16, kComposeFixedCalls = 82, kComposeEvolutionCalls = 20,
        kComposeTail = 1024   /* head-room behind the compose commands: FINISH / END and the checks' own allocations */
 };
@@ -6286,17 +6335,10 @@ static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
 }
 
 #if SM_PSP_ASYNC
-/* sceGuStart returns int (< 0: sceGeListEnQueue failed) in current PSPSDK and void in older ones: this takes either
- * prototype (with void a failure cannot be seen and 0 is returned). */
-#define GU_START_DIRECT(list)                                                                                      \
-  __builtin_choose_expr(__builtin_types_compatible_p(__typeof__(sceGuStart(GU_DIRECT, (list))), void),            \
-                        ((void)sceGuStart(GU_DIRECT, (list)), 0), sceGuStart(GU_DIRECT, (list)))
-#endif
-
-/* Bytes used so far in `list` (the list the GU is writing): sceGuGetMemory(0) returns the list position + 8 (its own
- * header). */
-static uint32_t CurListUsed(const uint32_t *list) {
-  return (uint32_t)(((uintptr_t)sceGuGetMemory(0) & 0x1fffffffu) - ((uintptr_t)list & 0x1fffffffu));
+/* Bytes in the open list so far (sceGuCheckList: current - start; reads only, writes nothing). */
+static uint32_t CurListUsed(void) {
+  const int u = sceGuCheckList();
+  return u > 0 ? (uint32_t)u : 0u;
 }
 
 #if SM_PSP_DOOR_SNAP
@@ -6313,12 +6355,12 @@ static bool DsListFits(void) {
 #endif
 
 #if SM_PSP_ASYNC
-/* After the compose commands are built (every build, one sceGuGetMemory(0) per frame): the compose commands took
- * CurListUsed(list) - base bytes (base: what the list held before them, 0 for a list of their own). Detector only, see
- * the bound above. */
-static void ComposeCheckUsed(uint32_t bound, uint32_t mem, uint32_t calls, const uint32_t *list, uint32_t base) {
-  const uint32_t total = CurListUsed(list);
-  const uint32_t used = total - base;
+/* After the compose commands are built (every build): the compose commands took CurListUsed() - base bytes (base: what the
+ * list held before them, 0 for a list of their own). Detector of a wrong estimate above, not a guard: the guard is the
+ * check psp_gl_guard.h makes before every call. */
+static void ComposeCheckUsed(uint32_t bound, uint32_t mem, uint32_t calls, uint32_t base) {
+  const uint32_t total = CurListUsed();
+  const uint32_t used = total > base ? total - base : 0u;
   (void)mem;
   (void)calls;
   PROF(if (used > g_comp_used_hw) g_comp_used_hw = used;
@@ -6332,11 +6374,6 @@ static void ComposeCheckUsed(uint32_t bound, uint32_t mem, uint32_t calls, const
     g_async_viol++;
     PspLog("async: compose list used %u > bound %u (mem %u, calls %u): async disabled", (unsigned)used, (unsigned)bound,
            (unsigned)mem, (unsigned)calls);
-  }
-  if (total + 256 > (uint32_t)kComposeCap) {  /* memory behind the list is already overwritten: stop */
-    PspLog("async: compose list overflow, used %u of %u", (unsigned)total, (unsigned)kComposeCap);
-    PspLog_Flush();
-    Die("compose list overflow");
   }
 }
 
@@ -6366,38 +6403,51 @@ static void ComposeMarker(void) {
  * is off, the bound does not fit or (== 1) the list cannot be enqueued; the caller then finishes the frame
  * synchronously (sceGuStart of the next list re-initialises the GU). */
 static bool ComposeGeAsync(void) {
-  if (!g_async_ok)
+  if (!g_async_ok || g_gl_finish_fail)  /* g_gl_finish_fail: a sceGuFinish failed once, stay synchronous */
     return false;
   uint32_t mem, calls;
   const uint32_t bound = ComposeBytesBound(&mem, &calls);
   PROF(if (bound > g_comp_bound_hw) g_comp_bound_hw = bound;)
 #if SM_PSP_ASYNC == 1
-  const uint32_t *const list = g_gu_list2;
   const uint32_t base = 0;
   if (bound > (uint32_t)kComposeAsyncMax) {
     g_async_nofit++;
     return false;
   }
-  if (GU_START_DIRECT(g_gu_list2) < 0) {
+  if (GlStart(g_gu_list2, kComposeListBytes) < 0) {
     g_async_fail++;
     return false;
   }
 #else
-  const uint32_t *const list = g_gu_list;
-  const uint32_t base = CurListUsed(g_gu_list);
+  if (!g_gl_open)
+    return false;
+  const uint32_t base = CurListUsed();
   if (base + bound + kComposeTail > (uint32_t)kListBytes) {
     g_async_nofit++;
     return false;
   }
 #endif
+  if (setjmp(g_gl_jb)) {
+    /* A call was refused before it wrote (the estimate above was wrong). The list is finished and the GE waited for; the
+     * caller finishes the frame synchronously, composing from the copy if it was already in the list. */
+    GlAborted("compose-async");
+    g_compose_resume = g_compose_copied;
+    g_async_ok = false;
+    g_async_viol++;
+    return false;
+  }
+  GL_ARM();
+  g_compose_copied = false;
   SelectDrawBuffer();
   sceGuCopyImage(GU_PSM_5650, kLeft, kTop, kGameWidth, kSrcRows, 512, (void *)(uintptr_t)(0x04000000u | g_draw_off), 0, 0,
                  kGameWidth, (void *)(uintptr_t)(0x04000000u | (uint32_t)kVramTexture));
   sceGuTexSync();
+  g_compose_copied = true;
   const ComposeSrc src = {g_texture, GU_PSM_5650, kGameWidth, 256, kGameWidth};
   ComposeDraw(&src);
   ComposeMarker();
-  ComposeCheckUsed(bound, mem, calls, list, base);
+  ComposeCheckUsed(bound, mem, calls, base);
+  GL_DISARM();
 #if SM_PSP_ASYNC == 1
   sceGuFinish();
 #endif
@@ -6918,8 +6968,9 @@ static void S5iLog(void) {
 #define S5I_LOG() ((void)0)
 #endif
 
-// Returns false (nothing drawn, GE idle) if the frame must use the software image.
-static bool DrawGe(void) {
+// Returns false (nothing drawn, GE idle) if the frame must use the software image. noinline: DrawGe() below holds the
+// setjmp, which must not change how this large function is compiled.
+static __attribute__((noinline)) bool DrawGeBody(void) {
   g_t_draw_start = Now();
   g_last_reason = 0;
   g_ent_top = 0;
@@ -7498,7 +7549,9 @@ static bool DrawGe(void) {
   PROF(g_pc_obj = g_t_list_start - t_bg;)
   g_prep_us = g_t_list_start - g_t_draw_start;
   VTX_RESET();  /* the previous frame was synced in Present: the GE no longer reads the pool */
-  sceGuStart(GU_DIRECT, g_gu_list);
+  if (!FrameListStart(g_gu_list, kListBytes, "scene"))
+    return false;
+  GL_ARM();
   SelectDrawBuffer();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_BLEND);
@@ -8131,6 +8184,21 @@ static bool DrawGe(void) {
   return true;
 }
 
+/* Recovery point of the scene list (and of the code before it). A call the list refuses longjmps here from inside
+ * DrawGeBody (never expected: ListBytesNeeded() has admitted the frame). Present() and the compose / mosaic functions it
+ * calls arm their own recovery point for their own list, so by the time DrawGeBody returns nothing is armed. */
+static bool DrawGe(void) {
+  if (setjmp(g_gl_jb)) {
+    GlAborted("scene");
+    g_verify_now = false;
+    g_audit_now = false;
+    return false;  /* nothing was drawn or flipped, the GE is idle: EndDraw holds the previous image or draws in software */
+  }
+  const bool drew = DrawGeBody();
+  GL_DISARM();
+  return drew;
+}
+
 /* ------------------------------------------------------------- lifecycle */
 
 void PspRenderer_ToggleGe(void) {
@@ -8186,7 +8254,7 @@ static void UvSelfTest(void) {
     tex[k] = (uint16_t)k;
     tex[k * kTexWidth] = (uint16_t)k;
   }
-  sceGuStart(GU_DIRECT, g_gu_list);
+  GuStartBoot();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_DEPTH_TEST);
   sceGuDisable(GU_BLEND);
@@ -8379,7 +8447,7 @@ static int BenchStrips(TileVert *v, bool split) {
 /* One frame: list build, then GE run to completion. build = until sceGuFinish, total = until the GE is idle. */
 static void BenchFrame(int kind, uint32_t *build_us, uint32_t *total_us) {
   uint32_t t0 = Now();
-  sceGuStart(GU_DIRECT, g_gu_list);
+  GuStartBoot();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_DEPTH_TEST);
   sceGuDisable(GU_BLEND);
@@ -8492,7 +8560,7 @@ static void Bench5ib(void) {
   BenchRun("strips T8 RAM split", kBenchT8Split);
   BenchVerify("strips T8 RAM split", false);
   BenchRun("tile quads 3492    ", kBenchQuads);
-  sceGuStart(GU_DIRECT, g_gu_list);  /* leave the draw buffer black, as before */
+  GuStartBoot();  /* leave the draw buffer black, as before */
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuClearColor(0xff000000);
   sceGuClear(GU_COLOR_BUFFER_BIT);
@@ -8622,7 +8690,7 @@ static bool B7Prepare(const int16_t *m, int segw, float uvh) {
 /* One frame into draw buffer 0: strips (the segments from B7Prepare) or the image quad (g_m7img, today's path). */
 static void B7Frame(bool strips, uint32_t *build_us, uint32_t *total_us) {
   uint32_t t0 = Now();
-  sceGuStart(GU_DIRECT, g_gu_list);
+  GuStartBoot();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_DEPTH_TEST);
   sceGuDisable(GU_BLEND);
@@ -8779,7 +8847,7 @@ static void B7CopyWindow(int bx, int by, bool swz) {
 /* One frame: a single bind of the window, a single GU_TRIANGLES draw of every segment (two triangles each). */
 static void B7FrameWin(const uint8_t *tex, int stride, bool swz, uint32_t *build_us, uint32_t *total_us) {
   uint32_t t0 = Now();
-  sceGuStart(GU_DIRECT, g_gu_list);
+  GuStartBoot();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_DEPTH_TEST);
   sceGuDisable(GU_BLEND);
@@ -8972,7 +9040,7 @@ static bool B7PrepareBlocks(const int16_t *m, int bw, int bh, float uvh, bool ta
 /* One frame: a bind and a GU_TRIANGLES draw per block. */
 static void B7FrameBlk(bool swz, uint32_t *build_us, uint32_t *total_us) {
   uint32_t t0 = Now();
-  sceGuStart(GU_DIRECT, g_gu_list);
+  GuStartBoot();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuDisable(GU_DEPTH_TEST);
   sceGuDisable(GU_BLEND);
@@ -9142,7 +9210,7 @@ static void Bench5r(void) {
   memset(g_m7img, 0, sizeof(g_m7img));
   memset(g_m7ikey, 0, sizeof(g_m7ikey));  /* gate 5t: the image and the VRAM snapshot were overwritten */
   g_m7i_stale = true;
-  sceGuStart(GU_DIRECT, g_gu_list);  /* leave the draw buffer black */
+  GuStartBoot();  /* leave the draw buffer black */
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
   sceGuClearColor(0xff000000);
   sceGuClear(GU_COLOR_BUFFER_BIT);
@@ -9166,7 +9234,7 @@ static const char *const kCbName[kCbKinds] = {"empty list     ", "clear 480x272 
 
 static uint32_t CbOnce(int kind) {
   const uint32_t t0 = Now();
-  sceGuStart(GU_DIRECT, g_gu_list);
+  GuStartBoot();
   SelectDrawBuffer();
   sceGuEnable(GU_SCISSOR_TEST);
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
@@ -9278,7 +9346,7 @@ static bool PspRenderer_Initialize(void) {
          (unsigned)sceGeEdramGetSize());
 
   sceGuInit();
-  sceGuStart(GU_DIRECT, g_gu_list);
+  GuStartBoot();
   sceGuDrawBuffer(GU_PSM_5650, (void *)0, 512);
   sceGuDispBuffer(kPspWidth, kPspHeight, (void *)(512 * 272 * 2), 512);
   sceGuDepthBuffer((void *)(512 * 272 * 4), 512);
@@ -9501,6 +9569,42 @@ static void NoteFallback(const char *kind) {
 #define DG_WHY(x) ((void)0)
 #endif
 
+/* The software-image frame: the CPU frame (g_texture / g_framebuffer) composed into the draw buffer by the GE, then
+ * Present(false). Returns false if the list could not start or refused a call (never expected): the GE is idle and nothing
+ * was drawn or flipped, so the caller holds the previous image for a frame. */
+static bool SwFrameList(int swpath) {
+  if (!FrameListStart(g_gu_list, kListBytes, "software"))
+    return false;
+  if (setjmp(g_gl_jb)) {
+    GlAborted("software");
+    return false;
+  }
+  GL_ARM();
+  SelectDrawBuffer();
+  sceGuDisable(GU_ALPHA_TEST);
+  sceGuDisable(GU_DEPTH_TEST);
+  sceGuDisable(GU_BLEND);
+  sceGuEnable(GU_TEXTURE_2D);
+  sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
+  if (swpath == 0) {
+    sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+    sceGuTexImage(0, kTexWidth, kTexHeight, kTexWidth, g_texture);
+  } else {
+    /* GE copy RAM -> VRAM (physical address 0x04xxxxxx), then sample the VRAM copy. */
+    void *vram_phys = (void *)(0x04000000u | ((uintptr_t)g_texture & 0x001fffffu));
+    sceGuCopyImage(GU_PSM_8888, 0, 0, kGameWidth, kGameHeight, kGameWidth, g_framebuffer, 0, 0, 256, vram_phys);
+    sceGuTexSync();
+    sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+    sceGuTexImage(0, 256, 256, 256, g_texture);
+  }
+  sceGuTexFlush();
+  const ComposeSrc csrc = swpath == 0 ? (ComposeSrc){g_texture, GU_PSM_5650, kTexWidth, kTexHeight, kTexWidth}
+                                      : (ComposeSrc){g_texture, GU_PSM_8888, 256, 256, 256};
+  ComposeDraw(&csrc);
+  Present(false);
+  return true;
+}
+
 static void PspRenderer_EndDraw(void) {
   PROF(uint32_t t_enter = Now();)
   g_frame++;
@@ -9568,30 +9672,12 @@ static void PspRenderer_EndDraw(void) {
     sceKernelDcacheWritebackRange(g_framebuffer, sizeof(g_framebuffer));
     g_t_list_start = Now();
     g_prep_us = g_t_list_start - g_t_draw_start;
-    sceGuStart(GU_DIRECT, g_gu_list);
-    SelectDrawBuffer();
-    sceGuDisable(GU_ALPHA_TEST);
-    sceGuDisable(GU_DEPTH_TEST);
-    sceGuDisable(GU_BLEND);
-    sceGuEnable(GU_TEXTURE_2D);
-    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
-    if (swpath == 0) {
-      sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
-      sceGuTexImage(0, kTexWidth, kTexHeight, kTexWidth, g_texture);
-    } else {
-      /* GE copy RAM -> VRAM (physical address 0x04xxxxxx), then sample the VRAM copy. */
-      void *vram_phys = (void *)(0x04000000u | ((uintptr_t)g_texture & 0x001fffffu));
-      sceGuCopyImage(GU_PSM_8888, 0, 0, kGameWidth, kGameHeight, kGameWidth, g_framebuffer, 0, 0, 256, vram_phys);
-      sceGuTexSync();
-      sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
-      sceGuTexImage(0, 256, 256, 256, g_texture);
-    }
-    sceGuTexFlush();
-    const ComposeSrc csrc = swpath == 0 ? (ComposeSrc){g_texture, GU_PSM_5650, kTexWidth, kTexHeight, kTexWidth}
-                                        : (ComposeSrc){g_texture, GU_PSM_8888, 256, 256, 256};
-    ComposeDraw(&csrc);
-    Present(false);
-    if (g_swpath < 0) {  /* calibration: CPU + GE cost of getting the frame on screen, per path */
+    if (!SwFrameList(swpath)) {
+      /* as a held frame: the panel keeps the previous image, the pacing stays */
+      if (!waited)
+        Pace();
+      g_vcount_last = sceDisplayGetVcount();
+    } else if (g_swpath < 0) {  /* calibration: CPU + GE cost of getting the frame on screen, per path */
       uint32_t k = g_cal_frames++;
       if (k % kSwCalFrames >= kSwCalSkip) {
         g_cal_sum[swpath] += g_prep_us + g_gewait_us;
@@ -9719,6 +9805,10 @@ static void PspRenderer_EndDraw(void) {
            (unsigned)(g_peak_list >> 10), (int)(kListBytes >> 10), (unsigned)(g_peak_vtx >> 10),
            (int)(kVtxPoolBytes >> 10), (int)SM_PSP_VTX_POOL);
     g_peak_tiles = g_peak_list = g_peak_vtx = 0;
+    PspLog("  gl: finished list peak=%uKB/%dKB refused-calls=%u aborted-frames=%u start-fail=%u finish-err=%u finish-fail=%d",
+           (unsigned)(g_gl_peak >> 10), (int)(kListBytes >> 10), (unsigned)g_gl_trips, (unsigned)g_gl_aborts,
+           (unsigned)g_gl_start_fail, (unsigned)g_gl_finish_err, (int)g_gl_finish_fail);
+    g_gl_peak = 0;
     PspLog("  verify: gap=%d armed=%u deferred=%u", (int)SM_PSP_VERIFY_GAP, (unsigned)g_verify_armed, (unsigned)g_verify_deferred);
     g_verify_armed = g_verify_deferred = 0;
     PspLog("  rowcache: hit=%u miss=%u", (unsigned)g_rc_hit, (unsigned)g_rc_miss);
