@@ -574,6 +574,11 @@ static uint8_t g_m7pl_dirty[64];  /* VRAM pages 0-63 written since the plane was
  * of 64 bytes. g_m7pl_fast = false: cells are converted from g_vram word by word as before (set if a log build finds a difference). */
 static uint8_t g_m7t8[256 * 64] __attribute__((aligned(16)));
 static bool g_m7pl_fast = true;
+/* The tile each map cell of the plane shows (the low bytes of g_vram, as of the last update), so that a written page only
+ * rebuilds the cells whose tile number or tile pixels really changed. g_m7pl_incr = false: every cell of a written page and
+ * every cell showing one of its tiles is rebuilt (set if a log build finds a difference). */
+static uint8_t g_m7map[128 * 128];
+static bool g_m7pl_incr = true;
 #ifndef SM_PSP_VERIFY
 #define SM_PSP_VERIFY 1
 #endif
@@ -3753,11 +3758,36 @@ static void M7PlaneCellAll(int cx, int cy) {
   }
 }
 
+/* Like M7TilesRefresh for one tile; true if its pixels changed. */
+static bool M7TileRefresh1(int t) {
+  uint8_t *d = &g_m7t8[t * 64];
+  const uint16_t *src = &g_vram[t * 64];
+  unsigned diff = 0;
+  for (int k = 0; k < 64; k++) {
+    const uint8_t v = (uint8_t)(src[k] >> 8);
+    diff |= (unsigned)(d[k] ^ v);
+    d[k] = v;
+  }
+  return diff != 0;
+}
+
+/* The whole plane from g_vram. */
+static void M7PlaneFull(void) {
+  M7TilesRefresh(0, 256);
+  for (int cell = 0; cell < 128 * 128; cell++)
+    g_m7map[cell] = (uint8_t)(g_vram[cell] & 0xff);
+  for (int cy = 0; cy < kM7PlaneP / 8; cy++)
+    for (int cx = 0; cx < kM7PlaneP / 8; cx++)
+      M7PlaneCell(cx, cy);
+  g_m7pl_valid = true;
+}
+
 /* Brings the plane up to date with g_vram and writes it back for the GE (CPU only, before the list is opened, like g_m7img).
  * A written map word changes its own cell; a written tile word changes every cell that shows the tile (tile t is VRAM page
  * t >> 2). Many dirty pages, or no plane yet: rebuild everything. */
 static void M7PlaneUpdate(void) {
   int nd = 0;
+  unsigned nchg = 0, ncell = 0;  /* tiles whose pixels changed, cells rebuilt (partial update) */
   for (int pg = 0; pg < kM7Pages; pg++)
     nd += g_m7pl_dirty[pg];
   if (g_m7pl_valid && nd == 0)
@@ -3767,11 +3797,37 @@ static void M7PlaneUpdate(void) {
   const bool full = !g_m7pl_valid || nd >= kM7PlFull;
 #endif
   if (!g_m7pl_valid || nd >= kM7PlFull) {
-    M7TilesRefresh(0, 256);
-    for (int cy = 0; cy < kM7PlaneP / 8; cy++)
-      for (int cx = 0; cx < kM7PlaneP / 8; cx++)
-        M7PlaneCell(cx, cy);
-    g_m7pl_valid = true;
+    M7PlaneFull();
+  } else if (g_m7pl_incr) {
+    uint32_t tmask[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    for (int pg = 0; pg < kM7Pages; pg++)
+      if (g_m7pl_dirty[pg])
+        for (int t = pg * 4; t < pg * 4 + 4; t++)
+          if (M7TileRefresh1(t)) {
+            tmask[t >> 5] |= 1u << (t & 31);
+            nchg++;
+          }
+    for (int pg = 0; pg < kM7Pages; pg++) {
+      if (!g_m7pl_dirty[pg])
+        continue;
+      for (int i = 0; i < kVramPageWords; i++) {
+        const int cell = pg * kVramPageWords + i;
+        const uint8_t t = (uint8_t)(g_vram[cell] & 0xff);
+        if (t != g_m7map[cell]) {
+          g_m7map[cell] = t;
+          M7PlaneCellAll(cell & 127, cell >> 7);
+          ncell++;
+        }
+      }
+    }
+    if (nchg)
+      for (int cell = 0; cell < 128 * 128; cell++) {
+        const unsigned t = g_m7map[cell];
+        if (tmask[t >> 5] >> (t & 31) & 1) {
+          M7PlaneCellAll(cell & 127, cell >> 7);
+          ncell++;
+        }
+      }
   } else {
     uint32_t tmask[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     for (int pg = 0; pg < kM7Pages; pg++)
@@ -3782,6 +3838,7 @@ static void M7PlaneUpdate(void) {
         continue;
       for (int i = 0; i < kVramPageWords; i++) {
         const int cell = pg * kVramPageWords + i;
+        g_m7map[cell] = (uint8_t)(g_vram[cell] & 0xff);
         M7PlaneCellAll(cell & 127, cell >> 7);
       }
       tmask[(pg * 4) >> 5] |= 0xfu << ((pg * 4) & 31);
@@ -3792,11 +3849,28 @@ static void M7PlaneUpdate(void) {
         M7PlaneCellAll(cell & 127, cell >> 7);
     }
   }
+  (void)nchg;
+  (void)ncell;
   memset(g_m7pl_dirty, 0, sizeof(g_m7pl_dirty));
 #if SM_PSP_LOG
   const uint32_t t_conv = Now() - t0;
 #if SM_PSP_VERIFY
   {  /* the first full rebuilds are compared cell by cell with the word by word conversion; a difference switches it back */
+    static unsigned nchkp;
+    if (!full && g_m7pl_incr && nchkp < 12) {  /* the first partial updates: the whole plane against the word by word conversion */
+      nchkp++;
+      unsigned bad = 0;
+      for (int cy = 0; cy < kM7PlaneP / 8; cy++)
+        for (int cx = 0; cx < kM7PlaneP / 8; cx++)
+          bad += !M7PlaneCellSame(cx, cy);
+      if (bad || nchkp == 12)
+        PspLog("m7plane check f=%u partial updates 1-%u: %u of %d cells differ%s", (unsigned)g_frame, nchkp, bad,
+               (kM7PlaneP / 8) * (kM7PlaneP / 8), bad ? ", full rebuild every time restored" : "");
+      if (bad) {
+        g_m7pl_incr = false;
+        M7PlaneFull();
+      }
+    }
     static unsigned nchk;
     if (full && g_m7pl_fast && nchk < 3) {
       nchk++;
@@ -3823,8 +3897,8 @@ static void M7PlaneUpdate(void) {
     static unsigned nlog;
     const uint32_t t_wb = Now() - t1;
     if ((full || t_conv + t_wb > 2000) && nlog++ < 80)
-      PspLog("m7plane f=%u %s dirty=%d conv=%uus writeback=%uus fast=%d", (unsigned)g_frame, full ? "full" : "part", nd, (unsigned)t_conv,
-             (unsigned)t_wb, (int)g_m7pl_fast);
+      PspLog("m7plane f=%u %s dirty=%d conv=%uus writeback=%uus fast=%d incr=%d chg=%u cells=%u", (unsigned)g_frame, full ? "full" : "part", nd,
+             (unsigned)t_conv, (unsigned)t_wb, (int)g_m7pl_fast, (int)g_m7pl_incr, nchg, ncell);
   }
 #endif
 }
