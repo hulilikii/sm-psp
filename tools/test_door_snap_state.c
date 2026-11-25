@@ -71,13 +71,17 @@ int main(void) {
     compose(&good, true);
     CHECK(g_ds_state == kDsPlay && g_copies == 2 && g_copy_dst[1] == kVramImg0 + kImgBytes && g_ds_step == 0, "B captured into slot 1");
     const int n = DsSteps(dir);
-    int held = 0;
+    int held = 0, last_drawn = (int)g_ds_step;  /* the capture frame draws step 0 */
     while (PspRenderer_DoorSnapHold()) {
       held++;
+      /* the composition of a held frame draws g_ds_step (DrawDoorSnap): consecutive, and the last one is step n */
+      CHECK((int)g_ds_step == last_drawn + 1 && g_ds_state == kDsPlay, "dir %u: step %d follows %d", dir, (int)g_ds_step, last_drawn);
+      last_drawn = (int)g_ds_step;
       CHECK(held < 1000, "hold never ends");
       if (held >= 1000) break;
     }
-    CHECK(held == n - 1, "dir %u: held %d frames, want %d (the game runs on the %dth)", dir, held, n - 1, n);
+    CHECK(last_drawn == n, "dir %u: the last step drawn is %d, want the destination step %d", dir, last_drawn, n);
+    CHECK(held == n, "dir %u: held %d frames, want %d (steps 1..%d; the game runs on frame N+%d)", dir, held, n, n, n + 1);
     restored("slide end");
     CHECK(!PspRenderer_DoorSnapHold(), "released");
   }

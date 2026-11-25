@@ -2277,7 +2277,8 @@ bool PspRenderer_DoorTransitionArmed(void) {
  *   Arm (door hit, frame N-1)  layer images off; this frame's composition is copied to slot 0 (old room) -> HaveA
  *   Ready/Begin (frame N)      the game loaded the room; from now on the old snapshot covers the screen -> WaitB
  *   composition of frame N     the first valid frame (HUD layout resolved, GE scene) is copied to slot 1 -> Play
- *   Hold (frames N+1...)       the game logic is held, the step counts the eased slide; at the last step everything is released
+ *   Hold (frames N+1...N+n)    the game logic is held, the step counts the eased slide (step k on frame N+k, so step n, the exact
+ *                              destination, is drawn); on frame N+n+1 everything is released and the live frames resume
  * Held frames keep the OAM and registers of frame N, so a snapshot that is refused on one frame is retried on the next
  * (kDsMaxWaitB), then the transition is dropped and the live destination shows (a cut, never a stuck lock). */
 #if SM_PSP_DOOR_SNAP
@@ -2366,10 +2367,13 @@ bool PspRenderer_DoorSnapHold(void) {
     }
     return true;
   case kDsPlay:
-    if (++g_ds_step >= (unsigned)DsSteps(g_ds_dir)) {
+    /* Frame N+k draws step k (the capture frame drew step 0), so steps 0..N are all shown and the last one is the exact
+     * destination; the frame after it is the first live one. */
+    if (g_ds_step >= (unsigned)DsSteps(g_ds_dir)) {
       DoorSnapRelease();
       return false;
     }
+    g_ds_step++;
     return true;
   default:
     return false;

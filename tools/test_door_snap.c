@@ -122,6 +122,36 @@ int main(void) {
       check_door(dir, REF_DoorAlignDistance((uint16_t)pos), (uint16_t)(pos * 3), (uint16_t)(pos ^ 0x5a5a));
       doors++;
     }
+  /* Samus's walk-in: exact start and end, monotonic toward the end, never past it, short way round a coordinate wrap */
+  long walks = 0;
+  for (unsigned dir = 0; dir < 4; dir++) {
+    const int n = DsWalkSteps(dir);
+    CHECK(n == DsSteps(dir), "walk length is the scroll length");
+    static const int ds[] = {0, 1, -1, 13, -13, 50, -50, 63, -63, 96, -96, 120, -120, 300, -300};
+    static const uint16_t starts[] = {0, 0x0010, 0x00E8, 0x0100, 0x1234, 0x7FFF, 0xFFE0, 0xFFFF};
+    for (unsigned a = 0; a < sizeof starts / sizeof starts[0]; a++)
+      for (unsigned b = 0; b < sizeof ds / sizeof ds[0]; b++) {
+        const uint16_t st = starts[a], en = (uint16_t)(st + ds[b]);
+        CHECK(DsWalkPos(st, en, 0, n) == st && DsWalkPos(st, en, n, n) == en, "walk ends dir %u %04x->%04x", dir, st, en);
+        int prev = 0;
+        for (int k = 1; k <= n; k++) {
+          const int moved = (int16_t)(uint16_t)(DsWalkPos(st, en, k, n) - st);  /* signed distance from the start */
+          const int sgn = ds[b] < 0 ? -1 : 1;
+          CHECK(sgn * moved >= sgn * prev && sgn * moved <= sgn * ds[b], "walk monotonic dir %u %04x->%04x k %d", dir, st, en, k);
+          prev = moved;
+        }
+        walks++;
+      }
+    /* per-step distance follows the scroll's ease: slow at both ends, never more than the mid-scroll step */
+    int mid = 0, first = 0;
+    for (int k = 1; k <= n; k++) {
+      const int d = DsWalkPos(0, 400, k, n) - DsWalkPos(0, 400, k - 1, n);
+      if (d > mid) mid = d;
+      if (k == 1) first = d;
+    }
+    CHECK(first <= mid, "walk starts no faster than its peak");
+  }
+  printf("walk-in: %ld walks\n", walks);
   /* DsOffsets clamps its step */
   int a[4], b[4];
   DsOffsets(0, -5, 100, a); DsOffsets(0, 0, 100, b);

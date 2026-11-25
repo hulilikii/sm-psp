@@ -9,6 +9,7 @@
  * from src/door_ease.h, the same code the game runs, and the slide replays the recursion step by step (never a closed form),
  * so the snapshots sit exactly where the live scroll's camera would be, with no drift and an exact landing on step N.
  * All displacements are in SNES source pixels; +x right, +y down. */
+#include <stdint.h>
 #include "src/door_ease.h"
 
 enum { kDsStepsH = 64, kDsStepsV = 56, kDsTotalH = 256, kDsTotalV = 224 };
@@ -48,4 +49,22 @@ static inline void DsOffsets(unsigned dir, int step, int align, int out[4]) {
 /* Source pixels -> viewport pixels (360x270 viewport from 256x192 source rows = 45/32), rounded away from zero. */
 static inline int DsDispPx(int src_px) {
   return (src_px * 45 + (src_px >= 0 ? 16 : -16)) / 32;
+}
+
+/* Samus's walk-in. The instant load leaves her where the live scroll's last step leaves her (end); the slide shows the new
+ * room without her at the position the scroll started her from (start: one screen beyond the door, hidden), and she walks
+ * to end over the live frames that follow, steps 1..n of the same n-step ease as the scroll (the scroll moved her by
+ * speed * step / 4 per step, so her speed profile is the same). Positions are the game's 16-bit world coordinates; the
+ * difference is taken signed so a wrap of the coordinate cannot send her the long way round. Step 0 is `start`, step n is
+ * exactly `end`; every step moves toward `end`, never past it. */
+static inline int DsWalkSteps(unsigned dir) {  /* frames of the walk-in: the scroll's own length (original entrance timing) */
+  return DsSteps(dir);
+}
+
+static inline uint16_t DsWalkPos(uint16_t start, uint16_t end, int step, int n) {
+  enum { kScale = 256 };
+  const int d = (int16_t)(uint16_t)(end - start);
+  const int cum = DoorEaseCum(step, n, kScale);
+  const int num = d * cum;
+  return (uint16_t)(start + (num + (num >= 0 ? kScale / 2 : -(kScale / 2))) / kScale);
 }

@@ -7,6 +7,9 @@
 #include "config.h"
 #include "src/psp/psp_renderer.h"
 #include "src/psp/psp_mosaic_fade.h"
+#if SM_PSP_DOOR_SNAP
+#include "src/psp/psp_door_snap.h"
+#endif
 
 #define kDemoRoomData ((unaligned_uint16*)RomFixedPtr(0x82876c))
 #define kPauseScreenSpriteAnimationData_0 (*(PauseScreenSpriteAnimationData*)RomFixedPtr(0x82c0b2))
@@ -3828,6 +3831,24 @@ CoroutineRet CallDoorTransitionFunction_Async(uint32 ea) {
 // If the load has to wait for a frame (a message box in the PLM handler) the normal states take over from there.
 static bool g_door_instant;
 
+// Samus's walk-in (DsWalkPos): she is drawn at step k of g_walk_n from g_walk_sx/sy (where the scroll started her) to
+// g_walk_ex/ey (where the scroll and DoorTransition_HandleTransition leave her, and where the game logic keeps her).
+// Only her drawn position moves; everything else sees her at the end position, exactly as in the live fade in.
+static uint8 g_walk_n;  // 0: no walk (the original fade in)
+static uint16 g_walk_k, g_walk_sx, g_walk_sy, g_walk_ex, g_walk_ey, g_walk_epx, g_walk_epy;  // e*: the end position, ep*: its previous-position copy
+
+static void DoorSnapWalkPose(int k) {  // Samus's position for the sprites drawn now
+  samus_x_pos = samus_prev_x_pos = DsWalkPos(g_walk_sx, g_walk_ex, k, g_walk_n);
+  samus_y_pos = samus_prev_y_pos = DsWalkPos(g_walk_sy, g_walk_ey, k, g_walk_n);
+}
+
+static void DoorSnapWalkEnd(void) {  // back to the logical (end) position
+  samus_x_pos = g_walk_ex;
+  samus_y_pos = g_walk_ey;
+  samus_prev_x_pos = g_walk_epx;  // HandleTransition's snap moves samus_x_pos but not the previous position: keep that
+  samus_prev_y_pos = g_walk_epy;
+}
+
 static int DoorSnapAlign(uint16 pos) {  // sm_80.c DoorAlignDistance
   const int low = pos & 0xFF;
   return (low & 0x80) ? 256 - low : -low;
@@ -3846,9 +3867,12 @@ static CoroutineRet DoorSnap_Run(void) {
   DoorTransitionFunction_SetupNewRoom();
   DoorTransitionFunction_SetupScrolling();
   DoorTransitionFunction_PlaceSamusLoadTiles();
+  g_walk_sx = samus_x_pos;  // where the scroll starts her (a screen beyond the door at the final camera)
+  g_walk_sy = samus_y_pos;
   CoroutineRet r = DoorTransitionFunction_LoadMoreThings_Async();
   g_door_instant = false;
   if (r) {  // yielded: the normal states finish the transition (with their fade in)
+    g_walk_n = 0;
     PspRenderer_DoorSnapAbort();
     return r;
   }
@@ -3857,6 +3881,12 @@ static CoroutineRet DoorSnap_Run(void) {
     HandleMusicQueue();
   DoorTransition_WaitForMusicToClear();
   DoorTransition_HandleTransition();
+  g_walk_ex = samus_x_pos;
+  g_walk_ey = samus_y_pos;
+  g_walk_epx = samus_prev_x_pos;
+  g_walk_epy = samus_prev_y_pos;
+  g_walk_n = (uint8)DsWalkSteps(dir);
+  g_walk_k = 0;
   memcpy(palette_buffer, target_palettes, 0x200);
   // a frame's worth of the main loop's prologue, so that the sprites below are the only ones
   ClearOamExt();
@@ -3868,19 +3898,18 @@ static CoroutineRet DoorSnap_Run(void) {
   DetermineWhichEnemiesToProcess();
   EnemyMain();
   EprojRunAll();
+  DoorSnapWalkPose(0);  // the new room's snapshot is taken from this frame: Samus has not entered yet
   DrawSamusEnemiesAndProjectiles();
   EnsureSamusDrawnEachFrame();
+  DoorSnapWalkEnd();
   QueueEnemyBG2TilemapTransfers();
   if (timer_status)
     DrawTimer();
   HdmaObjectHandler();
   HdmaObjectHandler();
   PspRenderer_EndDoorTransition();
-  debug_disable_sounds = 0;
-  PlaySpinJumpSoundIfSpinJumping();
-  door_transition_flag_elevator_zebetites = 0;
-  door_transition_flag_enemies = 0;
-  game_state = kGameState_8_MainGameplay;
+  // game_state stays 11 and door_transition_function is DoorTransition_FadeInScreenAndFinish (set above): once the slide
+  // is over, the fade in's frames walk Samus in (DoorTransition_FadeInScreenAndFinish) and then end the transition.
   PspRenderer_DoorSnapBegin(dir, align);
   return kCoroutineNone;
 }
@@ -4348,10 +4377,26 @@ CoroutineRet DoorTransition_FadeInScreenAndFinish(void) {  // 0x82E737
   DetermineWhichEnemiesToProcess();
   EnemyMain();
   EprojRunAll();
+#if SM_PSP_DOOR_SNAP
+  if (g_walk_n)
+    DoorSnapWalkPose(++g_walk_k);  // instant door load: Samus walks in (the palettes are already at their targets)
+#endif
   DrawSamusEnemiesAndProjectiles();
   EnsureSamusDrawnEachFrame();
+#if SM_PSP_DOOR_SNAP
+  if (g_walk_n)
+    DoorSnapWalkEnd();
+#endif
   QueueEnemyBG2TilemapTransfers();
-  if (AdvancePaletteFadeForAllPalettes_0xc()) {
+#if SM_PSP_DOOR_SNAP
+  const bool fade_done = g_walk_n ? g_walk_k >= g_walk_n : AdvancePaletteFadeForAllPalettes_0xc();
+#else
+  const bool fade_done = AdvancePaletteFadeForAllPalettes_0xc();
+#endif
+  if (fade_done) {
+#if SM_PSP_DOOR_SNAP
+    g_walk_n = 0;
+#endif
     PspRenderer_EndDoorTransition();
     debug_disable_sounds = 0;
     PlaySpinJumpSoundIfSpinJumping();
