@@ -2458,9 +2458,23 @@ void sub_88DE18(uint16 k, uint16 a) {  // 0x88DE18
   }
 }
 
+#if SM_PSP_GE_HAZE_LIGHT
+// The haze colour gradient (hdma_table_2) is not written: the renderer lights the picture instead. The fade counter hdma_object_A and
+// the state machine are untouched, so timing and every other effect of the haze object are as in the game.
+static void PspHazeLight(uint16 k) {
+  const int v = (uint8)k >> 1;
+  PspRenderer_SetHazeLight(hdma_object_A[v], (uint8)hdma_object_B[v]);
+}
+#define HAZE_TABLE_VALUE(r20, v1) (r20)
+#else
+#define PspHazeLight(k) ((void)0)
+#define HAZE_TABLE_VALUE(r20, v1) ((r20) | (v1))
+#endif
+
 void HdmaobjPreInstr_HazeColorMathSubscreen_FadingIn(uint16 k) {  // 0x88DE2D
   int8 v1;
 
+  PspHazeLight(k);
   reg_COLDATA[0] = 32;
   reg_COLDATA[1] = 64;
   reg_COLDATA[2] = 0x80;
@@ -2473,7 +2487,7 @@ void HdmaobjPreInstr_HazeColorMathSubscreen_FadingIn(uint16 k) {  // 0x88DE2D
     v1 = *((uint8 *)hdma_object_A + (uint8)k);
     for (int i = 15; i >= 0; --i) {
       uint8 r18 = v1;
-      *((uint8 *)hdma_table_2 + (uint8)i) = r20 | v1;
+      *((uint8 *)hdma_table_2 + (uint8)i) = HAZE_TABLE_VALUE(r20, v1);
       v1 = r18 - 1;
       if ((int8)(r18 - 1) < 0)
         v1 = 0;
@@ -2483,6 +2497,7 @@ void HdmaobjPreInstr_HazeColorMathSubscreen_FadingIn(uint16 k) {  // 0x88DE2D
 }
 
 void HdmaobjPreInstr_HazeColorMathSubscreen_FadedIn(uint16 k) {  // 0x88DE74
+  PspHazeLight(k);
   reg_COLDATA[0] = 32;
   reg_COLDATA[1] = 64;
   reg_COLDATA[2] = 0x80;
@@ -2495,6 +2510,7 @@ void HdmaobjPreInstr_HazeColorMathSubscreen_FadedIn(uint16 k) {  // 0x88DE74
 void HdmaobjPreInstr_HazeColorMathSubscreen_FadingOut(uint16 k) {  // 0x88DE96
   int8 v1;
 
+  PspHazeLight(k);
   reg_COLDATA[0] = 32;
   reg_COLDATA[1] = 64;
   reg_COLDATA[2] = 0x80;
@@ -2505,7 +2521,7 @@ void HdmaobjPreInstr_HazeColorMathSubscreen_FadingOut(uint16 k) {  // 0x88DE96
     v1 = *((uint8 *)hdma_object_A + (uint8)k);
     for (int i = 15; i >= 0; --i) {
       uint8 r18 = v1;
-      *((uint8 *)hdma_table_2 + (uint8)i) = r20 | v1;
+      *((uint8 *)hdma_table_2 + (uint8)i) = HAZE_TABLE_VALUE(r20, v1);
       v1 = r18 - 1;
       if ((int8)(r18 - 1) < 0)
         v1 = 0;

@@ -3,6 +3,7 @@
 #include "variables.h"
 #include "sm_rtl.h"
 #include "funcs.h"
+#include "src/psp/psp_renderer.h"
 
 
 #define kGoldenTorizoPalette1 ((unaligned_uint16*)RomFixedPtr(0x848032))
@@ -266,6 +267,51 @@ static inline uint8 *RomPtr_84orRAM(uint16_t addr) {
     return RomPtr_RAM(addr);
   }
 }
+
+#if SM_PSP_GE_GLOW
+// Glow emitters: bounding boxes (level pixels) of the coloured (0x84C7B1) and blue (0x84C7BB) door shells in the PLM table, from
+// each PLM's current draw instruction (same walk as ProcessPlmDrawInstruction, but nothing is written). Read only.
+int PspGlow_DoorBoxes(PspGlowBox *out, int max) {
+  const int w = room_width_in_blocks;
+  int n = 0;
+  if (w <= 0 || w > 0x100)
+    return 0;
+  for (int i = 0; i < 40 && n < max; i++) {
+    const uint16 hdr = plm_header_ptr[i];
+    if (!(hdr & 0x8000))
+      continue;
+    const uint16 setup = GET_WORD(RomPtr_84(hdr));
+    if (setup != (fnPlmSetup_Door_Colored & 0xFFFF) && setup != (fnPlmSetup_Door_Blue & 0xFFFF))
+      continue;
+    const uint16 dp = plm_instruction_draw_ptr[i];
+    if (!(dp & 0x8000))  // custom (RAM) draw instruction: not a plain door shell
+      continue;
+    const unaligned_uint16 *p = (const unaligned_uint16 *)RomPtr_84orRAM(dp);
+    const int blk = plm_block_indices[i] >> 1, bx = blk % w, by = blk / w;
+    int x0 = bx, y0 = by, x1 = bx + 1, y1 = by + 1, gx = bx, gy = by;
+    for (int seg = 0; seg < 8; seg++) {
+      const uint16 v = *p++;
+      const int cnt = (uint8)v;
+      if (cnt == 0)
+        break;
+      p += cnt;
+      const int ex = (v & 0x8000) ? gx + 1 : gx + cnt, ey = (v & 0x8000) ? gy + cnt : gy + 1;
+      x0 = gx < x0 ? gx : x0;
+      y0 = gy < y0 ? gy : y0;
+      x1 = ex > x1 ? ex : x1;
+      y1 = ey > y1 ? ey : y1;
+      const uint16 off = *p;
+      if (!off)
+        break;
+      gx = bx + (int8)off;
+      gy = by + (int8)(off >> 8);
+      p++;
+    }
+    out[n++] = (PspGlowBox){(int16_t)(x0 * 16), (int16_t)(y0 * 16), (int16_t)(x1 * 16), (int16_t)(y1 * 16)};
+  }
+  return n;
+}
+#endif
 
 void ProcessPlmDrawInstruction(uint16 v0) {  // 0x84861E
   int v1 = v0 >> 1;

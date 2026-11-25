@@ -14,6 +14,22 @@ uint8_t *PspRenderer_FrameBuffer(void);
 // Called from ppu_runLine() (through g_ppu_line_hook) before each visible line is rendered. Only active while the GE path is enabled.
 void PspRenderer_CaptureLine(const struct Ppu *ppu, int line);
 
+// Optional GE effects (compile time, off by default). SM_PSP_GE_GLOW: selective glow (psp_renderer.c). SM_PSP_GE_HAZE_LIGHT: the
+// Ceres haze colour gradient is replaced by GE point lights (sm_88.c writes no gradient, the renderer lights the picture).
+#ifndef SM_PSP_GE_GLOW
+#define SM_PSP_GE_GLOW 0
+#endif
+#ifndef SM_PSP_GE_HAZE_LIGHT
+#define SM_PSP_GE_HAZE_LIGHT 0
+#endif
+
+// Glow emitters: a box in level pixels (x1 / y1 exclusive).
+typedef struct PspGlowBox { int16_t x0, y0, x1, y1; } PspGlowBox;
+// sm_84.c: boxes of the coloured / blue door shells in the PLM table (at most max); returns how many.
+int PspGlow_DoorBoxes(PspGlowBox *out, int max);
+// sm_88.c, every frame the Ceres haze object runs: fade level 0..16 and colour channel (0x80 blue, 0x20 red) of the haze.
+void PspRenderer_SetHazeLight(unsigned level, unsigned mask);
+
 // Cycle at runtime: software PPU blit -> GE (with tint) -> GE without tint -> software.
 void PspRenderer_ToggleGe(void);
 bool PspRenderer_GeActive(void);
