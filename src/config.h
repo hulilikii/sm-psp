@@ -31,6 +31,15 @@
 #define SM_DOOR_FIXOOB 1
 #endif
 
+// PSP only (PSP_DOOR_SNAP in the Makefile): load the next room within one frame at a door and let the renderer slide frozen
+// snapshots of the old and the new room (the SM_DOOR_EASE / SM_DOOR_DIAG motion). Needs both of those. 0 = the game's own transition.
+#ifndef SM_PSP_DOOR_SNAP
+#define SM_PSP_DOOR_SNAP 0
+#endif
+#if SM_PSP_DOOR_SNAP && !(SM_DOOR_EASE && SM_DOOR_DIAG)
+#error "SM_PSP_DOOR_SNAP needs SM_DOOR_EASE and SM_DOOR_DIAG"
+#endif
+
 // Run SPC + DSP on the Media Engine.
 #ifndef PSP_AUDIO_ME
 #define PSP_AUDIO_ME 0

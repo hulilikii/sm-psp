@@ -114,6 +114,19 @@
 #define SM_PSP_GE_HAZE_LIGHT_GAIN 100
 #endif
 
+/* SM_PSP_DOOR_SNAP=1 (PSP_DOOR_SNAP in the Makefile): instant door load, then the GE slides two frozen snapshots of the old and
+ * the new room (see "Instant door transition" below). Needs the synchronous present: the snapshots are written into the layer
+ * image slots, which the CPU rewrites after the transition, and the compose list is unaudited for the extra quads. */
+#ifndef SM_PSP_DOOR_SNAP
+#define SM_PSP_DOOR_SNAP 0
+#endif
+#if SM_PSP_DOOR_SNAP && SM_PSP_ASYNC
+#error "PSP_DOOR_SNAP=1 needs PSP_ASYNC=0"
+#endif
+#if SM_PSP_DOOR_SNAP
+#include "src/psp/psp_door_snap.h"
+#endif
+
 enum {
   kPspWidth = 480,
   kPspHeight = 272,
@@ -2252,6 +2265,115 @@ bool PspRenderer_DoorTransitionActive(void) {
 bool PspRenderer_DoorTransitionArmed(void) {
 #if SM_PSP_DOOR_GE
   return g_door_reserved && g_door_armed;
+#else
+  return false;
+#endif
+}
+
+/* ---- Instant door transition (SM_PSP_DOOR_SNAP) -------------------------------------------------------------------------
+ * The game loads the destination room within one frame (sm_82.c DoorSnap_Run); the GE slides two frozen 256x192 RGB565
+ * snapshots of the gameplay rows (HUD rows are live) instead of the live scroll. Both live in the layer image slots (each
+ * slot is exactly 256x256x2 bytes), which are switched off from Arm to release, so nothing else uses them:
+ *   Arm (door hit, frame N-1)  layer images off; this frame's composition is copied to slot 0 (old room) -> HaveA
+ *   Ready/Begin (frame N)      the game loaded the room; from now on the old snapshot covers the screen -> WaitB
+ *   composition of frame N     the first valid frame (HUD layout resolved, GE scene) is copied to slot 1 -> Play
+ *   Hold (frames N+1...)       the game logic is held, the step counts the eased slide; at the last step everything is released
+ * Held frames keep the OAM and registers of frame N, so a snapshot that is refused on one frame is retried on the next
+ * (kDsMaxWaitB), then the transition is dropped and the live destination shows (a cut, never a stuck lock). */
+#if SM_PSP_DOOR_SNAP
+enum { kDsIdle, kDsArmed, kDsHaveA, kDsWaitB, kDsPlay };
+enum { kDsMaxWaitB = 8, kDsMaxHaveA = 4 };
+CASSERT(kImgBytes >= 256 * 256 * 2);  /* a snapshot is described to the GE as 256x256 RGB565 and must fit its slot */
+static uint8_t g_ds_state, g_ds_frames, g_ds_dir;
+static uint16_t g_ds_step;
+static int16_t g_ds_align;
+static bool g_ds_ok, g_ds_saved_img_ok, g_ds_saved_imgh_ok, g_ds_saved_skip_ok;
+
+static void DoorSnapRelease(void) {
+  if (g_ds_state == kDsIdle)
+    return;
+  g_ds_state = kDsIdle;
+  g_img_ok = g_ds_saved_img_ok;
+  g_imgh_ok = g_ds_saved_imgh_ok;
+  g_img_skip_ok = g_ds_saved_skip_ok;
+  memset(g_img, 0, sizeof(g_img));  /* both slots held snapshots: rebuild both images */
+  ImgMarkAllDirty();
+}
+#endif
+
+void PspRenderer_DoorSnapArm(void) {
+#if SM_PSP_DOOR_SNAP
+  if (!g_ds_ok || g_ds_state != kDsIdle || !g_ge_active)
+    return;
+#if SM_PSP_DOOR_GE
+  if (g_door_reserved)
+    return;
+#endif
+  g_ds_saved_img_ok = g_img_ok;
+  g_ds_saved_imgh_ok = g_imgh_ok;
+  g_ds_saved_skip_ok = g_img_skip_ok;
+  g_img_ok = g_imgh_ok = g_img_skip_ok = false;  /* no layer image (main or subscreen) may use either slot */
+  g_ds_state = kDsArmed;
+  g_ds_frames = 0;
+#endif
+}
+
+bool PspRenderer_DoorSnapReady(void) {
+#if SM_PSP_DOOR_SNAP
+  return g_ds_state == kDsHaveA;
+#else
+  return false;
+#endif
+}
+
+void PspRenderer_DoorSnapAbort(void) {
+#if SM_PSP_DOOR_SNAP
+  if (g_ds_state != kDsIdle)
+    PspLog("door snap: dropped (state %d)", (int)g_ds_state);
+  DoorSnapRelease();
+#endif
+}
+
+void PspRenderer_DoorSnapBegin(unsigned direction, int align_px) {
+#if SM_PSP_DOOR_SNAP
+  if (g_ds_state != kDsHaveA)
+    return;
+  g_ds_dir = (uint8_t)(direction & 3);
+  g_ds_align = (int16_t)(align_px < -256 ? -256 : align_px > 256 ? 256 : align_px);
+  g_ds_step = 0;
+  g_ds_frames = 0;
+  g_ds_state = kDsWaitB;
+#else
+  (void)direction, (void)align_px;
+#endif
+}
+
+bool PspRenderer_DoorSnapHold(void) {
+#if SM_PSP_DOOR_SNAP
+  switch (g_ds_state) {
+  case kDsArmed:
+  case kDsHaveA:  /* the game commits (or aborts) within a frame or two */
+    if (++g_ds_frames > kDsMaxHaveA) {
+      PspLog("door snap: no commit");
+      DoorSnapRelease();
+    }
+    return false;
+  case kDsWaitB:
+    if (++g_ds_frames > kDsMaxWaitB) {
+      PspLog("door snap: no valid destination frame");
+      DoorSnapRelease();
+      return false;
+    }
+    return true;
+  case kDsPlay:
+    if (++g_ds_step >= (unsigned)DsSteps(g_ds_dir)) {
+      DoorSnapRelease();
+      return false;
+    }
+    return true;
+  default:
+    return false;
+  }
 #else
   return false;
 #endif
@@ -4997,6 +5119,102 @@ static void DrawDoorTransition(const ComposeSrc *s) {
 }
 #endif
 
+#if SM_PSP_DOOR_SNAP
+/* The two snapshots (slot 0 old room, slot 1 new room; 256x192 valid rows) slid over the gameplay viewport. Each image is
+ * mapped 256x192 -> 360x270 exactly like the normal composition and displaced by DsOffsets(). The image that leads (left /
+ * upper: old for right and down doors, new for left and up doors) owns the viewport up to its trailing edge, the other image
+ * owns the rest, so there is no seam or gap whatever the rounding. Where an image does not reach a pixel of its region (the
+ * camera offset across the door, and the 32 source rows the HUD hides on vertical doors) its nearest edge row/column is
+ * repeated by drawing constant-coordinate quads, so tubes and walls continue; nothing outside the 192 rows is ever sampled.
+ * The rectangles are clipped on the CPU (no scissor state is touched). */
+static void DsQuad(float su0, float sv0, float su1, float sv1, int x0, int y0, int x1, int y1) {
+  TileVert *v = sceGuGetMemory(2 * (int)sizeof(TileVert));
+  ComposeQuad(v, su0, sv0, su1, sv1, x0, y0, x1 - x0, y1 - y0);
+  GeDraw(kVtTile, 2, v);
+}
+
+static int DsClamp(int v, int lo, int hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/* Draws the part [rx0, rx1) x [ry0, ry1) of the viewport from the image tex whose top-left corner is at (dx, dy). */
+static void DsImage(const void *tex, int dx, int dy, int rx0, int ry0, int rx1, int ry1) {
+  enum { kRows = 192 };
+  if (rx1 <= rx0 || ry1 <= ry0)
+    return;
+  sceGuTexMode(GU_PSM_5650, 0, 0, GU_FALSE);
+  sceGuTexImage(0, 256, 256, 256, tex);
+  sceGuTexFlush();
+  const float ku = (float)(kGameWidth - 1) / (float)(kCompW - 1), kv = (float)(kRows - 1) / (float)(kCompH - 1);
+  const int xs[4] = {rx0, DsClamp(dx, rx0, rx1), DsClamp(dx + kCompW, rx0, rx1), rx1};
+  const int ys[4] = {ry0, DsClamp(dy, ry0, ry1), DsClamp(dy + kCompH, ry0, ry1), ry1};
+  for (int j = 0; j < 3; j++) {
+    const int y0 = ys[j], y1 = ys[j + 1];
+    if (y1 <= y0)
+      continue;
+    const float v0 = j == 0 ? 0.5f : j == 2 ? (float)kRows - 0.5f : 0.5f + (float)(y0 - dy) * kv;
+    const float v1 = j == 0 ? 0.5f : j == 2 ? (float)kRows - 0.5f : 0.5f + (float)(y1 - 1 - dy) * kv;
+    for (int i = 0; i < 3; i++) {
+      const int x0 = xs[i], x1 = xs[i + 1];
+      if (x1 <= x0)
+        continue;
+      const float u0 = i == 0 ? 0.5f : i == 2 ? (float)kGameWidth - 0.5f : 0.5f + (float)(x0 - dx) * ku;
+      const float u1 = i == 0 ? 0.5f : i == 2 ? (float)kGameWidth - 0.5f : 0.5f + (float)(x1 - 1 - dx) * ku;
+      DsQuad(u0, v0, u1, v1, x0, y0, x1, y1);
+    }
+  }
+}
+
+static void DrawDoorSnap(const ComposeSrc *s) {
+  const int step = g_ds_state == kDsPlay ? (int)g_ds_step : 0;  /* until the new snapshot exists the old one stays put */
+  int o[4];
+  DsOffsets(g_ds_dir, step, g_ds_align, o);
+  const int vx0 = kCompX, vx1 = kCompX + kCompW, vy0 = kCompY, vy1 = kCompY + kCompH;
+  const int oldx = kCompX + DsDispPx(o[0]), oldy = kCompY + DsDispPx(o[1]);
+  const int newx = kCompX + DsDispPx(o[2]), newy = kCompY + DsDispPx(o[3]);
+  const void *const tex_old = g_img_tex[0], *const tex_new = g_img_tex[1];
+  if (g_ds_state != kDsPlay) {  /* waiting for the new snapshot: the old image alone covers the screen */
+    DsImage(tex_old, oldx, oldy, vx0, vy0, vx1, vy1);
+  } else if (!(g_ds_dir & 2)) {  /* horizontal door: the leading image is on the left */
+    const bool old_first = g_ds_dir == 0;
+    const int seam = DsClamp((old_first ? oldx : newx) + kCompW, vx0, vx1);
+    if (old_first) {
+      DsImage(tex_old, oldx, oldy, vx0, vy0, seam, vy1);
+      DsImage(tex_new, newx, newy, seam, vy0, vx1, vy1);
+    } else {
+      DsImage(tex_new, newx, newy, vx0, vy0, seam, vy1);
+      DsImage(tex_old, oldx, oldy, seam, vy0, vx1, vy1);
+    }
+  } else {  /* vertical door: the leading image is on top */
+    const bool old_first = g_ds_dir == 2;
+    const int seam = DsClamp((old_first ? oldy : newy) + kCompH, vy0, vy1);
+    if (old_first) {
+      DsImage(tex_old, oldx, oldy, vx0, vy0, vx1, seam);
+      DsImage(tex_new, newx, newy, vx0, seam, vx1, vy1);
+    } else {
+      DsImage(tex_new, newx, newy, vx0, vy0, vx1, seam);
+      DsImage(tex_old, oldx, oldy, vx0, seam, vx1, vy1);
+    }
+  }
+  /* the HUD pass samples the composition source again */
+  sceGuTexMode(s->psm, 0, 0, GU_FALSE);
+  sceGuTexImage(0, s->w, s->h, s->stride, s->ptr);
+  sceGuTexFlush();
+}
+
+/* Display-list use of the snapshot code (compose list, PSP_ASYNC=0 only). Every libgu call is one or a few 4 byte commands
+ * (pspsdk/gu sources): sceGuTexMode 2 + flush 1, sceGuTexImage 3 + flush 1, sceGuTexFlush 1, sceGuDrawArray 4 (vertex type,
+ * base, address, prim), sceGuCopyImage 8, sceGuTexSync 1; sceGuGetMemory(n) takes n rounded up to 4, plus an 8 byte jump.
+ * DrawDoorSnap changes only the texture mode / image (restored at the end) and draws sprites: no other GE state.
+ *   a DsImage call: <= 3 x 3 = 9 quads; DrawDoorSnap makes <= 2 of them (one while the new snapshot is awaited)
+ *   per image TexMode + TexImage + TexFlush = 12 + 16 + 4 = 32 B; per quad GuMem(2 TileVert) + 16 B draw; restore 32 B;
+ *   capture (CopyImage + TexSync) 32 + 4 B. Calls: 2 x 3 + 18 + 3 + 2 = 29.
+ *   => exactly <= 2*32 + 18*(40 + 16) + 32 + 36 = 1140 B (tools/test_door_snap_draw.sh measures it with these costs).
+ * The compose bound (ComposeBytesBound) charges the generous kGuCallMax per call instead: kDsMaxCalls calls + kDsMaxMem. */
+enum { kDsMaxQuads = 18, kDsMaxCalls = 29, kDsExactBytes = 1140,
+       kDsMaxMem = kDsMaxQuads * (((2 * (int)sizeof(TileVert) + 3) / 4) * 4 + 8) };
+#endif
+
 /* ---- Native message overlay ---------------------------------------------------------------------------------
  * Drawn last in ComposeDraw, so the GE and software paths share it. Text: psp_message_text.h (from messages.txt),
  * glyph metrics: psp_message_font.h. Textures are RGBA8888 in RAM, written back once (ComposeDraw), never modified.
@@ -5624,6 +5842,10 @@ static void ComposeHazeLight(void) {
 /* Appends the composition of the source image s (256 wide, rows 0-223 valid) to the open list: black panel, then Layout A
  * (HUD present: source rows 32-223 -> 360x270, original HUD elements in the side panels) or Layout B (rows 0-223 -> 360x270,
  * empty margins). The list is open and the source is complete; exactly one Present() follows. */
+#if SM_PSP_DOOR_SNAP
+static bool DsListFits(void);
+#endif
+
 static void ComposeDraw(const ComposeSrc *s) {
   static bool icons_flushed;
   if (!icons_flushed) {  /* the icon textures are read by the GE from RAM: write the CPU's copy back once (never written again) */
@@ -5698,6 +5920,30 @@ static void ComposeDraw(const ComposeSrc *s) {
   }
 #endif
 
+#if SM_PSP_DOOR_SNAP
+  /* The compose list is checked, not assumed, before the snapshots add to it (see DsListFits); a transition that does not fit
+   * is dropped: the live destination frame shows (a cut) and nothing is emitted for it. */
+  if (g_ds_state != kDsIdle && !DsListFits()) {
+    PspLog("door snap: compose list too full, transition dropped");
+    DoorSnapRelease();
+  }
+  /* A snapshot is only taken from a GE scene frame whose HUD layout resolved (gameplay rows 32-223 of the 256x256 composition
+   * source, which lives in VRAM), copied VRAM to VRAM and synced before it is sampled; rows 192-255 of a slot are never read. */
+  if ((g_ds_state == kDsArmed || g_ds_state == kDsWaitB) && hud && s->psm == GU_PSM_5650 && s->ptr == (const void *)g_texture) {
+    const int slot = g_ds_state == kDsArmed ? 0 : 1;
+    sceGuCopyImage(GU_PSM_5650, 0, 32, kGameWidth, 192, s->stride,
+                   (void *)(0x04000000u | ((uintptr_t)s->ptr & 0x001fffffu)), 0, 0, 256,
+                   (void *)(uintptr_t)(0x04000000u | (uint32_t)(kVramImg0 + slot * kImgBytes)));
+    sceGuTexSync();
+    if (slot == 0) {
+      g_ds_state = kDsHaveA;
+    } else {
+      g_ds_state = kDsPlay;
+      g_ds_step = 0;
+    }
+  }
+#endif
+
   TileVert *base = sceGuGetMemory((int)((kComposeStrips + kHudRectN + 2) * 2 * sizeof(TileVert)));
   const int srow0 = hud ? 32 : 0;
   const int nbase = ComposeQuadStrips(base, 0.5f, (float)srow0 + 0.5f, (float)kGameWidth - 0.5f, (float)kSrcRows - 0.5f, kCompX,
@@ -5714,6 +5960,10 @@ static void ComposeDraw(const ComposeSrc *s) {
 #endif
 #if SM_PSP_GE_GLOW
   ComposeGlow(s, srow0);  /* emitters only; nothing at all when there are none (GlowCollect) */
+#endif
+#if SM_PSP_DOOR_SNAP
+  if (g_ds_state == kDsWaitB || g_ds_state == kDsPlay)
+    DrawDoorSnap(s);
 #endif
   if (hud) {
     TileVert *w = base + nbase;
@@ -5924,7 +6174,7 @@ static void ApplyMosaicTransition(void) {
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
 
-#if SM_PSP_ASYNC
+#if SM_PSP_ASYNC || SM_PSP_DOOR_SNAP  /* the bound is also what PSP_DOOR_SNAP checks the (synchronous) compose list against */
 /* Compose-list bound. sceGuGetMemory and sceGuCopyImage..sceGuFinish never check the list end, so ComposeDraw only
  * runs on g_gu_list2 if ComposeBytesBound() <= kComposeAsyncMax (half of the list). The bound is mem + calls *
  * kGuCallMax, from a complete audit of what ComposeGeAsync, ComposeDraw, DrawDoorTransition and DrawNativeMessage emit:
@@ -5940,6 +6190,7 @@ static void ApplyMosaicTransition(void) {
  *   ComposeGeAsync 5 (start, draw buffer, copy, sync, finish) + marker 6 (3 states, scissor x2, draw; mem 2 ColorVert);
  *   ComposeDraw preamble 19, door capture 2, base quad 2,
  *   door transition 7, HUD 17, button header 7, trailer 5; DrawNativeMessage fixed part 12 (71 + 5 = 76);
+ *   SM_PSP_DOOR_SNAP (synchronous only): kDsMaxCalls + kDsMaxMem, see DrawDoorSnap;
  *   button overlay: 3 set-up + 2 per run (colour, draw); message: 5 per glyph run (colour, mode, image, flush, draw)
  *   and 5 per icon (the same, its vertices counted in mem).
  *   kComposeEvolutionCalls (20) is head-room for edits of ComposeDraw; ComposeCheckUsed catches an edit that exceeds it.
@@ -5948,9 +6199,18 @@ static void ApplyMosaicTransition(void) {
  * ComposeCheckUsed measures the real list after every compose; if it ever exceeds the bound (an audit or libgu
  * assumption is wrong) async is switched off for good. That is a detector, not the guard: the guard is the bound. */
 enum { kGuCallMax = 128, kGuClearBytes = 16 * 16, kComposeFixedCalls = 82, kComposeEvolutionCalls = 20,
-       kComposeTail = 1024,  /* head-room behind the compose commands: FINISH / END and the checks' own allocations */
-       kComposeAsyncMax = kComposeCap / 2 };
+       kComposeTail = 1024   /* head-room behind the compose commands: FINISH / END and the checks' own allocations */
+};
+#if SM_PSP_ASYNC
+enum { kComposeAsyncMax = kComposeCap / 2 };
 CASSERT(kComposeAsyncMax + kComposeTail <= kComposeCap);
+#endif
+#if SM_PSP_DOOR_SNAP
+/* the generous per-call charge covers the measured worst case, and the snapshots' charge is small beside the list */
+CASSERT(kDsExactBytes <= kDsMaxMem + kDsMaxCalls * kGuCallMax);
+CASSERT(kDsMaxMem + kDsMaxCalls * kGuCallMax <= 8 * 1024);
+CASSERT(kDsMaxMem + kDsMaxCalls * kGuCallMax + kComposeTail < kListBytes / 32);
+#endif
 
 static inline uint32_t GuMem(uint32_t n) {
   return ((n + 3u) & ~3u) + 8u;
@@ -5977,6 +6237,10 @@ static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
   uint32_t mem = GuMem((kComposeStrips + kHudRectN + 2) * 2 * sizeof(TileVert)) + GuMem(2 * sizeof(TileVert)) +
                  GuMem(2 * sizeof(ColorVert)) + GuMem(2 * sizeof(ColorVert)) + GuMem(kGuClearBytes);
   uint32_t calls = kComposeFixedCalls + kComposeEvolutionCalls;
+#if SM_PSP_DOOR_SNAP
+  mem += kDsMaxMem;
+  calls += kDsMaxCalls;
+#endif
 #if SM_PSP_GE_GLOW
   if (GlowStateOk()) {  /* worst case of ComposeGlow (the box list is only known inside ComposeDraw) */
     mem += GuMem((uint32_t)(kGlowMaxVerts + 4 * 2 * COMPOSE_STRIPS(kGlowW2) + 4 * 2 * COMPOSE_STRIPS(kGlowW3) + 2 * kComposeStrips + 4) *
@@ -6017,11 +6281,13 @@ static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
   return mem + calls * kGuCallMax;
 }
 
+#if SM_PSP_ASYNC
 /* sceGuStart returns int (< 0: sceGeListEnQueue failed) in current PSPSDK and void in older ones: this takes either
  * prototype (with void a failure cannot be seen and 0 is returned). */
 #define GU_START_DIRECT(list)                                                                                      \
   __builtin_choose_expr(__builtin_types_compatible_p(__typeof__(sceGuStart(GU_DIRECT, (list))), void),            \
                         ((void)sceGuStart(GU_DIRECT, (list)), 0), sceGuStart(GU_DIRECT, (list)))
+#endif
 
 /* Bytes used so far in `list` (the list the GU is writing): sceGuGetMemory(0) returns the list position + 8 (its own
  * header). */
@@ -6029,6 +6295,20 @@ static uint32_t CurListUsed(const uint32_t *list) {
   return (uint32_t)(((uintptr_t)sceGuGetMemory(0) & 0x1fffffffu) - ((uintptr_t)list & 0x1fffffffu));
 }
 
+#if SM_PSP_DOOR_SNAP
+/* Synchronous compose with snapshots. Both callers of ComposeDraw (ComposeGeFrame and the software path) start g_gu_list right
+ * before it, so CurListUsed(g_gu_list) is what the compose has emitted so far. The rest of the composition is charged with the
+ * whole bound again (the commands already emitted are counted twice: conservative), snapshots included. If that plus the tail
+ * does not fit the list, the transition is dropped before it adds a single command. The snapshots' share of the bound is
+ * 29 * 128 + 720 = 4432 B of the 512 KB list; this never trips in practice, it is the guard, not the budget. */
+static bool DsListFits(void) {
+  uint32_t mem, calls;
+  const uint32_t bound = ComposeBytesBound(&mem, &calls);
+  return CurListUsed(g_gu_list) + bound + kComposeTail <= (uint32_t)kListBytes;
+}
+#endif
+
+#if SM_PSP_ASYNC
 /* After the compose commands are built (every build, one sceGuGetMemory(0) per frame): the compose commands took
  * CurListUsed(list) - base bytes (base: what the list held before them, 0 for a list of their own). Detector only, see
  * the bound above. */
@@ -6119,7 +6399,8 @@ static bool ComposeGeAsync(void) {
 #endif
   return true;
 }
-#endif
+#endif  /* SM_PSP_ASYNC */
+#endif  /* SM_PSP_ASYNC || SM_PSP_DOOR_SNAP */
 
 /* Splits [x0,x1) at multiples of 64 framebuffer pixels. PPSSPP's GE notes say
  * 2D images are cheaper to draw in 64-pixel-wide vertical strips on 16-bit
@@ -7872,6 +8153,9 @@ bool PspRenderer_GeActive(void) {
 void PspRenderer_Resume(void) {
   GeWait();  /* complete (and show) a queued frame before the atlases and layer images are dropped */
   DoorTransitionRelease();  /* VRAM (the snapshot) is not trusted after sleep */
+#if SM_PSP_DOOR_SNAP
+  DoorSnapRelease();
+#endif
   memset(g_hash2, 0xff, sizeof(g_hash2));
   memset(g_hash4, 0xff, sizeof(g_hash4));
   memset(g_hash7, 0xff, sizeof(g_hash7));
@@ -8981,6 +9265,11 @@ static bool PspRenderer_Initialize(void) {
 #if SM_PSP_DOOR_GE
   g_door_ok = g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)(kVramImg0 + kImgBytes);
 #endif
+#if SM_PSP_DOOR_SNAP
+  g_ds_ok = g_ge_ok && (unsigned)sceGeEdramGetSize() >= (unsigned)kVramImgEnd;  /* both layer image slots hold a snapshot */
+  PspLog("door snap: %d (slots %u..%u of %u)", (int)g_ds_ok, (unsigned)kVramImg0, (unsigned)kVramImgEnd,
+         (unsigned)sceGeEdramGetSize());
+#endif
   PspLog("layer images: %d high=%d skip=%d (needs %u of %u)", (int)g_img_ok, (int)g_imgh_ok, (int)g_img_skip_ok, (unsigned)kVramImgEnd,
          (unsigned)sceGeEdramGetSize());
 
@@ -9064,6 +9353,9 @@ static bool PspRenderer_Initialize(void) {
 static void PspRenderer_Destroy(void) {
   GeWait();  /* the GE must be idle before the display is switched off */
   DoorTransitionRelease();
+#if SM_PSP_DOOR_SNAP
+  DoorSnapRelease();
+#endif
   g_ppu_line_hook = NULL;
   g_ppu_draw_begin = g_ppu_draw_end = NULL;
   g_ppu_skip_draw = false;
@@ -9255,6 +9547,12 @@ static void PspRenderer_EndDraw(void) {
     g_streak = 0;
     g_t_draw_start = Now();
     int swpath = g_swpath >= 0 ? g_swpath : (int)((g_cal_frames / kSwCalFrames) % kSwPaths);
+#if SM_PSP_DOOR_SNAP
+    if (g_ds_state != kDsIdle) {  /* the snapshots come from GE frames only: the live (destination) frame shows */
+      PspLog("door snap: software frame, transition dropped");
+      DoorSnapRelease();
+    }
+#endif
 #if SM_PSP_DOOR_GE
     if (g_door_reserved) {  /* the software PPU cannot draw the override palettes: the game's own transition continues */
       PspLog("door: software frame, GE door transition dropped");

@@ -66,6 +66,11 @@ PSP_MOS_GE ?= 1
 # PSP_DOOR_GE=1 enables the experimental GE door transition.
 # 0 preserves the original SNES palette-fade transition.
 PSP_DOOR_GE ?= 0
+# PSP_DOOR_SNAP=1: instant door transition. The game state jumps to the destination room within one frame (the states of
+# door_speedup.asm run back to back, using the game's own room loader) while the GE slides two frozen snapshots (old room,
+# new room) with the default eased, diagonal door motion; game logic is held for the slide. Needs PSP_ASYNC=0 and uses the two
+# layer image slots (no extra eDRAM). Falls back to the normal transition when a snapshot cannot be taken. 0 = unchanged.
+PSP_DOOR_SNAP ?= 0
 # PSP_LAYER_IMG: BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run).
 # 0: tile quads. 1: Gate 5l (32x32 / 64x32 maps). 2: also 32x64 maps (Gate 5m). 3: also skip the image scan when no VRAM page of the map or tiles was written (Gate 5m).
 PSP_LAYER_IMG ?= 3
@@ -132,7 +137,7 @@ CFLAGS += -DSM_PSP_CAP_WIN=$(PSP_CAP_WIN) -DSM_PSP_BENCH=$(PSP_BENCH)
 CFLAGS += -DSM_PSP_BENCH_M7=$(PSP_BENCH_M7) -DSM_PSP_BENCH_COMPOSE=$(PSP_BENCH_COMPOSE)
 CFLAGS += -DSM_PSP_M7_REUSE=$(PSP_M7_REUSE) -DSM_PSP_SWIZZLE=$(PSP_SWIZZLE) -DSM_PSP_M7_PROBE=$(PSP_M7_PROBE) -DSM_PSP_M7_ROW4=$(PSP_M7_ROW4) -DSM_PSP_M7_BLK=$(PSP_M7_BLK)
 CFLAGS += -DSM_PSP_MOS_GE=$(PSP_MOS_GE)
-CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE)
+CFLAGS += -DSM_PSP_DOOR_GE=$(PSP_DOOR_GE) -DSM_PSP_DOOR_SNAP=$(PSP_DOOR_SNAP)
 CFLAGS += -DSM_PSP_LAYER_IMG=$(PSP_LAYER_IMG)
 CFLAGS += -DSM_PSP_TILE_GEN=$(PSP_TILE_GEN)
 CFLAGS += -DSM_PSP_ASYNC=$(PSP_ASYNC)
@@ -180,7 +185,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_glow$(PSP_GE_GLOW)t$(PSP_GE_GLOW_THRESH)g$(PSP_GE_GLOW_GAIN)s$(PSP_GE_GLOW_SRC)_hz$(PSP_GE_HAZE_LIGHT)g$(PSP_GE_HAZE_LIGHT_GAIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_vg$(PSP_VERIFY_GAP)_vf$(PSP_VERIFY)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_glow$(PSP_GE_GLOW)t$(PSP_GE_GLOW_THRESH)g$(PSP_GE_GLOW_GAIN)s$(PSP_GE_GLOW_SRC)_hz$(PSP_GE_HAZE_LIGHT)g$(PSP_GE_HAZE_LIGHT_GAIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_vg$(PSP_VERIFY_GAP)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_snap$(PSP_DOOR_SNAP)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp

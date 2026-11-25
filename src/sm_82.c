@@ -672,6 +672,16 @@ CoroutineRet RunOneFrameOfGameInner(void) {
     Die("Incorrect coroutine_state_0");
   }
 
+#if SM_PSP_DOOR_SNAP
+  // The renderer is sliding the door snapshots: the room is already loaded, hold it. Input, OAM and the HDMA objects stay as
+  // the loading frame left them (so the destination frame can still be captured); only what HdmaObjectHandler does for the
+  // music queue, and the sound handlers below, keep running.
+  if (PspRenderer_DoorSnapHold()) {
+    HandleMusicQueue();
+    goto HELD_FRAME;
+  }
+#endif
+
   // Ensure these are reset to a known state.
   // There was a bug where these would have the wrong value.
   coroutine_state_1 = coroutine_state_2 = coroutine_state_3 = coroutine_state_4 = 0;
@@ -689,6 +699,9 @@ CoroutineRet RunOneFrameOfGameInner(void) {
 RESUME_AT_SWITCH:
   COROUTINE_AWAIT_ONLY(kGameStateFuncs[st - 10]());
 
+#if SM_PSP_DOOR_SNAP
+HELD_FRAME:
+#endif
   HandleSoundEffects();
   ClearUnusedOam();
   ShowSpareCpu();
@@ -886,6 +899,12 @@ CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
   HandleSamusOutOfHealthAndGameTile();
   HandleRoomShaking();
   DecrementSamusTimers();
+#if SM_PSP_DOOR_SNAP
+  // Samus hit a normal door this frame (elevator doors keep their own transition): this frame, now fully built, is the
+  // outgoing room's last picture. The renderer snapshots it when the frame is composed.
+  if (game_state == kGameState_9_HitDoorBlock && !elevator_flags && (get_DoorDef(door_def_ptr)->door_bitflags & 0x80) == 0)
+    PspRenderer_DoorSnapArm();
+#endif
   COROUTINE_END(0);
 
 }
@@ -3796,7 +3815,85 @@ CoroutineRet CallDoorTransitionFunction_Async(uint32 ea) {
   }
 }
 
+#if SM_PSP_DOOR_SNAP
+// Instant door load. door_speedup.asm runs the door states back to back inside force blank; this runs the game's own state
+// functions (the room loader stays authoritative) in the same order within one frame, replacing only the waits:
+//   sounds / fade out    skipped (the renderer shows the old room's snapshot; the sound queue is cleared by GameState_10)
+//   scroll to the door   the eased scroll steps (Irq_FollowDoorTransition) run back to back, each followed by the VRAM
+//                        upload the NMI would have made, so the tilemap, camera, layer 2, Samus and the scroll state end up
+//                        exactly where the live scroll leaves them
+//   music                the queue is drained, then the new track is queued (DoorTransition_WaitForMusicToClear)
+//   fade in              the palettes are set to their targets; the enemies/Samus run and draw once (as the asm does) so the
+//                        frame the renderer snapshots is a complete gameplay frame; HDMA objects run twice (the asm does)
+// If the load has to wait for a frame (a message box in the PLM handler) the normal states take over from there.
+static bool g_door_instant;
+
+static int DoorSnapAlign(uint16 pos) {  // sm_80.c DoorAlignDistance
+  const int low = pos & 0xFF;
+  return (low & 0x80) ? 256 - low : -low;
+}
+
+static CoroutineRet DoorSnap_Run(void) {
+  const uint16 old_x = layer1_x_pos, old_y = layer1_y_pos;
+  g_door_instant = true;
+  DoorTransitionFunction_HandleElevator();  // game_state 9 -> 11, GameState_10: target palettes, sounds
+  DoorTransitionFunction_LoadDoorHeaderEtc();
+  const unsigned dir = door_direction & 3;
+  const int align = DoorSnapAlign((dir & 2) ? old_x : old_y);  // across the door
+  DoorTransitionFunction_ScrollScreenToAlignment();
+  DoorTransitionFunction_FixDoorsMovingUp();
+  NMI_ProcessVramWriteQueue();
+  DoorTransitionFunction_SetupNewRoom();
+  DoorTransitionFunction_SetupScrolling();
+  DoorTransitionFunction_PlaceSamusLoadTiles();
+  CoroutineRet r = DoorTransitionFunction_LoadMoreThings_Async();
+  g_door_instant = false;
+  if (r) {  // yielded: the normal states finish the transition (with their fade in)
+    PspRenderer_DoorSnapAbort();
+    return r;
+  }
+  DoorTransition_C_HandleAnimTiles();
+  for (int i = 0; i < 1024 && HasQueuedMusic(); i++)
+    HandleMusicQueue();
+  DoorTransition_WaitForMusicToClear();
+  DoorTransition_HandleTransition();
+  memcpy(palette_buffer, target_palettes, 0x200);
+  // a frame's worth of the main loop's prologue, so that the sprites below are the only ones
+  ClearOamExt();
+  oam_next_ptr = 0;
+  nmi_copy_samus_halves = 0;
+  nmi_copy_samus_top_half_src = 0;
+  nmi_copy_samus_bottom_half_src = 0;
+  AnimtilesHandler();
+  DetermineWhichEnemiesToProcess();
+  EnemyMain();
+  EprojRunAll();
+  DrawSamusEnemiesAndProjectiles();
+  EnsureSamusDrawnEachFrame();
+  QueueEnemyBG2TilemapTransfers();
+  if (timer_status)
+    DrawTimer();
+  HdmaObjectHandler();
+  HdmaObjectHandler();
+  PspRenderer_EndDoorTransition();
+  debug_disable_sounds = 0;
+  PlaySpinJumpSoundIfSpinJumping();
+  door_transition_flag_elevator_zebetites = 0;
+  door_transition_flag_enemies = 0;
+  game_state = kGameState_8_MainGameplay;
+  PspRenderer_DoorSnapBegin(dir, align);
+  return kCoroutineNone;
+}
+#endif
+
 CoroutineRet GameState_9_HitDoorBlock(void) {  // 0x82E169
+#if SM_PSP_DOOR_SNAP
+  if (door_transition_function == FUNC16(DoorTransitionFunction_HandleElevator) && !elevator_flags) {
+    if (PspRenderer_DoorSnapReady())
+      return DoorSnap_Run();
+    PspRenderer_DoorSnapAbort();  // no snapshot of the old room: the game's own transition
+  }
+#endif
   if ((get_DoorDef(door_def_ptr)->door_bitflags & 0x80) == 0)
     PspRenderer_BeginDoorTransition();
   return CallDoorTransitionFunction_Async(door_transition_function | 0x820000);
@@ -4045,6 +4142,9 @@ static uint8 g_door_music_stage;  // 0: nothing queued, 1: stop/upload queued, 2
 
 CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
   uint16 bg_data_ptr;
+#if SM_PSP_DOOR_SNAP
+  uint16 instant_steps = 0;
+#endif
 
   COROUTINE_BEGIN(coroutine_state_1, 0);
 
@@ -4082,6 +4182,19 @@ CoroutineRet DoorTransitionFunction_LoadMoreThings_Async(void) {
   PspRenderer_DoorTransitionArm((const uint16_t *)target_palettes);
   // Wait until the screen has finished scrolling as a result of the door opening
   while ((door_transition_flag & 0x8000) == 0) {
+#if SM_PSP_DOOR_SNAP
+    if (g_door_instant) {  // the steps the IRQ handler takes one per frame, each followed by the NMI's VRAM upload
+      if (++instant_steps > 1024) {  // the scroll always ends within 65 steps: never spin
+        door_transition_flag |= 0x8000;
+        layer1_x_pos = door_destination_x_pos;
+        layer1_y_pos = door_destination_y_pos;
+        break;
+      }
+      Irq_FollowDoorTransition();
+      NMI_ProcessVramWriteQueue();
+      continue;
+    }
+#endif
 #if SM_DOOR_MUSIC_SYNC && SM_DOOR_EASE
     {
       const int mid = ((door_direction & 2) ? 56 : 64) / 2;
