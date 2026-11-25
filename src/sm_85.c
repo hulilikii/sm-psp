@@ -108,10 +108,17 @@ static void RestorePpuForMessageBox(void) {  // 0x85861A
   gameplay_CGADSUB = next_gameplay_CGADSUB;
 }
 
+// Refill stations change resource values before opening the message box. The normal gameplay loop stops calling HandleHudTilemap while the box is open, so keep the original HUD counters advancing during these no-update waits.
+static void UpdateRefillStationHud(void) {
+  if (message_box_index == 0x15 || message_box_index == 0x16)
+    HandleHudTilemap();
+}
+
 static CoroutineRet OpenMessageBox_Async(void) {  // 0x85844C
   COROUTINE_BEGIN(coroutine_state_4, 0);
   for (message_box_animation_y_radius = 0;; message_box_animation_y_radius += 512) {
     COROUTINE_AWAIT(1, WaitForNMI_NoUpdate_Async());
+    UpdateRefillStationHud();
     HandleMusicQueue();
     HandleSoundEffects();
     PspRenderer_SetMessageFade(message_box_animation_y_radius * 255u / 0x1800u);
@@ -152,11 +159,13 @@ static CoroutineRet HandleMessageBoxInteraction_Async(void) {  // 0x85846D
       my_counter = 360;
     do {
       COROUTINE_AWAIT(2, WaitForNMI_NoUpdate_Async());
+      UpdateRefillStationHud();
       HandleMusicQueue();
       HandleSoundEffects();
     } while (--my_counter);
     do {
       COROUTINE_AWAIT(3, WaitForNMI_NoUpdate_Async());
+      UpdateRefillStationHud();
       ReadJoypadInputs();
     } while ((bug_fix_counter < 1 ? joypad1_newkeys : joypad1_lastkeys) == 0);
   }
@@ -169,6 +178,7 @@ static CoroutineRet CloseMessageBox_Async(void) {  // 0x858589
   PspRenderer_ClearButtonIcon(0);
   do {
     COROUTINE_AWAIT(1, WaitForNMI_NoUpdate_Async());
+    UpdateRefillStationHud();
     HandleMusicQueue();
     HandleSoundEffects();
     PspRenderer_SetMessageFade(message_box_animation_y_radius * 255u / 0x1800u);
