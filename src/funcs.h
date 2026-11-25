@@ -67,8 +67,6 @@ void HandleFadeIn(void);
 void ClearUnusedOam(void);
 void HandleFadeOut(void);
 void HandleHudTilemap(void);
-void HandleHudTilemapForRefillStation(void);
-void HandleHudTilemapForGameFrame(void);
 void HandleMusicQueue(void);
 void HandleScrollingWhenTriggeringScrollDown(void);
 void HandleScrollingWhenTriggeringScrollLeft(void);

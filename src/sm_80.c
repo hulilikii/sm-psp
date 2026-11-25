@@ -1335,10 +1335,7 @@ void AddToTilemapInner(uint16 k, const unaligned_uint16 *j) {  // 0x809A4C
   }
 }
 
-static bool hud_updated_early_for_refill_station;
-
 void InitializeHud(void) {  // 0x809A79
-  hud_updated_early_for_refill_station = false;
   WriteRegWord(VMADDL, addr_unk_605800);
   WriteRegWord(VMAIN, 0x80);
   static const StartDmaCopy unk_809A8F = { 1, 1, 0x18, LONGPTR(0x80988b), 0x0040 };
@@ -1494,22 +1491,6 @@ void HandleHudTilemap(void) {  // 0x809B44
   gVramWriteEntry(v5++)->size = 126;
   gVramWriteEntry(v5)->size = addr_unk_605820;
   vram_write_queue_tail = v5 + 2;
-}
-
-// Refill stations perform the full HUD update early, before their message.
-void HandleHudTilemapForRefillStation(void) {
-  HandleHudTilemap();
-  hud_updated_early_for_refill_station = true;
-}
-
-
-// Consume the early-update marker at the normal gameplay HUD point.
-void HandleHudTilemapForGameFrame(void) {
-  if (hud_updated_early_for_refill_station) {
-    hud_updated_early_for_refill_station = false;
-    return;
-  }
-  HandleHudTilemap();
 }
 
 static const uint16 kHudItemTilemapOffsets[5] = { 0x14, 0x1c, 0x22, 0x28, 0x2e };
