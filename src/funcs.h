@@ -1708,6 +1708,7 @@ void PostGrappleCollisionDetect_Y(void);
 void Samus_AlignYPosSlope(void);
 
 // Bank 9B
+bool GrappleBeam_ImprovementsEnabled(void);
 uint16 CheckBannedDraygonGrappleDirs(uint16 a);
 uint16 GameState_24_SamusNoHealth_Explosion_2(void);
 uint16 GameState_24_SamusNoHealth_Explosion_Helper(void);

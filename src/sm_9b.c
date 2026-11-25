@@ -525,6 +525,11 @@ void GrappleBeamFunc_BD95(void) {  // 0x9BBD95
   uint16 v0 = abs16(grapple_beam_unkD26);
   uint16 v1;
 
+  // The original game enables slow scrolling at this swing-speed threshold.
+  // Keep that behavior in attract demos; the improvement removes it in play.
+  if (!GrappleBeam_ImprovementsEnabled())
+    slow_grabble_scrolling_flag = !sign16(v0 - 64);
+
   if (!sign16(v0 - 64)) {
   LABEL_7:
     samus_anim_frame_timer = 15;
@@ -764,6 +769,8 @@ void GrappleBeamFunc_FireGoToCancel(void) {  // 0x9BC51E
   grapple_beam_grapple_start_x = 0;
   grapple_beam_unkD38 = 0;
   grapple_beam_unkD36 = 0;
+  if (!GrappleBeam_ImprovementsEnabled())
+    slow_grabble_scrolling_flag = 0;
   GrappleFunc_AF87();
   samus_draw_handler = FUNC16(sub_90EB86);
   grapple_walljump_timer = 0;
@@ -798,6 +805,10 @@ uint16 CheckBannedDraygonGrappleDirs(uint16 a) {  // 0x9BC6B2
 
 uint8 ClearCarry_12(void) {  // 0x9BC701
   return 0;
+}
+
+bool GrappleBeam_ImprovementsEnabled(void) {
+  return game_state < kGameState_40_TransitionToDemo;
 }
 
 static uint16 GrappleBeam_SetupSwing(void) {
@@ -894,7 +905,8 @@ void GrappleBeamFunc_Firing(void) {  // 0x9BC703
   }
   QueueSfx1_Max6(6);
   HandleConnectingGrapple();
-  grapple_beam_length_delta = GrappleBeam_SetupSwing();
+  grapple_beam_length_delta = GrappleBeam_ImprovementsEnabled()
+      ? GrappleBeam_SetupSwing() : (uint16)-8;
   samus_grapple_flags |= 1;
 }
 
@@ -965,6 +977,8 @@ void GrappleBeamFunc_Cancel(void) {  // 0x9BC856
   grapple_beam_direction = 0;
   grapple_beam_unkD36 = 0;
   grapple_walljump_timer = 0;
+  if (!GrappleBeam_ImprovementsEnabled())
+    slow_grabble_scrolling_flag = 0;
   grapple_varCF6 = 0;
   grapple_beam_flags = 0;
   flare_counter = 0;
@@ -1135,6 +1149,8 @@ void GrappleBeamFunc_ReleaseFromSwing(void) {  // 0x9BCB8B
   grapple_beam_direction = 0;
   grapple_beam_unkD36 = 0;
   grapple_walljump_timer = 0;
+  if (!GrappleBeam_ImprovementsEnabled())
+    slow_grabble_scrolling_flag = 0;
   grapple_varCF6 = 0;
   grapple_beam_flags = 0;
   flare_counter = 0;

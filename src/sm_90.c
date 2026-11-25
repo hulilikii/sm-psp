@@ -1239,7 +1239,9 @@ void Samus_MoveHandler_ReleaseFromGrapple(void) {  // 0x90946E
     samus_y_subspeed = 0;
     samus_y_speed = 0;
     samus_y_dir = 2;
-    if ((joypad1_lastkeys & (kButton_Right | kButton_Left)) == 0 || sign16(samus_x_base_speed - 2))
+    if (!GrappleBeam_ImprovementsEnabled()
+        || (joypad1_lastkeys & (kButton_Right | kButton_Left)) == 0
+        || sign16(samus_x_base_speed - 2))
       samus_movement_handler = FUNC16(Samus_MovementHandler_Normal);
   }
   samus_x_accel_mode = 2;
@@ -1252,7 +1254,9 @@ void Samus_MoveHandler_ReleaseFromGrapple(void) {  // 0x90946E
     samus_collision_flag = 0;
   }
   Samus_MoveY_WithSpeedCalc();
-  if (input_to_pose_calc && (input_to_pose_calc & 0xFF) != 2)
+  if (input_to_pose_calc &&
+      (!GrappleBeam_ImprovementsEnabled() ||
+       (input_to_pose_calc & 0xFF) != 2))
     samus_movement_handler = FUNC16(Samus_MovementHandler_Normal);
 }
 

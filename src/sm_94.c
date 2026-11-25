@@ -2097,7 +2097,8 @@ uint8 BlockCollGrappleBeam(void) {  // 0x94A85B
         __PAIR32__(grapple_beam_end_x_offset, grapple_beam_end_x_suboffset) + __PAIR32__(samus_x_pos, samus_x_subpos) + ((uint32)grapple_beam_origin_x_offset << 16));
     SetHiLo(&grapple_beam_end_y_pos, &grapple_beam_end_y_subpos,
         __PAIR32__(grapple_beam_end_y_offset, grapple_beam_end_y_suboffset) + __PAIR32__(samus_y_pos, samus_y_subpos) + ((uint32)grapple_beam_origin_y_offset << 16));
-    result = BlockReactGrappleWithAdjacentTiles();
+    result = GrappleBeam_ImprovementsEnabled()
+        ? BlockReactGrappleWithAdjacentTiles() : BlockReactGrapple();
     if ((result & 0x40) != 0 && (result & 1) != 0) {
       grapple_beam_end_x_pos = grapple_beam_end_x_pos & 0xFFF0 | 8;
       grapple_beam_end_y_pos = grapple_beam_end_y_pos & 0xFFF0 | 8;
@@ -2416,7 +2417,7 @@ uint8 BlockFunc_AC31(void) {  // 0x94AC31
 
   uint16 end = grapple_beam_length_delta + grapple_beam_length;
   if ((grapple_beam_length_delta & 0x8000) != 0) {
-    if (grapple_beam_length >= 64) {
+    if (GrappleBeam_ImprovementsEnabled() && grapple_beam_length >= 64) {
       if (end < 63) {
         grapple_beam_length_delta = 0;
         end = 63;
