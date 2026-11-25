@@ -4543,8 +4543,10 @@ void Samus_MoveHandlerVerticalShinespark(void) {  // 0x90D0AB
   Samus_UpdateSpeedEchoPos();
   Samus_ShinesparkMove_Y();
   Samus_EndSuperJump();
-  if (!sign16(samus_health - 30) && (--samus_health & 0x8000) != 0)
-    samus_health = 0;
+if ((equipped_items & 0x21) == 0 &&
+    !sign16(samus_health - 30) &&
+    (--samus_health & 0x8000) != 0)
+  samus_health = 0;
 }
 
 void Samus_MoveHandler_Shinespark_Diag(void) {  // 0x90D0D7
@@ -4554,8 +4556,10 @@ void Samus_MoveHandler_Shinespark_Diag(void) {  // 0x90D0D7
   Samus_ShinesparkMove_X();
   Samus_ShinesparkMove_Y();
   Samus_EndSuperJump();
-  if (!sign16(samus_health - 30) && (--samus_health & 0x8000) != 0)
-    samus_health = 0;
+if ((equipped_items & 0x21) == 0 &&
+    !sign16(samus_health - 30) &&
+    (--samus_health & 0x8000) != 0)
+  samus_health = 0;
 }
 
 void Samus_MoveHandler_Shinespark_Horiz(void) {  // 0x90D106
@@ -4564,8 +4568,10 @@ void Samus_MoveHandler_Shinespark_Horiz(void) {  // 0x90D106
   Samus_UpdateSpeedEchoPos();
   Samus_ShinesparkMove_X();
   Samus_EndSuperJump();
-  if (!sign16(samus_health - 30) && (--samus_health & 0x8000) != 0)
-    samus_health = 0;
+if ((equipped_items & 0x21) == 0 &&
+    !sign16(samus_health - 30) &&
+    (--samus_health & 0x8000) != 0)
+  samus_health = 0;
 }
 
 static uint32 Samus_ClampSpeedHi(int32 amt, int val) {
