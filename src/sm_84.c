@@ -269,12 +269,17 @@ static inline uint8 *RomPtr_84orRAM(uint16_t addr) {
 }
 
 #if SM_PSP_GE_GLOW
-// Glow emitters: bounding boxes (level pixels) of the coloured (0x84C7B1) and blue (0x84C7BB) door shells in the PLM table, from
-// each PLM's current draw instruction (same walk as ProcessPlmDrawInstruction, but nothing is written). Read only.
+// Glow emitters: the door caps in view, as boxes in picture pixels (the 256 x 224 scene; read only).
+//  - Coloured doors (setup 0x84C7B1: orange / red / green / yellow, in the room's PLM list) and opening blue doors (0x84C7BB, spawned
+//    when a blue door is shot): from each PLM's current draw instruction (same walk as ProcessPlmDrawInstruction). Grey doors
+//    (0x84C794) are left out.
+//  - Closed blue doors are not PLMs: the room's level data holds the cap as a block of type 0xC with BTS 0x40..0x43 (0x40 left,
+//    0x41 right, as PlmInstr_MoveUpAndMakeBlueDoorFacing* writes them) followed by continuation blocks: type 0xD below it for the
+//    left / right caps (0xD0FF, 0xD0FE, 0xD0FD: sub_84D7EF), type 0x5 to its right for the up / down ones. At most 4 blocks.
 int PspGlow_DoorBoxes(PspGlowBox *out, int max) {
-  const int w = room_width_in_blocks;
+  const int w = room_width_in_blocks, h = room_height_in_blocks, cx = layer1_x_pos, cy = layer1_y_pos;
   int n = 0;
-  if (w <= 0 || w > 0x100)
+  if (w <= 0 || w > 0x100 || h <= 0 || h > 0x100)
     return 0;
   for (int i = 0; i < 40 && n < max; i++) {
     const uint16 hdr = plm_header_ptr[i];
@@ -307,7 +312,27 @@ int PspGlow_DoorBoxes(PspGlowBox *out, int max) {
       gy = by + (int8)(off >> 8);
       p++;
     }
-    out[n++] = (PspGlowBox){(int16_t)(x0 * 16), (int16_t)(y0 * 16), (int16_t)(x1 * 16), (int16_t)(y1 * 16)};
+    out[n++] = (PspGlowBox){(int16_t)(x0 * 16 - cx), (int16_t)(y0 * 16 - cy), (int16_t)(x1 * 16 - cx), (int16_t)(y1 * 16 - cy)};
+  }
+  const int bx0 = cx >> 4, bx1 = (cx + 255) >> 4, by0 = cy >> 4, by1 = (cy + 223) >> 4;
+  for (int by = by0; by <= by1 && by < h && n < max; by++) {
+    for (int bx = bx0; bx <= bx1 && bx < w && n < max; bx++) {
+      const int idx = by * w + bx;
+      if ((level_data[idx] >> 12) != 0xC)
+        continue;
+      const uint8 bts = BTS[idx];
+      if (bts < 0x40 || bts > 0x43)
+        continue;
+      int ex = bx + 1, ey = by + 1;
+      if (bts & 2) {
+        while (ex - bx < 4 && ex < w && (level_data[by * w + ex] >> 12) == 0x5)
+          ex++;
+      } else {
+        while (ey - by < 4 && ey < h && (level_data[ey * w + bx] >> 12) == 0xD)
+          ey++;
+      }
+      out[n++] = (PspGlowBox){(int16_t)(bx * 16 - cx), (int16_t)(by * 16 - cy), (int16_t)(ex * 16 - cx), (int16_t)(ey * 16 - cy)};
+    }
   }
   return n;
 }

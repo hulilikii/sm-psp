@@ -23,9 +23,10 @@ void PspRenderer_CaptureLine(const struct Ppu *ppu, int line);
 #define SM_PSP_GE_HAZE_LIGHT 0
 #endif
 
-// Glow emitters: a box in level pixels (x1 / y1 exclusive).
+// Glow emitters: a box in picture pixels (the 256 x 224 scene; x1 / y1 exclusive).
 typedef struct PspGlowBox { int16_t x0, y0, x1, y1; } PspGlowBox;
-// sm_84.c: boxes of the coloured / blue door shells in the PLM table (at most max); returns how many.
+// sm_84.c: boxes (picture pixels) of the door caps in view: coloured / opening-blue door PLMs by their current draw instruction, and the
+// closed blue caps in the level data (type 0xC, BTS 0x40..0x43, with their 0xD / 0x5 continuation blocks). At most max; returns how many.
 int PspGlow_DoorBoxes(PspGlowBox *out, int max);
 // sm_88.c, every frame the Ceres haze object runs: fade level 0..16 and colour channel (0x80 blue, 0x20 red) of the haze.
 void PspRenderer_SetHazeLight(unsigned level, unsigned mask);

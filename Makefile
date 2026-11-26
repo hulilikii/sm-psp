@@ -26,20 +26,24 @@ PSP_GE_WIN ?= 1
 # as textured sprites over the window spans. 0 keeps the original constant-colour tint rectangles for every frame.
 PSP_GE_SMOOTH_TINT ?= 0
 # PSP_GE_GLOW=1 (experimental, not verified on hardware; off by default, so the original picture is the default): light spreads from
-# selected parts of the picture only. GE only: a half-resolution bright pass over the emitter boxes (threshold PSP_GE_GLOW_THRESH, 0..254 per
-# channel), two blur stages (quarter, eighth resolution) and one additive bilinear pass in the composition list, scissored to the emitters;
-# about 86 KB of eDRAM. PSP_GE_GLOW_GAIN: percent, 1..400. PSP_GE_GLOW_SRC: emitters, mask of 1 = sprites (Samus, shots, enemies),
-# 2 = coloured / blue door shells, 4 = environment (lava / acid below the surface, whole picture in rain rooms for the lightning).
-# Only in main gameplay: no glow in the pause screens, the intro or menus. Works with PSP_ASYNC=0, 1 and 2.
+# selected parts of the picture only. GE only: the emitters (PSP_GE_GLOW_SRC, mask: 1 = sprites, redrawn where they are visible; 2 = door
+# caps; 4 = lava / acid layer-3 pixels, whole picture in rain rooms) are drawn into a scratch image, then a half-resolution bright pass
+# (threshold PSP_GE_GLOW_THRESH, 0..254 per channel), two blur stages and additive passes in the composition list, scissored to the
+# emitters; about 86 KB of eDRAM. PSP_GE_GLOW_GAIN: percent, 1..400. PSP_GE_GLOW_CORE: percent of the half-resolution emitter image
+# added back at screen resolution (0 = off). Only in main gameplay: no glow in the pause screens, the intro or menus. Works with
+# PSP_ASYNC=0, 1 and 2.
 # PSP_GE_HAZE_LIGHT=1 (experimental, off by default): the Ceres haze colour gradient is not written by the game; the composition list
-# adds four GE point lights shining up from the bottom edge instead (colour follows the haze: blue, red after Ridley). Frames drawn by the
-# software PPU show no haze at all with it. PSP_GE_HAZE_LIGHT_GAIN: percent of the default strength.
+# lights the picture with four GE point lights from the bottom instead, full height like the gradient (blue; red and ebbing like an
+# emergency light after Ridley), dithered, PSP_GE_HAZE_GLOW percent of it also through the glow chain (needs PSP_GE_GLOW=1).
+# Frames drawn by the software PPU show no haze with it. PSP_GE_HAZE_LIGHT_GAIN: percent of the default strength.
 PSP_GE_GLOW ?= 0
 PSP_GE_GLOW_THRESH ?= 144
 PSP_GE_GLOW_GAIN ?= 300
 PSP_GE_GLOW_SRC ?= 7
 PSP_GE_HAZE_LIGHT ?= 0
 PSP_GE_HAZE_LIGHT_GAIN ?= 100
+PSP_GE_HAZE_GLOW ?= 35
+PSP_GE_GLOW_CORE ?= 35
 PSP_VTX_POOL ?= 0
 # PSP_TRIPLE=1: three frame buffers. Below 60 fps the vblank wait is skipped, so the next frame must not draw into the buffer still on screen. 0: libgu double buffering.
 PSP_TRIPLE ?= 1
@@ -125,7 +129,7 @@ CFLAGS := -O2 -G0 -fno-strict-aliasing -Ibuild/generated -I.
 CFLAGS += -DSYSTEM_VOLUME_MIXER_AVAILABLE=0
 CFLAGS += -DSM_PSP_LOG=$(PSP_LOG) -DSM_PSP_LOG_FLUSH_FRAMES=$(PSP_LOG_FLUSH_FRAMES)
 CFLAGS += -DSM_PSP_GE_STRIPS=$(PSP_GE_STRIPS) -DSM_PSP_SW_PATH=$(PSP_SW_PATH) -DSM_PSP_GE_WIN=$(PSP_GE_WIN)
-CFLAGS += -DSM_PSP_GE_GLOW=$(PSP_GE_GLOW) -DSM_PSP_GE_GLOW_THRESH=$(PSP_GE_GLOW_THRESH) -DSM_PSP_GE_GLOW_GAIN=$(PSP_GE_GLOW_GAIN) -DSM_PSP_GE_GLOW_SRC=$(PSP_GE_GLOW_SRC) -DSM_PSP_GE_HAZE_LIGHT=$(PSP_GE_HAZE_LIGHT) -DSM_PSP_GE_HAZE_LIGHT_GAIN=$(PSP_GE_HAZE_LIGHT_GAIN)
+CFLAGS += -DSM_PSP_GE_GLOW=$(PSP_GE_GLOW) -DSM_PSP_GE_GLOW_THRESH=$(PSP_GE_GLOW_THRESH) -DSM_PSP_GE_GLOW_GAIN=$(PSP_GE_GLOW_GAIN) -DSM_PSP_GE_GLOW_SRC=$(PSP_GE_GLOW_SRC) -DSM_PSP_GE_HAZE_LIGHT=$(PSP_GE_HAZE_LIGHT) -DSM_PSP_GE_HAZE_LIGHT_GAIN=$(PSP_GE_HAZE_LIGHT_GAIN) -DSM_PSP_GE_HAZE_GLOW=$(PSP_GE_HAZE_GLOW) -DSM_PSP_GE_GLOW_CORE=$(PSP_GE_GLOW_CORE)
 CFLAGS += -DSM_PSP_GE_SMOOTH_TINT=$(PSP_GE_SMOOTH_TINT)
 CFLAGS += -DSM_PSP_VTX_POOL=$(PSP_VTX_POOL)
 CFLAGS += -DSM_PSP_TRIPLE=$(PSP_TRIPLE)
@@ -185,7 +189,7 @@ PSP_ASSET_FILES += $(PSP_EBOOT_SND0)
 endif
 
 # Objects don't track CFLAGS, so a stamp file forces a rebuild when these change.
-BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_glow$(PSP_GE_GLOW)t$(PSP_GE_GLOW_THRESH)g$(PSP_GE_GLOW_GAIN)s$(PSP_GE_GLOW_SRC)_hz$(PSP_GE_HAZE_LIGHT)g$(PSP_GE_HAZE_LIGHT_GAIN)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_vg$(PSP_VERIFY_GAP)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_snap$(PSP_DOOR_SNAP)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
+BUILD_STAMP := build/flags_log$(PSP_LOG)_flush$(PSP_LOG_FLUSH_FRAMES)_strips$(PSP_GE_STRIPS)_sw$(PSP_SW_PATH)_win$(PSP_GE_WIN)_smooth$(PSP_GE_SMOOTH_TINT)_glow$(PSP_GE_GLOW)t$(PSP_GE_GLOW_THRESH)g$(PSP_GE_GLOW_GAIN)s$(PSP_GE_GLOW_SRC)_hz$(PSP_GE_HAZE_LIGHT)g$(PSP_GE_HAZE_LIGHT_GAIN)w$(PSP_GE_HAZE_GLOW)c$(PSP_GE_GLOW_CORE)_vp$(PSP_VTX_POOL)_tb$(PSP_TRIPLE)_pr$(PSP_PROBES)_vd$(PSP_VRAM_DIRTY)_cr$(PSP_CAP_REUSE)_v16$(PSP_VTX16)_st$(PSP_STATS)_cw$(PSP_CAP_WIN)_bn$(PSP_BENCH)_li$(PSP_LAYER_IMG)_tg$(PSP_TILE_GEN)_as$(PSP_ASYNC)_vg$(PSP_VERIFY_GAP)_m7r$(PSP_M7_REUSE)_swz$(PSP_SWIZZLE)_pr$(PSP_M7_PROBE)_r4$(PSP_M7_ROW4)_blk$(PSP_M7_BLK)_door$(PSP_DOOR_GE)_snap$(PSP_DOOR_SNAP)_aud$(PSP_AUDIO)_me$(PSP_AUDIO_ME)_melog$(ME_LOG_ON).stamp
 $(BUILD_STAMP):
 	@mkdir -p build
 	@rm -f build/flags_*.stamp
