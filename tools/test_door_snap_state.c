@@ -16,8 +16,9 @@ typedef struct ComposeSrc { const void *ptr; int psm, w, h, stride; } ComposeSrc
 enum { kGameWidth = 256, kHudRowsMax = 32 };
 typedef struct Ppu Ppu;
 static int g_scratch_calls, g_scratch_fail_at;
-static bool ppu_drawLineScratch(Ppu *p, int line, uint8_t *dst) {  /* stand-in: a pattern that identifies the line */
+static bool ppu_drawLineScratch(Ppu *p, int line, uint8_t *dst, int bg3_ref_line) {  /* stand-in: a pattern that identifies the line */
   (void)p;
+  if (bg3_ref_line != kHudRowsMax + 1) return false;  /* the renderer must pin BG3 to the first gameplay line */
   g_scratch_calls++;
   if (g_scratch_fail_at && line == g_scratch_fail_at)
     return false;
@@ -37,9 +38,12 @@ static void ImgMarkAllDirty(void) { g_dirty_all++; }
 static void PspLog(const char *f, ...) { (void)f; }
 static void sceGuCopyImage(int psm, int sx, int sy, int w, int h, int sw, void *src, int dx, int dy, int dw, void *dst) {
   (void)psm, (void)sx, (void)sy, (void)w, (void)sw, (void)src, (void)dx, (void)dw;
-  g_copy_dy[g_copies] = dy;
-  g_copy_h[g_copies] = h;
-  g_copy_dst[g_copies++] = (int)((uintptr_t)dst & 0x1fffff);
+  if (g_copies < 8) {  /* the log holds 8 copies; the count itself keeps going */
+    g_copy_dy[g_copies] = dy;
+    g_copy_h[g_copies] = h;
+    g_copy_dst[g_copies] = (int)((uintptr_t)dst & 0x1fffff);
+  }
+  g_copies++;
   g_cap_bytes += 32;  /* 8 commands (pspsdk sceGuCopyImage) */
 }
 static void sceGuTexSync(void) { g_cap_bytes += 4; }
@@ -107,7 +111,8 @@ int main(void) {
     restored("slide end");
     CHECK(!PspRenderer_DoorSnapHold(), "released");
   }
-  /* the rows under the HUD: only the lower room of a vertical door. Up door: the old room (slot 0, the armed frame); down door:
+  /* the rows under the HUD: only the new room of a DOWN door (slot 1, frame N; the up door's gap is the new room's edge row, the
+   * old room never has them). The old comment follows, superseded: Up door: the old room (slot 0, the armed frame); down door:
    * the new room (slot 1, frame N); horizontal doors: none. The hook runs for lines 1..33 of the frame being captured. */
   for (unsigned dir = 0; dir < 4; dir++) {
     dir_for_arm = dir;
@@ -115,7 +120,7 @@ int main(void) {
     g_copies = 0; g_cap_bytes = 0; g_scratch_calls = 0; g_wb = 0;
     for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
     compose(&good, true);
-    const bool want_a = dir == 3;
+    const bool want_a = false;  /* the old room never gets rows under the HUD */
     CHECK(g_ds_top[0] == want_a && !g_ds_top[1], "dir %u: A rows under the HUD %d (want %d)", dir, (int)g_ds_top[0], (int)want_a);
     CHECK(g_scratch_calls == (want_a ? 32 : 0), "dir %u: %d scratch lines for A", dir, g_scratch_calls);
     CHECK(g_copies == (want_a ? 2 : 1), "dir %u: A copies %d", dir, g_copies);
@@ -140,13 +145,17 @@ int main(void) {
     CHECK(!g_ds_top[0] && !g_ds_top[1] && !g_ds_top_ready, "release clears the top-row flags");
     restored("top rows");
   }
-  /* refused capture / failed scratch draw / stale stage: no top rows, the edge-row replication stays */
+  /* the armed frame (the old room) stages nothing; the new room of a down door is staged on frame N and may fail or go stale:
+   * no top rows then, the edge-row replication stays */
   dir_for_arm = 3;
   PspRenderer_DoorSnapArm(3);
+  g_scratch_calls = 0;
   for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
-  CHECK(g_ds_top_ready, "stage ready before the capture");
-  compose(&good, false);  /* HUD unresolved: A refused */
-  CHECK(!g_ds_top[0] && g_ds_state == kDsArmed, "refused A has no top rows");
+  CHECK(!g_ds_top_ready && g_scratch_calls == 0, "the old room's frame is never staged");
+  compose(&good, true);
+  PspRenderer_DoorSnapBegin(2, 0, 0);
+  for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
+  CHECK(g_ds_top_ready, "stage ready before the capture of B");
   DsCaptureTop(NULL, 1);
   CHECK(!g_ds_top_ready, "the next frame's first line drops a stale stage");
   g_scratch_fail_at = 10;
@@ -154,7 +163,7 @@ int main(void) {
   CHECK(!g_ds_top_ready, "a failed scratch draw gives no stage");
   g_scratch_fail_at = 0;
   compose(&good, true);
-  CHECK(g_ds_state == kDsHaveA && !g_ds_top[0], "A captured without top rows when the scratch draw failed");
+  CHECK(g_ds_state == kDsPlay && !g_ds_top[1], "B captured without top rows when the scratch draw failed");
   DoorSnapRelease();
   g_ge_active = false;
   PspRenderer_DoorSnapArm(3);

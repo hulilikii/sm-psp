@@ -76,7 +76,7 @@ static void run(unsigned state, unsigned dir, int step, int align, int *tex_seen
   g_ds_n = (uint8_t)(g_test_n ? g_test_n : DsSteps(dir));
   g_ds_step = (uint16_t)step;
   g_ds_align = (int16_t)align;
-  g_ds_top[0] = g_with_top && dir == 3;  /* the lower room of a vertical door: up door = old room, down door = new room */
+  g_ds_top[0] = false;  /* the old room never has them */
   g_ds_top[1] = g_with_top && dir == 2;
   static const int src_tag;
   const ComposeSrc s = {&src_tag, GU_PSM_8888, 512, 256, 512};  /* the composition source, as the HUD pass will need it again */
@@ -159,7 +159,24 @@ int main(void) {
   /* the gap between the leading image and the lower one is the lower room's rows under the HUD: 45 viewport rows of the band,
    * continuous with the image (the band's last row meets row 0), nothing replicated in between (at most the rounding row) */
   g_with_top = 1;
-  for (unsigned dir = 2; dir < 4; dir++)
+  /* up door: no band; the gap between the new image (above) and the old one is the new image's bottom row (v 191.5) repeated */
+  for (int step = 1; step < DsSteps(3); step++) {
+    run(kDsPlay, 3, step, 0, seen);
+    int o[4];
+    DsOffsets(3, step, 0, o);
+    const int oldtop = kCompY + DsDispPx(o[1]), newbot = kCompY + DsDispPx(o[3]) + kCompH;
+    int rep = 0;
+    for (int i = 0; i < g_nrect; i++) {
+      const Rect *r = &g_rects[i];
+      CHECK(r->v1 < (float)kDsTopRow0 && r->v0 < (float)kDsTopRow0, "dir 3 step %d: a quad samples the band rows (v %f)", step, r->v0);
+      if (r->tex == 1 && r->v0 > 191.0f && r->v1 > 191.0f && r->v0 == r->v1 && r->x0 == kCompX) rep += r->y1 - r->y0;
+    }
+    int want = oldtop - (newbot < kCompY ? kCompY : newbot);
+    if (oldtop > kCompY + kCompH) want = kCompY + kCompH - (newbot < kCompY ? kCompY : newbot);
+    if (want < 0) want = 0;
+    CHECK(rep >= want - 2 && rep <= want + 2 + 0, "dir 3 step %d: %d repeated bottom-row rows in the gap (want %d)", step, rep, want);
+  }
+  for (unsigned dir = 2; dir < 3; dir++)
     for (int step = 1; step < DsSteps(dir); step++) {
       run(kDsPlay, dir, step, 0, seen);
       int band_rows = 0, rep_rows = 0, last_band_v = -1;
@@ -188,7 +205,7 @@ int main(void) {
     for (int align = -256; align <= 256; align++)
       for (int step = 0; step <= DsSteps(dir); step++)
         for (int st = kDsWaitB; st <= kDsPlay; st++) {
-          g_ds_top[0] = g_with_top && dir == 3; g_ds_top[1] = g_with_top && dir == 2;
+          g_ds_top[0] = false; g_ds_top[1] = g_with_top && dir == 2;
           g_ds_state = (uint8_t)st; g_ds_dir = (uint8_t)dir; g_ds_n = (uint8_t)DsSteps(dir); g_ds_step = (uint16_t)step; g_ds_align = (int16_t)align;
           g_nrect = 0; g_mem_n = 0; g_bytes = g_calls = 0;
           static const int tag;

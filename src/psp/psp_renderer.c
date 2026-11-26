@@ -2309,11 +2309,13 @@ static uint16_t g_ds_step;
 static int16_t g_ds_align;
 static bool g_ds_ok, g_ds_saved_img_ok, g_ds_saved_imgh_ok, g_ds_saved_skip_ok;
 
-/* The rows under the HUD. A vertical door shows the LOWER room's top 32 source rows (the HUD covers them in the live game: the
- * PPU draws BG3 only on those lines, so they are in no buffer) in the gap between the two images. They are drawn here by the
- * software PPU with the register state of the first gameplay line, once, on the frame the lower room is captured: a down door's
- * lower room is the new one (frame N), an up door's the old one (the armed frame). Rows are staged as RGB565 and copied into the
- * unused rows 192..223 of that room's slot; nothing else reads those rows. */
+/* The rows under the HUD. The gap between the two images of a vertical door is the NEW room's continuation, as in the live scroll
+ * the older GE door path showed: going down, the new room's own top 32 source rows (the HUD covers them in the live game: the PPU
+ * draws BG3 only on those lines, so they are in no buffer); going up, the new room's edge row repeated (its door tube continues,
+ * DsImage) - the OLD room's rows are never shown there. The down door's rows are drawn here by the software PPU with the register
+ * state of the first gameplay line (BG3 pinned to that line's row: the water continues, the HUD does not appear), once, on the
+ * frame the new room is captured (frame N). Rows are staged as RGB565 and copied into the unused rows 192..223 of slot 1;
+ * nothing else reads those rows. */
 enum { kDsTopRows = 32, kDsTopRow0 = 192 };
 CASSERT(kDsTopRow0 + kDsTopRows <= 256);
 static uint16_t g_ds_top_stage[kGameWidth * kDsTopRows] __attribute__((aligned(64)));
@@ -2321,16 +2323,13 @@ static uint16_t g_ds_top_stage[kGameWidth * kDsTopRows] __attribute__((aligned(6
  * later transition's capture, so the stage needs no double buffering. */
 static bool g_ds_top[2];       /* slot rows 192..223 hold the rows under the HUD */
 static bool g_ds_top_ready;    /* the stage holds the rows of the frame being captured */
-static uint8_t g_ds_arm_dir;
 static uint32_t g_ds_top_us, g_ds_top_max_us, g_ds_top_n;
 
 /* The slot whose room is the lower one of a vertical door and is captured from the frame being built, or -1. */
 static int DsTopSlot(void) {
-  if (g_ds_state == kDsArmed)
-    return g_ds_arm_dir == 3 ? 0 : -1;  /* up door: the old room is below */
   if (g_ds_state == kDsWaitB)
     return g_ds_dir == 2 ? 1 : -1;      /* down door: the new room is below */
-  return -1;
+  return -1;                            /* the old room never needs them; up door: the new room's edge row */
 }
 
 /* Called for every line before it is drawn. At the first gameplay line (33) the registers are the gameplay ones: lines 1..32 are
@@ -2343,7 +2342,7 @@ static void DsCaptureTop(const Ppu *p, int line) {
   uint8_t row[kGameWidth * 4] __attribute__((aligned(16)));
   const uint32_t t0 = sceKernelGetSystemTimeLow();
   for (int l = 1; l <= kDsTopRows; l++) {
-    if (!ppu_drawLineScratch((Ppu *)p, l, row)) {  /* the hook gets a const PPU; the scratch draw restores everything it touches */
+    if (!ppu_drawLineScratch((Ppu *)p, l, row, kHudRowsMax + 1)) {  /* the hook gets a const PPU; the scratch draw restores everything it touches */
       g_ds_top_ready = false;
       return;
     }
@@ -2388,9 +2387,9 @@ bool PspRenderer_DoorSnapCanArm(void) {
 
 void PspRenderer_DoorSnapArm(unsigned direction) {
 #if SM_PSP_DOOR_SNAP
+  (void)direction;  /* the old room never needs rows under the HUD: the direction no longer matters here */
   if (!PspRenderer_DoorSnapCanArm())
     return;
-  g_ds_arm_dir = (uint8_t)(direction & 3);
   g_ds_top[0] = g_ds_top[1] = g_ds_top_ready = false;
   g_ds_saved_img_ok = g_img_ok;
   g_ds_saved_imgh_ok = g_imgh_ok;
@@ -5294,7 +5293,10 @@ static void DrawDoorSnap(const ComposeSrc *s) {
     }
   } else {  /* vertical door: the leading image is on top */
     const bool old_first = g_ds_dir == 2;
-    const int seam = DsClamp((old_first ? oldy : newy) + kCompH, vy0, vy1);
+    /* Down: the old image owns the viewport down to its bottom edge, the new one (with its rows under the HUD above it) the rest.
+     * Up: the new image owns it down to where the old one starts, so the 32 hidden rows between them are the new room's bottom row
+     * repeated (DsImage: below the image), like the live new room's out-of-bounds blocks. */
+    const int seam = DsClamp(old_first ? oldy + kCompH : oldy, vy0, vy1);
     if (old_first) {
       DsImage(tex_old, oldx, oldy, vx0, vy0, vx1, seam, top_old);
       DsImage(tex_new, newx, newy, vx0, seam, vx1, vy1, top_new);

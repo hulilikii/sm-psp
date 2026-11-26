@@ -303,34 +303,29 @@ void ppu_runLine(Ppu* ppu, int line) {
 }
 
 // Draws line `line` (1-based) of the PPU's CURRENT register state into dst (256 RGBA8888 pixels, the same byte order as the
-// frame buffer) without touching the frame being drawn: no line hook, no frame buffer write, BG3 (the HUD) is not drawn, the
+// frame buffer) without touching the frame being drawn: no line hook, no frame buffer write, BG3 pinned to one row (see bg3_ref_line), the
 // sprite status flags and the per-line state are restored (the real line draw clears and re-evaluates them anyway). Used by the PSP renderer for
 // lines the game never shows with this register state (the rows under the HUD). Returns false if it cannot draw
 // (the legacy per-pixel PPU, or widescreen padding).
-bool ppu_drawLineScratch(Ppu *ppu, int line, uint8_t *dst) {
+bool ppu_drawLineScratch(Ppu *ppu, int line, uint8_t *dst, int bg3_ref_line) {
   if (!g_new_ppu || ppu->extraLeftRight || line < 1 || line > 224)
     return false;
   uint8_t *const save_buf = ppu->renderBuffer;
   const uint32_t save_pitch = ppu->renderPitch;
   const bool save_range = ppu->rangeOver, save_time = ppu->timeOver, save_sprites = ppu->lineHasSprites;
-  // BG3 is left out: in Mode 1 it carries the HUD (and the FX layer), and the gameplay-line scroll of BG3 would put the HUD's
-  // own tilemap rows into the lines the HUD covers. The room's picture under the HUD is BG1/BG2 and the sprites.
-  const uint8_t save_main = ppu->screenEnabled[0], save_sub = ppu->screenEnabled[1];
-  const bool save_l2_main = ppu->layer[2].mainScreenEnabled, save_l2_sub = ppu->layer[2].subScreenEnabled;
-  ppu->screenEnabled[0] &= (uint8_t)~4;
-  ppu->screenEnabled[1] &= (uint8_t)~4;
-  ppu->layer[2].mainScreenEnabled = false;
-  ppu->layer[2].subScreenEnabled = false;
+  // BG3 carries the HUD and the FX layer (Maridia's water). At the gameplay-line scroll, continuing upwards would run into the
+  // HUD's own tilemap rows, so with bg3_ref_line every line shows the BG3 row that line bg3_ref_line shows (the first gameplay
+  // line: never the HUD): the FX continues, the HUD does not appear. 0 = BG3 as the registers give it.
+  const uint16_t save_v3 = ppu->bgLayer[2].vScroll;
+  if (bg3_ref_line > 0)
+    ppu->bgLayer[2].vScroll = (uint16_t)((save_v3 + bg3_ref_line - line) & 0x3ff);
   ppu->renderBuffer = dst;
   ppu->renderPitch = 0;  // PpuDrawWholeLine writes row (line - 1) * pitch: always dst
   PpuRefreshBrightness(ppu);
   ClearBackdrop(&ppu->objBuffer);
   ppu->lineHasSprites = !ppu->forcedBlank && ppu_evaluateSprites(ppu, line - 1);
   PpuDrawWholeLine(ppu, (uint)line);
-  ppu->screenEnabled[0] = save_main;
-  ppu->screenEnabled[1] = save_sub;
-  ppu->layer[2].mainScreenEnabled = save_l2_main;
-  ppu->layer[2].subScreenEnabled = save_l2_sub;
+  ppu->bgLayer[2].vScroll = save_v3;
   ppu->renderBuffer = save_buf;
   ppu->renderPitch = save_pitch;
   ppu->rangeOver = save_range;
