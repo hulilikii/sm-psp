@@ -6440,7 +6440,7 @@ static uint32_t CurListUsed(void) {
 static bool DsListFits(void) {
   uint32_t mem, calls;
   const uint32_t bound = ComposeBytesBound(&mem, &calls);
-  return CurListUsed(g_gu_list) + bound + kComposeTail <= (uint32_t)kListBytes;
+  return CurListUsed() + bound + kComposeTail <= (uint32_t)kListBytes;
 }
 #endif
 
