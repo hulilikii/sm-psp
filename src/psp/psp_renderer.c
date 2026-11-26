@@ -1228,7 +1228,10 @@ static void SnapshotVram(const Ppu *p) {
     memset(&dirty[pg], 0, (size_t)(e - pg));
     pg = e;
   }
-  if ((g_frame & 63) == 0 && memcmp(g_vram, p->vram, sizeof(g_vram)) != 0) {
+  /* Audit one 1 KB slice per frame: all of VRAM is still compared every 64 frames, without the ~128 KB memcmp spike on every 64th. */
+  CASSERT(kVramPages % 64 == 0 && sizeof(g_vram) == (size_t)kVramPages * kVramPageWords * 2);
+  const size_t aw = (size_t)(g_frame & 63) * (kVramPages / 64) * kVramPageWords;
+  if (memcmp(&g_vram[aw], &p->vram[aw], (size_t)(kVramPages / 64) * kVramPageWords * 2) != 0) {
     g_vd_ok = false;
     memcpy(g_vram, p->vram, sizeof(g_vram));
     ImgMarkAllDirty();
