@@ -6334,7 +6334,6 @@ static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
   return mem + calls * kGuCallMax;
 }
 
-#if SM_PSP_ASYNC
 /* Bytes in the open list so far (sceGuCheckList: current - start; reads only, writes nothing). */
 static uint32_t CurListUsed(void) {
   const int u = sceGuCheckList();
