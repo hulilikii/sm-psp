@@ -40,6 +40,9 @@
  *   Viewport 4, Offset 2, SetDither 4, DepthBuffer 2, DrawBufferList 3, DrawBuffer 5
  *   CopyImage          8 (TRANSFER_SRC, _SRC_W, _SRC_OFFSET, _DST, _DST_W, _DST_OFFSET, _SIZE, _START)
  *   DrawArray          6 (VERTEX_TYPE, BASE, IADDR, BASE, VADDR, PRIM)
+ *   SetMatrix          17 (GU_PROJECTION: MATRIX_NUMBER + 16 data; VIEW / MODEL / TEXTURE 13)
+ *   ColorMaterial 1, LightMode 1, Ambient 2 (colour, alpha), Material 4 (ambient colour + alpha, diffuse, specular)
+ *   Light 4 (X, Y, Z, TYPE), LightColor 2 (ambient and diffuse, or diffuse and specular), LightAtt 3
  *   Clear (not FAST)   14 = CLEAR_MODE + GetMemory(2 * 12 B vertices = 24, +8 header = 8 words) + DrawArray(VERTEX_TYPE, BASE,
  *                      VADDR, PRIM) + CLEAR_MODE;  FAST: 30 vertices at most (480 px, 32 px blocks) = 360 -> 368 B + 28 B
  *   GetMemory(n)       round4(n) + 8 (sceGuGetMemory.c; negative n and n > cap are refused first)
@@ -54,6 +57,10 @@ enum {
   kGlTexMode = 3 * 4,
   kGlCopyImage = 8 * 4,
   kGlDrawArray = 6 * 4,
+  kGlSetMatrix = 17 * 4,
+  kGlMaterial = 4 * 4,
+  kGlLight = 4 * 4,
+  kGlLightAtt = 3 * 4,
   kGlClear = 14 * 4,
   kGlClearFast = 400,
   kGlGetMemHeader = 8,
@@ -255,6 +262,16 @@ GL_CMD0(CopyImage, kGlCopyImage, void,
         sceGuCopyImage(p, sx, sy, w, h, sw, s, dx, dy, dw, d))
 GL_CMD0(DrawArray, kGlDrawArray, void, (int pr, int vt, int n, const void *i, const void *v), sceGuDrawArray(pr, vt, n, i, v))
 
+/* Fixed-function matrix and lighting (HazeDrawMesh). */
+GL_CMD0(SetMatrix, kGlSetMatrix, void, (int t, const ScePspFMatrix4 *m), sceGuSetMatrix(t, m))
+GL_CMD0(ColorMaterial, 4, void, (int c), sceGuColorMaterial(c))
+GL_CMD0(Material, kGlMaterial, void, (int m, int c), sceGuMaterial(m, c))
+GL_CMD0(Ambient, 8, void, (unsigned c), sceGuAmbient(c))
+GL_CMD0(LightMode, 4, void, (int m), sceGuLightMode(m))
+GL_CMD0(Light, kGlLight, void, (int l, int t, int c, const ScePspFVector3 *p), sceGuLight(l, t, c, p))
+GL_CMD0(LightColor, 8, void, (int l, int c, unsigned v), sceGuLightColor(l, c, v))
+GL_CMD0(LightAtt, kGlLightAtt, void, (int l, float a, float b, float c), sceGuLightAtt(l, a, b, c))
+
 GL_FN void Gl_Clear(int flags) {
   if (GlRoom((flags & GU_FAST_CLEAR_BIT) ? (uint32_t)kGlClearFast : (uint32_t)kGlClear))
     sceGuClear(flags);
@@ -293,6 +310,14 @@ GL_FN void Gl_Clear(int flags) {
 #define sceGuDrawBuffer(...) Gl_DrawBuffer(__VA_ARGS__)
 #define sceGuCopyImage(...) Gl_CopyImage(__VA_ARGS__)
 #define sceGuDrawArray(...) Gl_DrawArray(__VA_ARGS__)
+#define sceGuSetMatrix(...) Gl_SetMatrix(__VA_ARGS__)
+#define sceGuColorMaterial(...) Gl_ColorMaterial(__VA_ARGS__)
+#define sceGuMaterial(...) Gl_Material(__VA_ARGS__)
+#define sceGuAmbient(...) Gl_Ambient(__VA_ARGS__)
+#define sceGuLightMode(...) Gl_LightMode(__VA_ARGS__)
+#define sceGuLight(...) Gl_Light(__VA_ARGS__)
+#define sceGuLightColor(...) Gl_LightColor(__VA_ARGS__)
+#define sceGuLightAtt(...) Gl_LightAtt(__VA_ARGS__)
 #define sceGuClear(...) Gl_Clear(__VA_ARGS__)
 #define sceGuGetMemory(...) GlGetMemory(__VA_ARGS__)
 #define sceGuFinish(...) GlFinish(__VA_ARGS__)
@@ -315,19 +340,11 @@ GL_FN void Gl_Clear(int flags) {
 #define sceGuDrawSpline(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuSetStatus(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuSetAllStatus(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuSetMatrix(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuBoneMatrix(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuMorphWeight(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuLight(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuLightAtt(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuLightColor(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuLightMode(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuLightSpot(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuAmbient(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuAmbientColor(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuMaterial(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuModelColor(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
-#define sceGuColorMaterial(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuColorFunc(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuPixelMask(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)
 #define sceGuLogicalOp(...) GL_UNCHECKED_LIBGU_CALL_use_the_Gl_wrapper(__VA_ARGS__)

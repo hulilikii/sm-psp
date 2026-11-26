@@ -5822,6 +5822,23 @@ static void GlowAddBox(int x0, int y0, int x1, int y1, int srow0) {
   GlowBBox(x0, y0, x1, y1, srow0);
 }
 
+#if SM_PSP_LOG
+/* Why a frame has (or has no) glow, once per change of room / emitter set (first 64 lines): lets a room that should glow and does not
+ * (Maridia) be told apart: state or start-up (why = 0), no emitter found (1), or emitters present (2). */
+static void GlowLog(int why, int srow0) {
+  static unsigned last, nlog;
+  const unsigned room = GameRam16(0x79B);
+  const unsigned sig = room ^ (unsigned)why << 16 ^ (unsigned)g_glow_nbox << 20 ^ (g_glow_obj ? 1u << 24 : 0) ^ (g_glow_bg3 ? 1u << 25 : 0);
+  if (sig == last || nlog >= 64)
+    return;
+  last = sig;
+  nlog++;
+  PspLog("glow: why=%d room=%04x area=%02x gs=%04x fx=%04x ok=%d boxes=%d obj=%d(n=%d seg=%d) bg3=%d srow0=%d f=%u", why, room, (unsigned)g_ram[0x79F],
+         (unsigned)GameRam16(0x998), (unsigned)GameRam16(0x196E), (int)g_glow_ok, g_glow_nbox, (int)g_glow_obj, g_glow_obj_n, g_nobjseg,
+         (int)g_glow_bg3, srow0, (unsigned)g_frame);
+}
+#endif
+
 static bool GlowCollect(int srow0) {
   g_glow_nbox = 0;
   g_glow_obj = g_glow_bg3 = false;
@@ -5831,8 +5848,12 @@ static bool GlowCollect(int srow0) {
   g_glow_ux0 = kGameWidth;
   g_glow_uy0 = kSrcRows;
   g_glow_ux1 = g_glow_uy1 = 0;
-  if (!GlowStateOk())
+  if (!GlowStateOk()) {
+#if SM_PSP_LOG
+    GlowLog(0, srow0);
+#endif
     return false;
+  }
   const int cx = (int)GameRam16(0x911), cy = (int)GameRam16(0x915);  /* layer 1 position: level pixel of picture column / row 0 */
   (void)cx;
   (void)cy;
@@ -5881,7 +5902,11 @@ static bool GlowCollect(int srow0) {
   if (g_haze_via_glow)
     GlowBBox(0, srow0, kGameWidth, kSrcRows, srow0);
 #endif
-  return g_glow_ux1 > g_glow_ux0 && g_glow_uy1 > g_glow_uy0;
+  const bool found = g_glow_ux1 > g_glow_ux0 && g_glow_uy1 > g_glow_uy0;
+#if SM_PSP_LOG
+  GlowLog(found ? 2 : 1, srow0);
+#endif
+  return found;
 }
 
 static void GlowScissor(int x0, int y0, int x1, int y1) {

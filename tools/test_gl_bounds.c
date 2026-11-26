@@ -196,6 +196,41 @@ static void TestCostTable(void) {
     for (int idx = 0; idx < 2; idx++)
       MEASURE(sceGuDrawArray(GU_SPRITES, vt ? 0x1234 : 0, 2, idx ? g_list : NULL, g_list), 0);
 
+  /* Fixed-function matrix and lighting (HazeDrawMesh): every variant, and the worst one must be charged exactly (a loose
+   * charge would waste list room, a short one is already caught by MEASURE) */
+  static const float mtx[16] __attribute__((aligned(16))) = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  static const ScePspFVector3 lpos = {1.0f, 2.0f, 3.0f};
+  uint32_t wmax_mtx = 0, wmax_mat = 0, wmax_light = 0, wmax_lcol = 0;
+  for (int t = GU_PROJECTION; t <= GU_TEXTURE; t++) {
+    MEASURE(sceGuSetMatrix(t, (const ScePspFMatrix4 *)mtx), 0);
+    wmax_mtx = g_written > wmax_mtx ? g_written : wmax_mtx;
+  }
+  CHECK(wmax_mtx == (uint32_t)kGlSetMatrix);
+  for (int c = 0; c < 8; c++) {  /* GU_AMBIENT | GU_DIFFUSE | GU_SPECULAR combinations */
+    MEASURE(sceGuColorMaterial(c), 0);
+    MEASURE(sceGuMaterial(c, 0xff102030u), 0);
+    wmax_mat = g_written > wmax_mat ? g_written : wmax_mat;
+  }
+  CHECK(wmax_mat == (uint32_t)kGlMaterial);
+  MEASURE(sceGuAmbient(0xff000000u), 0);
+  for (int m = GU_SINGLE_COLOR; m <= GU_SEPARATE_SPECULAR_COLOR; m++)
+    MEASURE(sceGuLightMode(m), 0);
+  for (int l = 0; l < 4; l++) {
+    for (int type = GU_DIRECTIONAL; type <= GU_SPOTLIGHT; type++)
+      for (int comp = GU_AMBIENT; comp <= GU_DIFFUSE_AND_SPECULAR; comp++) {
+        MEASURE(sceGuLight(l, type, comp, &lpos), 0);
+        wmax_light = g_written > wmax_light ? g_written : wmax_light;
+      }
+    for (int comp = GU_AMBIENT; comp <= GU_DIFFUSE_AND_SPECULAR; comp++) {
+      MEASURE(sceGuLightColor(l, comp, 0xff203040u), 0);
+      wmax_lcol = g_written > wmax_lcol ? g_written : wmax_lcol;
+    }
+    MEASURE(sceGuLightAtt(l, 1.0f, 0.0f, 1.0f / 10000.0f), 0);
+    CHECK(g_written == (uint32_t)kGlLightAtt);
+  }
+  CHECK(wmax_light == (uint32_t)kGlLight);
+  CHECK(wmax_lcol == 8u);
+
   /* Clear: every pixel format, width, flag set; fast and plain */
   const int fmts[4] = {GU_PSM_5650, GU_PSM_5551, GU_PSM_4444, GU_PSM_8888};
   for (int f = 0; f < 4; f++)
