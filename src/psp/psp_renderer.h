@@ -56,7 +56,7 @@ bool PspRenderer_DoorTransitionArmed(void);                                   //
 
 // Instant door transition (SM_PSP_DOOR_SNAP / PSP_DOOR_SNAP=1): the game loads the destination room within one frame while the GE
 // slides frozen snapshots of the old and the new room. All calls are no-ops (Ready/Hold return false) when it is compiled out.
-void PspRenderer_DoorSnapArm(void);                                  // door hit (game_state 9, normal door): snapshot this frame as the old room
+void PspRenderer_DoorSnapArm(unsigned direction);                                  // door hit (game_state 9, normal door): snapshot this frame as the old room
 bool PspRenderer_DoorSnapReady(void);                                // the old snapshot exists: the game may load the room instantly
 void PspRenderer_DoorSnapAbort(void);                                // no snapshot / no instant load: drop everything, the game's own transition runs
 void PspRenderer_DoorSnapBegin(unsigned direction, int align_px);    // room loaded: direction = door_direction & 3, align_px = old camera's distance to a 256 boundary across the door

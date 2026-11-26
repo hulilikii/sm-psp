@@ -1905,8 +1905,15 @@ static int HudResolve(int *off) {
   return kHudOk;
 }
 
+#if SM_PSP_DOOR_SNAP
+static void DsCaptureTop(const Ppu *p, int line);
+#endif
+
 void PspRenderer_CaptureLine(const Ppu *p, int line) {
   HudCapture(p, line);
+#if SM_PSP_DOOR_SNAP
+  DsCaptureTop(p, line);
+#endif
 #if SM_PSP_LOG
 #if SM_PSP_PROBES
   WinProbe(p, line);
@@ -2298,10 +2305,63 @@ static uint16_t g_ds_step;
 static int16_t g_ds_align;
 static bool g_ds_ok, g_ds_saved_img_ok, g_ds_saved_imgh_ok, g_ds_saved_skip_ok;
 
+/* The rows under the HUD. A vertical door shows the LOWER room's top 32 source rows (the HUD covers them in the live game: the
+ * PPU draws BG3 only on those lines, so they are in no buffer) in the gap between the two images. They are drawn here by the
+ * software PPU with the register state of the first gameplay line, once, on the frame the lower room is captured: a down door's
+ * lower room is the new one (frame N), an up door's the old one (the armed frame). Rows are staged as RGB565 and copied into the
+ * unused rows 192..223 of that room's slot; nothing else reads those rows. */
+enum { kDsTopRows = 32, kDsTopRow0 = 192 };
+CASSERT(kDsTopRow0 + kDsTopRows <= 256);
+static uint16_t g_ds_top_stage[kGameWidth * kDsTopRows] __attribute__((aligned(64)));
+/* Written (CPU) only on the frame that captures the lower room and read (GE copy) by that same frame's list; the next write is a
+ * later transition's capture, so the stage needs no double buffering. */
+static bool g_ds_top[2];       /* slot rows 192..223 hold the rows under the HUD */
+static bool g_ds_top_ready;    /* the stage holds the rows of the frame being captured */
+static uint8_t g_ds_arm_dir;
+static uint32_t g_ds_top_us, g_ds_top_max_us, g_ds_top_n;
+
+/* The slot whose room is the lower one of a vertical door and is captured from the frame being built, or -1. */
+static int DsTopSlot(void) {
+  if (g_ds_state == kDsArmed)
+    return g_ds_arm_dir == 3 ? 0 : -1;  /* up door: the old room is below */
+  if (g_ds_state == kDsWaitB)
+    return g_ds_dir == 2 ? 1 : -1;      /* down door: the new room is below */
+  return -1;
+}
+
+/* Called for every line before it is drawn. At the first gameplay line (33) the registers are the gameplay ones: lines 1..32 are
+ * drawn with them (the BG rows simply continue upwards), which is what the PPU would show there without the HUD. */
+static void DsCaptureTop(const Ppu *p, int line) {
+  if (line == 1)
+    g_ds_top_ready = false;
+  if (line != kHudRowsMax + 1 || !g_ge_active || DsTopSlot() < 0)
+    return;
+  uint8_t row[kGameWidth * 4] __attribute__((aligned(16)));
+  const uint32_t t0 = sceKernelGetSystemTimeLow();
+  for (int l = 1; l <= kDsTopRows; l++) {
+    if (!ppu_drawLineScratch((Ppu *)p, l, row)) {  /* the hook gets a const PPU; the scratch draw restores everything it touches */
+      g_ds_top_ready = false;
+      return;
+    }
+    uint16_t *d = &g_ds_top_stage[(l - 1) * kGameWidth];
+    for (int x = 0; x < kGameWidth; x++)
+      d[x] = Rgb565(row + x * 4);
+  }
+  g_ds_top_ready = true;
+  const uint32_t us = sceKernelGetSystemTimeLow() - t0;
+  g_ds_top_us += us;
+  g_ds_top_n++;
+  if (us > g_ds_top_max_us)
+    g_ds_top_max_us = us;
+  if (g_ds_top_n <= 16)
+    PspLog("door snap: rows under the HUD drawn in %u us (slot %d)", (unsigned)us, DsTopSlot());
+}
+
 static void DoorSnapRelease(void) {
   if (g_ds_state == kDsIdle)
     return;
   g_ds_state = kDsIdle;
+  g_ds_top[0] = g_ds_top[1] = g_ds_top_ready = false;
   g_img_ok = g_ds_saved_img_ok;
   g_imgh_ok = g_ds_saved_imgh_ok;
   g_img_skip_ok = g_ds_saved_skip_ok;
@@ -2310,10 +2370,12 @@ static void DoorSnapRelease(void) {
 }
 #endif
 
-void PspRenderer_DoorSnapArm(void) {
+void PspRenderer_DoorSnapArm(unsigned direction) {
 #if SM_PSP_DOOR_SNAP
   if (!g_ds_ok || g_ds_state != kDsIdle || !g_ge_active)
     return;
+  g_ds_arm_dir = (uint8_t)(direction & 3);
+  g_ds_top[0] = g_ds_top[1] = g_ds_top_ready = false;
 #if SM_PSP_DOOR_GE
   if (g_door_reserved)
     return;
@@ -2324,6 +2386,8 @@ void PspRenderer_DoorSnapArm(void) {
   g_img_ok = g_imgh_ok = g_img_skip_ok = false;  /* no layer image (main or subscreen) may use either slot */
   g_ds_state = kDsArmed;
   g_ds_frames = 0;
+#else
+  (void)direction;
 #endif
 }
 
@@ -5137,7 +5201,9 @@ static void DrawDoorTransition(const ComposeSrc *s) {
  * upper: old for right and down doors, new for left and up doors) owns the viewport up to its trailing edge, the other image
  * owns the rest, so there is no seam or gap whatever the rounding. Where an image does not reach a pixel of its region (the
  * camera offset across the door, and the 32 source rows the HUD hides on vertical doors) its nearest edge row/column is
- * repeated by drawing constant-coordinate quads, so tubes and walls continue; nothing outside the 192 rows is ever sampled.
+ * repeated by drawing constant-coordinate quads, so tubes and walls continue. The 32 source rows the HUD hides are real picture
+ * for the lower room of a vertical door (g_ds_top: software-PPU rows in slot rows 192..223, drawn in the gap above its image); without
+ * them (software PPU unavailable) the edge row is repeated there. Only rows 0..191 and, with g_ds_top, 192..223 are ever sampled.
  * The rectangles are clipped on the CPU (no scissor state is touched). */
 static void DsQuad(float su0, float sv0, float su1, float sv1, int x0, int y0, int x1, int y1) {
   TileVert *v = sceGuGetMemory(2 * (int)sizeof(TileVert));
@@ -5149,8 +5215,10 @@ static int DsClamp(int v, int lo, int hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
-/* Draws the part [rx0, rx1) x [ry0, ry1) of the viewport from the image tex whose top-left corner is at (dx, dy). */
-static void DsImage(const void *tex, int dx, int dy, int rx0, int ry0, int rx1, int ry1) {
+/* Draws the part [rx0, rx1) x [ry0, ry1) of the viewport from the image tex whose top-left corner is at (dx, dy). With `top` the
+ * image also has the 32 rows above its row 0 (slot rows 192..223): they fill the 45 viewport rows above dy, and the edge row
+ * replicated above that is the first of them. */
+static void DsImage(const void *tex, int dx, int dy, int rx0, int ry0, int rx1, int ry1, bool top) {
   enum { kRows = 192 };
   if (rx1 <= rx0 || ry1 <= ry0)
     return;
@@ -5158,14 +5226,27 @@ static void DsImage(const void *tex, int dx, int dy, int rx0, int ry0, int rx1, 
   sceGuTexImage(0, 256, 256, 256, tex);
   sceGuTexFlush();
   const float ku = (float)(kGameWidth - 1) / (float)(kCompW - 1), kv = (float)(kRows - 1) / (float)(kCompH - 1);
+  const int tb = top ? DsDispPx(kDsTopRows) : 0;  /* viewport rows of the band above the image */
+  const float kvt = top ? (float)(kDsTopRows - 1) / (float)(tb - 1) : 0.0f;
+  const float vt0 = (float)kDsTopRow0 + 0.5f;  /* centre of the band's first row */
   const int xs[4] = {rx0, DsClamp(dx, rx0, rx1), DsClamp(dx + kCompW, rx0, rx1), rx1};
-  const int ys[4] = {ry0, DsClamp(dy, ry0, ry1), DsClamp(dy + kCompH, ry0, ry1), ry1};
-  for (int j = 0; j < 3; j++) {
+  const int ys[5] = {ry0, DsClamp(dy - tb, ry0, ry1), DsClamp(dy, ry0, ry1), DsClamp(dy + kCompH, ry0, ry1), ry1};
+  for (int j = 0; j < 4; j++) {
     const int y0 = ys[j], y1 = ys[j + 1];
     if (y1 <= y0)
       continue;
-    const float v0 = j == 0 ? 0.5f : j == 2 ? (float)kRows - 0.5f : 0.5f + (float)(y0 - dy) * kv;
-    const float v1 = j == 0 ? 0.5f : j == 2 ? (float)kRows - 0.5f : 0.5f + (float)(y1 - 1 - dy) * kv;
+    float v0, v1;
+    if (j == 0) {  /* above everything: the nearest edge row */
+      v0 = v1 = top ? vt0 : 0.5f;
+    } else if (j == 1) {  /* the rows under the HUD (empty unless top) */
+      v0 = vt0 + (float)(y0 - (dy - tb)) * kvt;
+      v1 = vt0 + (float)(y1 - 1 - (dy - tb)) * kvt;
+    } else if (j == 2) {
+      v0 = 0.5f + (float)(y0 - dy) * kv;
+      v1 = 0.5f + (float)(y1 - 1 - dy) * kv;
+    } else {
+      v0 = v1 = (float)kRows - 0.5f;
+    }
     for (int i = 0; i < 3; i++) {
       const int x0 = xs[i], x1 = xs[i + 1];
       if (x1 <= x0)
@@ -5185,27 +5266,28 @@ static void DrawDoorSnap(const ComposeSrc *s) {
   const int oldx = kCompX + DsDispPx(o[0]), oldy = kCompY + DsDispPx(o[1]);
   const int newx = kCompX + DsDispPx(o[2]), newy = kCompY + DsDispPx(o[3]);
   const void *const tex_old = g_img_tex[0], *const tex_new = g_img_tex[1];
+  const bool top_old = g_ds_top[0], top_new = g_ds_top[1];
   if (g_ds_state != kDsPlay) {  /* waiting for the new snapshot: the old image alone covers the screen */
-    DsImage(tex_old, oldx, oldy, vx0, vy0, vx1, vy1);
+    DsImage(tex_old, oldx, oldy, vx0, vy0, vx1, vy1, top_old);
   } else if (!(g_ds_dir & 2)) {  /* horizontal door: the leading image is on the left */
     const bool old_first = g_ds_dir == 0;
     const int seam = DsClamp((old_first ? oldx : newx) + kCompW, vx0, vx1);
     if (old_first) {
-      DsImage(tex_old, oldx, oldy, vx0, vy0, seam, vy1);
-      DsImage(tex_new, newx, newy, seam, vy0, vx1, vy1);
+      DsImage(tex_old, oldx, oldy, vx0, vy0, seam, vy1, top_old);
+      DsImage(tex_new, newx, newy, seam, vy0, vx1, vy1, top_new);
     } else {
-      DsImage(tex_new, newx, newy, vx0, vy0, seam, vy1);
-      DsImage(tex_old, oldx, oldy, seam, vy0, vx1, vy1);
+      DsImage(tex_new, newx, newy, vx0, vy0, seam, vy1, top_new);
+      DsImage(tex_old, oldx, oldy, seam, vy0, vx1, vy1, top_old);
     }
   } else {  /* vertical door: the leading image is on top */
     const bool old_first = g_ds_dir == 2;
     const int seam = DsClamp((old_first ? oldy : newy) + kCompH, vy0, vy1);
     if (old_first) {
-      DsImage(tex_old, oldx, oldy, vx0, vy0, vx1, seam);
-      DsImage(tex_new, newx, newy, vx0, seam, vx1, vy1);
+      DsImage(tex_old, oldx, oldy, vx0, vy0, vx1, seam, top_old);
+      DsImage(tex_new, newx, newy, vx0, seam, vx1, vy1, top_new);
     } else {
-      DsImage(tex_new, newx, newy, vx0, vy0, vx1, seam);
-      DsImage(tex_old, oldx, oldy, vx0, seam, vx1, vy1);
+      DsImage(tex_new, newx, newy, vx0, vy0, vx1, seam, top_new);
+      DsImage(tex_old, oldx, oldy, vx0, seam, vx1, vy1, top_old);
     }
   }
   /* the HUD pass samples the composition source again */
@@ -5218,12 +5300,13 @@ static void DrawDoorSnap(const ComposeSrc *s) {
  * (pspsdk/gu sources): sceGuTexMode 2 + flush 1, sceGuTexImage 3 + flush 1, sceGuTexFlush 1, sceGuDrawArray 4 (vertex type,
  * base, address, prim), sceGuCopyImage 8, sceGuTexSync 1; sceGuGetMemory(n) takes n rounded up to 4, plus an 8 byte jump.
  * DrawDoorSnap changes only the texture mode / image (restored at the end) and draws sprites: no other GE state.
- *   a DsImage call: <= 3 x 3 = 9 quads; DrawDoorSnap makes <= 2 of them (one while the new snapshot is awaited)
+ *   a DsImage call: <= 4 x 3 = 12 quads (9 without the rows under the HUD); only the lower room of a vertical door has them, so
+ *   DrawDoorSnap makes <= 12 + 9 = 21 (one image while the new snapshot is awaited)
  *   per image TexMode + TexImage + TexFlush = 12 + 16 + 4 = 32 B; per quad GuMem(2 TileVert) + 16 B draw; restore 32 B;
- *   capture (CopyImage + TexSync) 32 + 4 B. Calls: 2 x 3 + 18 + 3 + 2 = 29.
- *   => exactly <= 2*32 + 18*(40 + 16) + 32 + 36 = 1140 B (tools/test_door_snap_draw.sh measures it with these costs).
+ *   capture (CopyImage + TexSync) 32 + 4 B, plus the rows under the HUD (a second CopyImage) 32 B = 68 B. Calls: 2 x 3 + 21 + 3 + 3 = 33.
+ *   => exactly <= 2*32 + 21*(40 + 16) + 32 + 68 = 1340 B (tools/test_door_snap_draw.sh measures it with these costs).
  * The compose bound (ComposeBytesBound) charges the generous kGuCallMax per call instead: kDsMaxCalls calls + kDsMaxMem. */
-enum { kDsMaxQuads = 18, kDsMaxCalls = 29, kDsExactBytes = 1140,
+enum { kDsMaxQuads = 21, kDsMaxCalls = 33, kDsExactBytes = 1340,
        kDsMaxMem = kDsMaxQuads * (((2 * (int)sizeof(TileVert) + 3) / 4) * 4 + 8) };
 #endif
 
@@ -5946,6 +6029,14 @@ static void ComposeDraw(const ComposeSrc *s) {
     sceGuCopyImage(GU_PSM_5650, 0, 32, kGameWidth, 192, s->stride,
                    (void *)(0x04000000u | ((uintptr_t)s->ptr & 0x001fffffu)), 0, 0, 256,
                    (void *)(uintptr_t)(0x04000000u | (uint32_t)(kVramImg0 + slot * kImgBytes)));
+    g_ds_top[slot] = false;
+    if (g_ds_top_ready && DsTopSlot() == slot) {  /* the lower room of a vertical door: the rows under the HUD (RAM -> slot rows 192..223) */
+      sceKernelDcacheWritebackRange(g_ds_top_stage, sizeof(g_ds_top_stage));
+      sceGuCopyImage(GU_PSM_5650, 0, 0, kGameWidth, kDsTopRows, kGameWidth, g_ds_top_stage, 0, kDsTopRow0, 256,
+                     (void *)(uintptr_t)(0x04000000u | (uint32_t)(kVramImg0 + slot * kImgBytes)));
+      g_ds_top[slot] = true;
+    }
+    g_ds_top_ready = false;
     sceGuTexSync();
     if (slot == 0) {
       g_ds_state = kDsHaveA;

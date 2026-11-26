@@ -906,7 +906,7 @@ CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
   // Samus hit a normal door this frame (elevator doors keep their own transition): this frame, now fully built, is the
   // outgoing room's last picture. The renderer snapshots it when the frame is composed.
   if (game_state == kGameState_9_HitDoorBlock && !elevator_flags && (get_DoorDef(door_def_ptr)->door_bitflags & 0x80) == 0)
-    PspRenderer_DoorSnapArm();
+    PspRenderer_DoorSnapArm(get_DoorDef(door_def_ptr)->door_orientation & 3);  // the direction decides which room is the lower one
 #endif
   COROUTINE_END(0);
 
@@ -3885,7 +3885,18 @@ static CoroutineRet DoorSnap_Run(void) {
   g_walk_ey = samus_y_pos;
   g_walk_epx = samus_prev_x_pos;
   g_walk_epy = samus_prev_y_pos;
-  g_walk_n = (uint8)DsWalkSteps(dir);
+  {
+    // she enters through the doorway (the destination door cap) instead of a screen beyond it; see DsWalkStartAxis
+    const DoorDef *dd = get_DoorDef(door_def_ptr);
+    if (dir < 2)
+      g_walk_sx = DsWalkStartAxis(dir, (uint16)(dd->x_pos_plm * 16), g_walk_sx, g_walk_ex);
+    else
+      g_walk_sy = DsWalkStartAxis(dir, (uint16)(dd->y_pos_plm * 16 + (dir == 2 ? 0x10 : -0x38)), g_walk_sy, g_walk_ey);
+  }
+  {
+    const int dx = (int16)(g_walk_ex - g_walk_sx), dy = (int16)(g_walk_ey - g_walk_sy);
+    g_walk_n = (uint8)DsWalkSteps(dir, (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy) ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy));
+  }
   g_walk_k = 0;
   memcpy(palette_buffer, target_palettes, 0x200);
   // a frame's worth of the main loop's prologue, so that the sprites below are the only ones
@@ -4378,8 +4389,10 @@ CoroutineRet DoorTransition_FadeInScreenAndFinish(void) {  // 0x82E737
   EnemyMain();
   EprojRunAll();
 #if SM_PSP_DOOR_SNAP
-  if (g_walk_n)
-    DoorSnapWalkPose(++g_walk_k);  // instant door load: Samus walks in (the palettes are already at their targets)
+  if (g_walk_n) {  // instant door load: Samus walks in, animated (the palettes are already at their targets)
+    Samus_Animate();
+    DoorSnapWalkPose(++g_walk_k);
+  }
 #endif
   DrawSamusEnemiesAndProjectiles();
   EnsureSamusDrawnEachFrame();

@@ -181,6 +181,7 @@ void ppu_reset(Ppu* ppu);
 bool ppu_checkOverscan(Ppu* ppu);
 void ppu_handleVblank(Ppu* ppu);
 void ppu_runLine(Ppu* ppu, int line);
+bool ppu_drawLineScratch(Ppu *ppu, int line, uint8_t *dst);  // one line of the current register state into dst (256 RGBA), no side effects
 uint8_t ppu_read(Ppu* ppu, uint8_t adr);
 void ppu_write(Ppu* ppu, uint8_t adr, uint8_t val);
 void ppu_saveload(Ppu *ppu, SaveLoadFunc *func, void *ctx);

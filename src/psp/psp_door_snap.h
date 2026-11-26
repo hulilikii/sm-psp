@@ -53,18 +53,39 @@ static inline int DsDispPx(int src_px) {
 
 /* Samus's walk-in. The instant load leaves her where the live scroll's last step leaves her (end); the slide shows the new
  * room without her at the position the scroll started her from (start: one screen beyond the door, hidden), and she walks
- * to end over the live frames that follow, steps 1..n of the same n-step ease as the scroll (the scroll moved her by
- * speed * step / 4 per step, so her speed profile is the same). Positions are the game's 16-bit world coordinates; the
- * difference is taken signed so a wrap of the coordinate cannot send her the long way round. Step 0 is `start`, step n is
- * exactly `end`; every step moves toward `end`, never past it. */
-static inline int DsWalkSteps(unsigned dir) {  /* frames of the walk-in: the scroll's own length (original entrance timing) */
-  return DsSteps(dir);
+ * to end over the live frames that follow, animated (Samus_Animate each frame) at a steady kDsWalkSpeed px per frame, so
+ * the walk takes distance / speed frames (at least kDsWalkMin, at most the scroll's own length). Positions are the game's
+ * 16-bit world coordinates; the difference is taken signed so a wrap of the coordinate cannot send her the long way round.
+ * Step 0 is `start`, step n is exactly `end`; every step moves toward `end`, never past it. */
+enum { kDsWalkSpeed = 2, kDsWalkMin = 8 };
+
+static inline int DsWalkSteps(unsigned dir, int distance) {
+  int n = (distance + kDsWalkSpeed - 1) / kDsWalkSpeed;
+  if (distance < 0)
+    n = 0;
+  if (n < kDsWalkMin)
+    n = kDsWalkMin;
+  return n > DsSteps(dir) ? DsSteps(dir) : n;
 }
 
 static inline uint16_t DsWalkPos(uint16_t start, uint16_t end, int step, int n) {
-  enum { kScale = 256 };
   const int d = (int16_t)(uint16_t)(end - start);
-  const int cum = DoorEaseCum(step, n, kScale);
-  const int num = d * cum;
-  return (uint16_t)(start + (num + (num >= 0 ? kScale / 2 : -(kScale / 2))) / kScale);
+  if (step <= 0)
+    return start;
+  if (step >= n)
+    return end;
+  const int num = d * step;
+  return (uint16_t)(start + (num + (num >= 0 ? n / 2 : -(n / 2))) / n);
+}
+
+/* Where the walk starts on the door's axis. The scroll starts Samus a screen beyond the door (fallback), so most of her walk would
+ * be spent hidden off-screen (or under the HUD). The door cap is the doorway itself: the hack Nodever2_Door_Transitions places her
+ * there too (its algorithms 2 and 5: the destination door's cap block, +0x10 below / -0x38 above the cap for vertical doors).
+ * Use the cap when it lies ahead of the fallback and no further along than the end (so she still walks in the door's direction and
+ * never farther than before); otherwise keep the fallback. dir: 0 right, 1 left, 2 down, 3 up. */
+static inline uint16_t DsWalkStartAxis(unsigned dir, uint16_t cap, uint16_t fallback, uint16_t end) {
+  const int sgn = (dir & 1) ? -1 : 1;
+  const int dcap = sgn * (int)(int16_t)(uint16_t)(end - cap);
+  const int dfb = sgn * (int)(int16_t)(uint16_t)(end - fallback);
+  return (dcap >= 0 && dcap <= dfb) ? cap : fallback;
 }

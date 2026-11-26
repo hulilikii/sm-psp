@@ -13,16 +13,32 @@
 #define SM_PSP_DOOR_GE 0
 enum { kImgBytes = 131072, kVramImg0 = 1720320, GU_PSM_5650 = 0 };
 typedef struct ComposeSrc { const void *ptr; int psm, w, h, stride; } ComposeSrc;
-enum { kGameWidth = 256 };
+enum { kGameWidth = 256, kHudRowsMax = 32 };
+typedef struct Ppu Ppu;
+static int g_scratch_calls, g_scratch_fail_at;
+static bool ppu_drawLineScratch(Ppu *p, int line, uint8_t *dst) {  /* stand-in: a pattern that identifies the line */
+  (void)p;
+  g_scratch_calls++;
+  if (g_scratch_fail_at && line == g_scratch_fail_at)
+    return false;
+  for (int x = 0; x < 256; x++) { dst[x * 4] = (uint8_t)(line * 8); dst[x * 4 + 1] = (uint8_t)x; dst[x * 4 + 2] = 0xf8; dst[x * 4 + 3] = 0xff; }
+  return true;
+}
+static inline uint16_t Rgb565(const uint8_t *p) { return (uint16_t)((p[0] >> 3) | (p[1] >> 2) << 5 | (p[2] >> 3) << 11); }
+static uint32_t sceKernelGetSystemTimeLow(void) { return 0; }
+static int g_wb;
+static void sceKernelDcacheWritebackRange(const void *p, unsigned n) { (void)p, (void)n; g_wb++; }
 static bool g_img_ok = true, g_imgh_ok = true, g_img_skip_ok = true, g_ge_active = true;
 static uint8_t g_img[2][8];
-static int g_dirty_all, g_copies, g_copy_dst[8], g_cap_bytes;
+static int g_dirty_all, g_copies, g_copy_dst[8], g_copy_dy[8], g_copy_h[8], g_cap_bytes;
 static uint16_t g_tex_mem[4];
 static uint16_t *g_texture = g_tex_mem;
 static void ImgMarkAllDirty(void) { g_dirty_all++; }
 static void PspLog(const char *f, ...) { (void)f; }
 static void sceGuCopyImage(int psm, int sx, int sy, int w, int h, int sw, void *src, int dx, int dy, int dw, void *dst) {
-  (void)psm, (void)sx, (void)sy, (void)w, (void)h, (void)sw, (void)src, (void)dx, (void)dy, (void)dw;
+  (void)psm, (void)sx, (void)sy, (void)w, (void)sw, (void)src, (void)dx, (void)dw;
+  g_copy_dy[g_copies] = dy;
+  g_copy_h[g_copies] = h;
   g_copy_dst[g_copies++] = (int)((uintptr_t)dst & 0x1fffff);
   g_cap_bytes += 32;  /* 8 commands (pspsdk sceGuCopyImage) */
 }
@@ -43,6 +59,7 @@ static void compose(const ComposeSrc *s, bool hud) {
 }
 
 static int fails;
+static unsigned dir_for_arm;
 #define CHECK(c, ...) do { if (!(c)) { if (fails++ < 20) { printf("FAIL %s: ", #c); printf(__VA_ARGS__); printf("\n"); } } } while (0)
 static void restored(const char *what) {
   CHECK(g_ds_state == kDsIdle && g_img_ok && g_imgh_ok && g_img_skip_ok, "%s: idle + layer images restored", what);
@@ -55,7 +72,8 @@ int main(void) {
     /* normal door: arm, snapshot A, ready, begin, snapshot B, slide, release */
     g_copies = 0;
     g_cap_bytes = 0;
-    PspRenderer_DoorSnapArm();
+    dir_for_arm = dir;
+    PspRenderer_DoorSnapArm(dir_for_arm);
     CHECK(g_ds_state == kDsArmed && !g_img_ok && !g_imgh_ok && !g_img_skip_ok, "armed turns the layer images off");
     CHECK(!PspRenderer_DoorSnapReady(), "not ready before the old frame is captured");
     compose(&good, true);
@@ -85,21 +103,76 @@ int main(void) {
     restored("slide end");
     CHECK(!PspRenderer_DoorSnapHold(), "released");
   }
+  /* the rows under the HUD: only the lower room of a vertical door. Up door: the old room (slot 0, the armed frame); down door:
+   * the new room (slot 1, frame N); horizontal doors: none. The hook runs for lines 1..33 of the frame being captured. */
+  for (unsigned dir = 0; dir < 4; dir++) {
+    dir_for_arm = dir;
+    PspRenderer_DoorSnapArm(dir);
+    g_copies = 0; g_cap_bytes = 0; g_scratch_calls = 0; g_wb = 0;
+    for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
+    compose(&good, true);
+    const bool want_a = dir == 3;
+    CHECK(g_ds_top[0] == want_a && !g_ds_top[1], "dir %u: A rows under the HUD %d (want %d)", dir, (int)g_ds_top[0], (int)want_a);
+    CHECK(g_scratch_calls == (want_a ? 32 : 0), "dir %u: %d scratch lines for A", dir, g_scratch_calls);
+    CHECK(g_copies == (want_a ? 2 : 1), "dir %u: A copies %d", dir, g_copies);
+    if (want_a) {
+      CHECK(g_copy_dst[1] == kVramImg0 && g_copy_dy[1] == kDsTopRow0 && g_copy_h[1] == kDsTopRows, "top rows go to slot 0 rows 192..223");
+      CHECK(g_cap_bytes == 68 && g_wb == 1, "A capture with top rows: %d B, %d writebacks", g_cap_bytes, g_wb);
+      for (int l = 1; l <= 32; l++)  /* the staged rows are the drawn lines, converted */
+        for (int x = 0; x < 256; x += 51) {
+          const uint8_t px[4] = {(uint8_t)(l * 8), (uint8_t)x, 0xf8, 0xff};
+          CHECK(g_ds_top_stage[(l - 1) * 256 + x] == Rgb565(px), "stage row %d x %d", l, x);
+        }
+    }
+    PspRenderer_DoorSnapBegin(dir, 0);
+    g_copies = 0; g_scratch_calls = 0;
+    for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
+    compose(&good, true);
+    const bool want_b = dir == 2;
+    CHECK(g_ds_top[1] == want_b && (g_ds_top[0] == want_a || g_ds_state == kDsIdle), "dir %u: B rows under the HUD %d (want %d)", dir, (int)g_ds_top[1], (int)want_b);
+    CHECK(g_scratch_calls == (want_b ? 32 : 0), "dir %u: %d scratch lines for B", dir, g_scratch_calls);
+    CHECK(g_ds_state == kDsPlay, "dir %u: playing", dir);
+    DoorSnapRelease();
+    CHECK(!g_ds_top[0] && !g_ds_top[1] && !g_ds_top_ready, "release clears the top-row flags");
+    restored("top rows");
+  }
+  /* refused capture / failed scratch draw / stale stage: no top rows, the edge-row replication stays */
+  dir_for_arm = 3;
+  PspRenderer_DoorSnapArm(3);
+  for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
+  CHECK(g_ds_top_ready, "stage ready before the capture");
+  compose(&good, false);  /* HUD unresolved: A refused */
+  CHECK(!g_ds_top[0] && g_ds_state == kDsArmed, "refused A has no top rows");
+  DsCaptureTop(NULL, 1);
+  CHECK(!g_ds_top_ready, "the next frame's first line drops a stale stage");
+  g_scratch_fail_at = 10;
+  for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
+  CHECK(!g_ds_top_ready, "a failed scratch draw gives no stage");
+  g_scratch_fail_at = 0;
+  compose(&good, true);
+  CHECK(g_ds_state == kDsHaveA && !g_ds_top[0], "A captured without top rows when the scratch draw failed");
+  DoorSnapRelease();
+  g_ge_active = false;
+  PspRenderer_DoorSnapArm(3);
+  g_scratch_calls = 0;
+  for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
+  CHECK(g_scratch_calls == 0, "no scratch draw when idle / GE off");
+  g_ge_active = true;
   /* A refused: the game falls back */
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   compose(&good, false);
   CHECK(!PspRenderer_DoorSnapReady(), "A refused: not ready");
   PspRenderer_DoorSnapAbort();
   restored("abort after refused A");
   /* the game never commits */
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   compose(&good, true);
   int frames = 0;
   while (g_ds_state != kDsIdle && frames < 50) { PspRenderer_DoorSnapHold(); frames++; }
   CHECK(frames <= kDsMaxHaveA + 1, "uncommitted snapshot expires (%d)", frames);
   restored("expired");
   /* B never valid */
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   compose(&good, true);
   PspRenderer_DoorSnapBegin(0, 0);
   frames = 0;
@@ -108,15 +181,15 @@ int main(void) {
   restored("B timeout");
   /* GE inactive / resources missing / already running */
   g_ge_active = false;
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   CHECK(g_ds_state == kDsIdle && g_img_ok, "no arm without the GE path");
   g_ge_active = true;
   g_ds_ok = false;
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   CHECK(g_ds_state == kDsIdle && g_img_ok, "no arm without resources");
   g_ds_ok = true;
-  PspRenderer_DoorSnapArm();
-  PspRenderer_DoorSnapArm();  /* a second arm must not save the cleared flags */
+  PspRenderer_DoorSnapArm(dir_for_arm);
+  PspRenderer_DoorSnapArm(dir_for_arm);  /* a second arm must not save the cleared flags */
   PspRenderer_DoorSnapAbort();
   restored("double arm");
   /* the compose-list guard: DsListFits is exact at the limit, and a transition that does not fit is dropped before anything
@@ -128,12 +201,12 @@ int main(void) {
   g_mock_used = 0; g_mock_bound = 4432 + 20000;  /* a realistic bound (snapshots 4432 B + the rest of the composition) */
   CHECK(DsListFits(), "realistic bound fits");
   g_mock_used = (uint32_t)kListBytes; g_mock_bound = 0;
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   g_copies = 0;
   compose(&good, true);
   CHECK(g_ds_state == kDsIdle && g_copies == 0 && g_img_ok, "armed transition dropped before it emits a command");
   g_mock_used = 0; g_mock_bound = 1000;
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   compose(&good, true);
   PspRenderer_DoorSnapBegin(2, 0);
   g_mock_used = (uint32_t)kListBytes; g_copies = 0;  /* the list fills up while waiting for B */
@@ -141,7 +214,7 @@ int main(void) {
   CHECK(g_ds_state == kDsIdle && g_copies == 0 && g_img_ok && !PspRenderer_DoorSnapHold(), "WaitB dropped when the list is full");
   g_mock_used = 0;
   /* software frame / resume release */
-  PspRenderer_DoorSnapArm();
+  PspRenderer_DoorSnapArm(dir_for_arm);
   compose(&good, true);
   DoorSnapRelease();
   restored("release");

@@ -254,6 +254,19 @@ void (*g_ppu_draw_end)(void);
 bool g_ppu_skip_draw;
 uint32_t g_ppu_gen_hist[64];
 
+// Cache the brightness computation
+static void PpuRefreshBrightness(Ppu *ppu) {
+  if (ppu->brightness != ppu->lastBrightnessMult) {
+    uint8_t ppu_brightness = ppu->brightness;
+    ppu->lastBrightnessMult = ppu_brightness;
+    for (int i = 0; i < 32; i++)
+      ppu->brightnessMultHalf[i * 2] = ppu->brightnessMultHalf[i * 2 + 1] = ppu->brightnessMult[i] =
+      ((i << 3) | (i >> 2)) * ppu_brightness / 15;
+    // Store 31 extra entries to remove the need for clamping to 31.
+    memset(&ppu->brightnessMult[32], ppu->brightnessMult[31], 31);
+  }
+}
+
 void ppu_runLine(Ppu* ppu, int line) {
   if(line == 0) {
     // pre-render line
@@ -269,16 +282,7 @@ void ppu_runLine(Ppu* ppu, int line) {
       return;
     if (g_ppu_draw_begin)
       g_ppu_draw_begin();
-    // Cache the brightness computation
-    if (ppu->brightness != ppu->lastBrightnessMult) {
-      uint8_t ppu_brightness = ppu->brightness;
-      ppu->lastBrightnessMult = ppu_brightness;
-      for (int i = 0; i < 32; i++)
-        ppu->brightnessMultHalf[i * 2] = ppu->brightnessMultHalf[i * 2 + 1] = ppu->brightnessMult[i] =
-        ((i << 3) | (i >> 2)) * ppu_brightness / 15;
-      // Store 31 extra entries to remove the need for clamping to 31.
-      memset(&ppu->brightnessMult[32], ppu->brightnessMult[31], 31);
-    }
+    PpuRefreshBrightness(ppu);
 
     // evaluate sprites
     ClearBackdrop(&ppu->objBuffer);
@@ -296,6 +300,31 @@ void ppu_runLine(Ppu* ppu, int line) {
     if (g_ppu_draw_end)
       g_ppu_draw_end();
   }
+}
+
+// Draws line `line` (1-based) of the PPU's CURRENT register state into dst (256 RGBA8888 pixels, the same byte order as the
+// frame buffer) without touching the frame being drawn: no line hook, no frame buffer write, the sprite status flags and
+// the per-line state are restored (the real line draw clears and re-evaluates them anyway). Used by the PSP renderer for
+// lines the game never shows with this register state (the rows under the HUD). Returns false if it cannot draw
+// (the legacy per-pixel PPU, or widescreen padding).
+bool ppu_drawLineScratch(Ppu *ppu, int line, uint8_t *dst) {
+  if (!g_new_ppu || ppu->extraLeftRight || line < 1 || line > 224)
+    return false;
+  uint8_t *const save_buf = ppu->renderBuffer;
+  const uint32_t save_pitch = ppu->renderPitch;
+  const bool save_range = ppu->rangeOver, save_time = ppu->timeOver, save_sprites = ppu->lineHasSprites;
+  ppu->renderBuffer = dst;
+  ppu->renderPitch = 0;  // PpuDrawWholeLine writes row (line - 1) * pitch: always dst
+  PpuRefreshBrightness(ppu);
+  ClearBackdrop(&ppu->objBuffer);
+  ppu->lineHasSprites = !ppu->forcedBlank && ppu_evaluateSprites(ppu, line - 1);
+  PpuDrawWholeLine(ppu, (uint)line);
+  ppu->renderBuffer = save_buf;
+  ppu->renderPitch = save_pitch;
+  ppu->rangeOver = save_range;
+  ppu->timeOver = save_time;
+  ppu->lineHasSprites = save_sprites;
+  return true;
 }
 
 typedef struct PpuWindows {

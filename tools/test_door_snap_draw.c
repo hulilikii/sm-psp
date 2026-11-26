@@ -23,6 +23,8 @@ typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
 typedef struct ComposeSrc { const void *ptr; int psm, w, h, stride; } ComposeSrc;
 static float g_uvh[2] = {0.5f, 0.5f};
 static uint8_t g_ds_state, g_ds_dir;
+enum { kDsTopRows = 32, kDsTopRow0 = 192 };
+static bool g_ds_top[2];
 static uint16_t g_ds_step;
 static int16_t g_ds_align;
 static uint8_t g_tex_mem[2][16];
@@ -60,7 +62,7 @@ static void GeDraw(int type, int n, const void *v) {
 #include "/tmp/door_snap_compose_quad.inc"
 #include "/tmp/door_snap_draw.inc"
 
-static int fails, g_max_quads, g_max_bytes, g_max_calls;
+static int fails, g_max_quads, g_max_bytes, g_max_calls, g_with_top, g_band_quads;
 #define CHECK(c, ...) do { if (!(c)) { if (fails++ < 20) { printf("FAIL %s: ", #c); printf(__VA_ARGS__); printf("\n"); } } } while (0)
 
 static void run(unsigned state, unsigned dir, int step, int align, int *tex_seen) {
@@ -72,6 +74,8 @@ static void run(unsigned state, unsigned dir, int step, int align, int *tex_seen
   g_ds_dir = (uint8_t)dir;
   g_ds_step = (uint16_t)step;
   g_ds_align = (int16_t)align;
+  g_ds_top[0] = g_with_top && dir == 3;  /* the lower room of a vertical door: up door = old room, down door = new room */
+  g_ds_top[1] = g_with_top && dir == 2;
   static const int src_tag;
   const ComposeSrc s = {&src_tag, GU_PSM_8888, 512, 256, 512};  /* the composition source, as the HUD pass will need it again */
   g_bytes = g_calls = 0;
@@ -85,6 +89,7 @@ static void run(unsigned state, unsigned dir, int step, int align, int *tex_seen
   tex_seen[0] = tex_seen[1] = 0;
   for (int i = 0; i < g_nrect; i++) {
     const Rect *r = &g_rects[i];
+    if (r->v0 >= (float)kDsTopRow0) g_band_quads++;
     CHECK(r->tex == 0 || r->tex == 1, "texture %d dir %u step %d", r->tex, dir, step);
     if (r->tex == 0 || r->tex == 1) tex_seen[r->tex] = 1;
     CHECK(r->x0 >= kCompX && r->x1 <= kCompX + kCompW && r->y0 >= kCompY && r->y1 <= kCompY + kCompH && r->x1 > r->x0 && r->y1 > r->y0,
@@ -98,7 +103,9 @@ static void run(unsigned state, unsigned dir, int step, int align, int *tex_seen
     const float vs[2] = {r->v0 + 0.5f * (r->v1 - r->v0) / dh, r->v1 - 0.5f * (r->v1 - r->v0) / dh};
     for (int k = 0; k < 2; k++) {
       CHECK(us[k] >= 0.5f - eps && us[k] <= 255.5f + eps, "u %f out of the image", us[k]);
-      CHECK(vs[k] >= 0.5f - eps && vs[k] <= 191.5f + eps, "v %f out of the 192 rows", vs[k]);
+      const bool in_img = vs[k] >= 0.5f - eps && vs[k] <= 191.5f + eps;
+      const bool in_band = g_ds_top[r->tex] && vs[k] >= (float)kDsTopRow0 + 0.5f - eps && vs[k] <= (float)(kDsTopRow0 + kDsTopRows) - 0.5f + eps;
+      CHECK(in_img || in_band, "v %f outside the 192 rows (and the band %d)", vs[k], (int)g_ds_top[r->tex]);
     }
   }
   for (int y = kCompY; y < kCompY + kCompH; y++)
@@ -110,12 +117,13 @@ int main(void) {
   long runs = 0;
   int seen[2];
   static const int aligns[] = {-256, -200, -127, -37, -1, 0, 1, 37, 128, 200, 255, 256};
+  for (g_with_top = 0; g_with_top < 2; g_with_top++)
   for (unsigned dir = 0; dir < 4; dir++) {
     const int n = DsSteps(dir);
     for (unsigned a = 0; a < sizeof aligns / sizeof aligns[0]; a++) {
       run(kDsWaitB, dir, 0, aligns[a], seen);
       CHECK(seen[0] && !seen[1], "waiting for the new snapshot must draw the old one only (dir %u)", dir);
-      for (int step = 0; step < n; step++) {
+      for (int step = 0; step <= n; step++) {  /* step n is the destination: it is drawn too */
         run(kDsPlay, dir, step, aligns[a], seen);
         runs++;
         if (step == 0) {
@@ -126,16 +134,44 @@ int main(void) {
           CHECK(g_nrect == 1 && r->x0 == kCompX && r->y0 == kCompY && r->x1 == kCompX + kCompW && r->y1 == kCompY + kCompH &&
                 fabsf(uc - 0.5f) < 0.01f && fabsf(vc - 0.5f) < 0.01f, "step 0 mapping dir %u (%d quads)", dir, g_nrect);
         }
-        if (step == n - 1)
+        if (step == n)
           CHECK(seen[1], "the last step shows the new image (dir %u)", dir);
       }
     }
   }
+  /* the gap between the leading image and the lower one is the lower room's rows under the HUD: 45 viewport rows of the band,
+   * continuous with the image (the band's last row meets row 0), nothing replicated in between (at most the rounding row) */
+  g_with_top = 1;
+  for (unsigned dir = 2; dir < 4; dir++)
+    for (int step = 1; step < DsSteps(dir); step++) {
+      run(kDsPlay, dir, step, 0, seen);
+      int band_rows = 0, rep_rows = 0, last_band_v = -1;
+      for (int i = 0; i < g_nrect; i++) {
+        const Rect *r = &g_rects[i];
+        if (r->x0 != kCompX) continue;  /* one column of quads: align 0 has no x edges */
+        if (r->v0 >= (float)kDsTopRow0 && r->v1 > r->v0) { band_rows += r->y1 - r->y0; last_band_v = (int)r->v1; }
+        else if (r->v0 >= (float)kDsTopRow0) rep_rows += r->y1 - r->y0;
+      }
+      int o[4];
+      DsOffsets(dir, step, 0, o);
+      const int dy = kCompY + DsDispPx(dir == 2 ? o[3] : o[1]);  /* top of the lower image */
+      int lo = dy - DsDispPx(kDsTopRows), hi = dy;
+      if (lo < kCompY) lo = kCompY;
+      if (hi > kCompY + kCompH) hi = kCompY + kCompH;
+      const int want = hi > lo ? hi - lo : 0;
+      CHECK(band_rows >= want - 2 && band_rows <= want + 2, "dir %u step %d: %d band rows in the gap (want %d)", dir, step, band_rows, want);
+      if (hi == dy && want >= 4)  /* the band's last row is visible: it must be the slot's row 223 */
+        CHECK(last_band_v >= 222 && last_band_v <= 223, "dir %u step %d: the band ends at v %d (want 223.5)", dir, step, last_band_v);
+      CHECK(rep_rows <= 2, "dir %u step %d: %d replicated rows", dir, step, rep_rows);
+    }
+  g_with_top = 0;
   /* every alignment the offsets can take, every step, both states: command-list use only (the coverage above is the slow part) */
+  for (g_with_top = 0; g_with_top < 2; g_with_top++)
   for (unsigned dir = 0; dir < 4; dir++)
     for (int align = -256; align <= 256; align++)
-      for (int step = 0; step < DsSteps(dir); step++)
+      for (int step = 0; step <= DsSteps(dir); step++)
         for (int st = kDsWaitB; st <= kDsPlay; st++) {
+          g_ds_top[0] = g_with_top && dir == 3; g_ds_top[1] = g_with_top && dir == 2;
           g_ds_state = (uint8_t)st; g_ds_dir = (uint8_t)dir; g_ds_step = (uint16_t)step; g_ds_align = (int16_t)align;
           g_nrect = 0; g_mem_n = 0; g_bytes = g_calls = 0;
           static const int tag;
@@ -148,11 +184,12 @@ int main(void) {
         }
   /* draws + texture calls only; the memory calls are the quads' own (counted in the bytes); the capture's 36 B / 2 calls are
    * not part of DrawDoorSnap (tools/test_door_snap_state.sh) */
-  CHECK(g_max_bytes + 36 <= kDsExactBytes, "worst case %d B + capture exceeds kDsExactBytes %d", g_max_bytes, (int)kDsExactBytes);
+  CHECK(g_max_bytes + 68 <= kDsExactBytes, "worst case %d B + capture exceeds kDsExactBytes %d", g_max_bytes, (int)kDsExactBytes);
   CHECK(g_max_quads <= kDsMaxQuads, "quads %d", g_max_quads);
   const int libgu_calls_no_mem = g_max_calls - g_max_quads;  /* every quad has one GetMemory call: not a command-emitting call */
-  CHECK(libgu_calls_no_mem + 2 <= kDsMaxCalls, "calls %d + capture 2 exceed kDsMaxCalls %d", libgu_calls_no_mem, (int)kDsMaxCalls);
-  printf("%s (%ld slide frames; worst case %d quads, %d B, %d calls + capture 36 B / 2 calls; constants: %d B, %d quads, %d calls)\n",
-         fails ? "FAILED" : "OK", runs, g_max_quads, g_max_bytes, g_max_calls, (int)kDsExactBytes, (int)kDsMaxQuads, (int)kDsMaxCalls);
+  CHECK(libgu_calls_no_mem + 3 <= kDsMaxCalls, "calls %d + capture 3 exceed kDsMaxCalls %d", libgu_calls_no_mem, (int)kDsMaxCalls);
+  CHECK(g_band_quads > 0, "the rows under the HUD are never drawn");
+  printf("%s (%ld slide frames; worst case %d quads, %d B, %d calls + capture 68 B / 3 calls; %d band quads; constants: %d B, %d quads, %d calls)\n",
+         fails ? "FAILED" : "OK", runs, g_max_quads, g_max_bytes, g_max_calls, g_band_quads, (int)kDsExactBytes, (int)kDsMaxQuads, (int)kDsMaxCalls);
   return fails != 0;
 }

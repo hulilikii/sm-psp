@@ -122,35 +122,46 @@ int main(void) {
       check_door(dir, REF_DoorAlignDistance((uint16_t)pos), (uint16_t)(pos * 3), (uint16_t)(pos ^ 0x5a5a));
       doors++;
     }
-  /* Samus's walk-in: exact start and end, monotonic toward the end, never past it, short way round a coordinate wrap */
+  /* Samus's walk-in: exact start and end, monotonic toward the end, never past it, steady speed, short way round a wrap */
   long walks = 0;
   for (unsigned dir = 0; dir < 4; dir++) {
-    const int n = DsWalkSteps(dir);
-    CHECK(n == DsSteps(dir), "walk length is the scroll length");
     static const int ds[] = {0, 1, -1, 13, -13, 50, -50, 63, -63, 96, -96, 120, -120, 300, -300};
     static const uint16_t starts[] = {0, 0x0010, 0x00E8, 0x0100, 0x1234, 0x7FFF, 0xFFE0, 0xFFFF};
     for (unsigned a = 0; a < sizeof starts / sizeof starts[0]; a++)
       for (unsigned b = 0; b < sizeof ds / sizeof ds[0]; b++) {
         const uint16_t st = starts[a], en = (uint16_t)(st + ds[b]);
+        const int dist = ds[b] < 0 ? -ds[b] : ds[b];
+        const int n = DsWalkSteps(dir, dist);
+        CHECK(n >= kDsWalkMin && n <= DsSteps(dir), "walk length %d dir %u dist %d", n, dir, dist);
+        CHECK(n * kDsWalkSpeed >= dist || n == DsSteps(dir), "dist %d in %d frames is faster than the walk speed", dist, n);
         CHECK(DsWalkPos(st, en, 0, n) == st && DsWalkPos(st, en, n, n) == en, "walk ends dir %u %04x->%04x", dir, st, en);
-        int prev = 0;
+        int prev = 0, maxd = 0;
         for (int k = 1; k <= n; k++) {
           const int moved = (int16_t)(uint16_t)(DsWalkPos(st, en, k, n) - st);  /* signed distance from the start */
           const int sgn = ds[b] < 0 ? -1 : 1;
           CHECK(sgn * moved >= sgn * prev && sgn * moved <= sgn * ds[b], "walk monotonic dir %u %04x->%04x k %d", dir, st, en, k);
+          const int step = sgn * (moved - prev);
+          if (step > maxd) maxd = step;
           prev = moved;
         }
+        CHECK(maxd <= (dist + n - 1) / n + 1, "walk steps are even: max %d for %d px in %d frames", maxd, dist, n);
         walks++;
       }
-    /* per-step distance follows the scroll's ease: slow at both ends, never more than the mid-scroll step */
-    int mid = 0, first = 0;
-    for (int k = 1; k <= n; k++) {
-      const int d = DsWalkPos(0, 400, k, n) - DsWalkPos(0, 400, k - 1, n);
-      if (d > mid) mid = d;
-      if (k == 1) first = d;
-    }
-    CHECK(first <= mid, "walk starts no faster than its peak");
   }
+  CHECK(DsWalkSteps(0, 63) == 32 && DsWalkSteps(2, 96) == 48 && DsWalkSteps(0, 1000) == kDsStepsH && DsWalkSteps(3, 0) == kDsWalkMin, "walk lengths");
+  /* walk start: the door cap when it is ahead of the scroll's start and not past the end, else the scroll's start */
+  CHECK(DsWalkStartAxis(0, 0x0110, 0x0018, 0x0127) == 0x0110, "right: cap between start and end");
+  CHECK(DsWalkStartAxis(0, 0x0120, 0x0010, 0x0127) == 0x0120, "right: cap near the end");
+  CHECK(DsWalkStartAxis(0, 0x0130, 0x0010, 0x0127) == 0x0010, "right: cap past the end keeps the fallback");
+  CHECK(DsWalkStartAxis(0, 0x0008, 0x0010, 0x0127) == 0x0010, "right: cap behind the fallback keeps it (never a longer walk)");
+  CHECK(DsWalkStartAxis(1, 0x02E0, 0x03E8, 0x02D8) == 0x02E0, "left: cap between start and end");
+  CHECK(DsWalkStartAxis(1, 0x02C0, 0x03E8, 0x02D8) == 0x03E8, "left: cap past the end keeps the fallback");
+  CHECK(DsWalkStartAxis(2, 0x0110, 0x0020, 0x0180) == 0x0110, "down: cap between start and end");
+  CHECK(DsWalkStartAxis(3, 0x0148, 0x0300, 0x0100) == 0x0148, "up: cap between start and end");
+  CHECK(DsWalkStartAxis(3, 0x00C0, 0x0300, 0x0100) == 0x0300, "up: cap past the end keeps the fallback");
+  CHECK(DsWalkStartAxis(0, 0xFFE0, 0xFFF0, 0x0010) == 0xFFF0, "wrap: cap behind the fallback keeps it");
+  CHECK(DsWalkStartAxis(0, 0x0000, 0xFFF0, 0x0010) == 0x0000, "wrap: cap between the fallback and the end, across the wrap");
+  CHECK(DsWalkStartAxis(0, 0xFFF8, 0xFFE0, 0x0010) == 0xFFF8, "wrap: cap across the coordinate wrap");
   printf("walk-in: %ld walks\n", walks);
   /* DsOffsets clamps its step */
   int a[4], b[4];
