@@ -48,7 +48,7 @@ static bool g_ds_ok_init = true;
 /* the compose-list guard: DsListFits is the renderer's own; the bound and the list position are stand-ins */
 enum { kListBytes = 512 * 1024, kComposeTail = 1024 };
 static uint32_t g_gu_list[4], g_mock_used, g_mock_bound;
-static uint32_t CurListUsed(const uint32_t *list) { (void)list; return g_mock_used; }
+static uint32_t CurListUsed(void) { return g_mock_used; }
 static uint32_t ComposeBytesBound(uint32_t *mem, uint32_t *calls) { *mem = *calls = 0; return g_mock_bound; }
 #include "/tmp/door_snap_fits.inc"
 
@@ -69,18 +69,22 @@ int main(void) {
   g_ds_ok = true;
   const ComposeSrc good = {g_tex_mem, GU_PSM_5650, 256, 256, 256}, sw = {&g_dirty_all, GU_PSM_5650, 256, 256, 256};
   for (unsigned dir = 0; dir < 4; dir++) {
-    /* normal door: arm, snapshot A, ready, begin, snapshot B, slide, release */
+    /* normal door: arm, snapshot A, ready, begin, snapshot B, slide, release. The slide length is whatever Begin was given
+     * (the momentum-scaled DsStepsForSpeed): a different one per direction, the extremes included. */
+    const int slide_n = dir == 0 ? kDsStepsHMin : dir == 1 ? kDsStepsHMax : dir == 2 ? kDsStepsVMin : kDsStepsVMax;
+    CHECK(PspRenderer_DoorSnapCanArm(), "idle: the game may keep Samus out of the snapshot");
     g_copies = 0;
     g_cap_bytes = 0;
     dir_for_arm = dir;
     PspRenderer_DoorSnapArm(dir_for_arm);
+    CHECK(!PspRenderer_DoorSnapCanArm(), "armed: no second arm (and Samus is no longer hidden)");
     CHECK(g_ds_state == kDsArmed && !g_img_ok && !g_imgh_ok && !g_img_skip_ok, "armed turns the layer images off");
     CHECK(!PspRenderer_DoorSnapReady(), "not ready before the old frame is captured");
     compose(&good, true);
     CHECK(PspRenderer_DoorSnapReady() && g_copies == 1 && g_copy_dst[0] == kVramImg0, "A captured into slot 0");
     CHECK(g_cap_bytes == 36, "capture emits %d B (CopyImage 32 + TexSync 4)", g_cap_bytes);
     CHECK(!PspRenderer_DoorSnapHold() && g_ds_state == kDsHaveA, "no hold before the commit");
-    PspRenderer_DoorSnapBegin(dir, -37);
+    PspRenderer_DoorSnapBegin(dir, -37, slide_n);
     CHECK(g_ds_state == kDsWaitB, "begun");
     compose(&good, false);  /* HUD layout unresolved: refused, retried */
     CHECK(g_ds_state == kDsWaitB && g_copies == 1, "B refused without a resolved HUD");
@@ -88,7 +92,7 @@ int main(void) {
     CHECK(g_ds_state == kDsWaitB && g_copies == 1, "B refused from another source");
     compose(&good, true);
     CHECK(g_ds_state == kDsPlay && g_copies == 2 && g_copy_dst[1] == kVramImg0 + kImgBytes && g_ds_step == 0, "B captured into slot 1");
-    const int n = DsSteps(dir);
+    const int n = slide_n;
     int held = 0, last_drawn = (int)g_ds_step;  /* the capture frame draws step 0 */
     while (PspRenderer_DoorSnapHold()) {
       held++;
@@ -124,7 +128,7 @@ int main(void) {
           CHECK(g_ds_top_stage[(l - 1) * 256 + x] == Rgb565(px), "stage row %d x %d", l, x);
         }
     }
-    PspRenderer_DoorSnapBegin(dir, 0);
+    PspRenderer_DoorSnapBegin(dir, 0, DsSteps(dir));
     g_copies = 0; g_scratch_calls = 0;
     for (int l = 1; l <= 33; l++) DsCaptureTop(NULL, l);
     compose(&good, true);
@@ -174,12 +178,29 @@ int main(void) {
   /* B never valid */
   PspRenderer_DoorSnapArm(dir_for_arm);
   compose(&good, true);
-  PspRenderer_DoorSnapBegin(0, 0);
+  PspRenderer_DoorSnapBegin(0, 0, 0);
   frames = 0;
   while (PspRenderer_DoorSnapHold() && frames < 50) frames++;
   CHECK(frames == kDsMaxWaitB, "waiting for B gives up after %d frames (%d)", kDsMaxWaitB, frames);
   restored("B timeout");
-  /* GE inactive / resources missing / already running */
+  /* Begin without a length (0) slides the original length */
+  for (unsigned dir = 0; dir < 4; dir++) {
+    PspRenderer_DoorSnapArm(dir);
+    compose(&good, true);
+    PspRenderer_DoorSnapBegin(dir, 0, 0);
+    compose(&good, true);
+    int held = 0;
+    while (PspRenderer_DoorSnapHold() && held < 1000) held++;
+    CHECK(held == DsSteps(dir), "dir %u: default slide %d frames, want %d", dir, held, DsSteps(dir));
+    restored("default length");
+  }
+  /* GE inactive / resources missing / already running: nothing arms, so the game must not hide Samus either */
+  g_ge_active = false;
+  CHECK(!PspRenderer_DoorSnapCanArm(), "no GE: Samus stays");
+  g_ge_active = true;
+  g_ds_ok = false;
+  CHECK(!PspRenderer_DoorSnapCanArm(), "no resources: Samus stays");
+  g_ds_ok = true;
   g_ge_active = false;
   PspRenderer_DoorSnapArm(dir_for_arm);
   CHECK(g_ds_state == kDsIdle && g_img_ok, "no arm without the GE path");
@@ -208,7 +229,7 @@ int main(void) {
   g_mock_used = 0; g_mock_bound = 1000;
   PspRenderer_DoorSnapArm(dir_for_arm);
   compose(&good, true);
-  PspRenderer_DoorSnapBegin(2, 0);
+  PspRenderer_DoorSnapBegin(2, 0, 0);
   g_mock_used = (uint32_t)kListBytes; g_copies = 0;  /* the list fills up while waiting for B */
   compose(&good, true);
   CHECK(g_ds_state == kDsIdle && g_copies == 0 && g_img_ok && !PspRenderer_DoorSnapHold(), "WaitB dropped when the list is full");
@@ -219,7 +240,7 @@ int main(void) {
   DoorSnapRelease();
   restored("release");
   /* Begin without a snapshot does nothing */
-  PspRenderer_DoorSnapBegin(1, 5);
+  PspRenderer_DoorSnapBegin(1, 5, 0);
   CHECK(g_ds_state == kDsIdle, "begin without snapshot");
   printf("%s\n", fails ? "FAILED" : "OK");
   return fails != 0;

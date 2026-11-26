@@ -26,8 +26,8 @@ static inline int DsSteps(unsigned dir) {
  * The game keeps rem = camera - destination across the door: -align before the first step, then
  * rem = DoorPerpRemaining(rem, i, n) in step i. The new image is displaced by destination - camera = -rem; the old image
  * follows the camera from where it started: -(camera - start) = -(rem - (-align)) = -align - rem. */
-static inline void DsOffsets(unsigned dir, int step, int align, int out[4]) {
-  const int n = DsSteps(dir), total = (dir & 2) ? kDsTotalV : kDsTotalH;
+static inline void DsOffsetsN(unsigned dir, int n, int step, int align, int out[4]) {
+  const int total = (dir & 2) ? kDsTotalV : kDsTotalH;
   if (step < 0)
     step = 0;
   if (step > n)
@@ -44,6 +44,26 @@ static inline void DsOffsets(unsigned dir, int step, int align, int out[4]) {
   } else {
     out[0] = om; out[1] = op; out[2] = nm; out[3] = np;
   }
+}
+
+static inline void DsOffsets(unsigned dir, int step, int align, int out[4]) {
+  DsOffsetsN(dir, DsSteps(dir), step, align, out);
+}
+
+/* The slide's length follows Samus's momentum as she enters the door, so the room moves like she does rather than like an inserted
+ * animation: the quadratic ease (DoorEaseCum) accelerates and brakes harder over fewer steps when she is fast, softer over more
+ * when she is slow. speed_q8 = her speed along the door's axis in 1/256 px per frame (|x base + run speed| for a horizontal door,
+ * |y speed| for a vertical one). Linear between kDsSpeedLo (slowest, kDsStepsXMax steps) and kDsSpeedHi (fastest, kDsStepsXMin);
+ * the original length (64 / 56) falls in the middle for an ordinary run (H) / jump (V). The slide always spans the same 256 / 224 px. */
+enum { kDsSpeedLo = 256, kDsSpeedHiH = 1024, kDsSpeedHiV = 1536,
+       kDsStepsHMin = 48, kDsStepsHMax = 80, kDsStepsVMin = 42, kDsStepsVMax = 70 };
+
+static inline int DsStepsForSpeed(unsigned dir, int speed_q8) {
+  const int hi = (dir & 2) ? kDsSpeedHiV : kDsSpeedHiH;
+  const int nmin = (dir & 2) ? kDsStepsVMin : kDsStepsHMin, nmax = (dir & 2) ? kDsStepsVMax : kDsStepsHMax;
+  const int span = hi - kDsSpeedLo;
+  int v = speed_q8 < kDsSpeedLo ? kDsSpeedLo : speed_q8 > hi ? hi : speed_q8;
+  return nmax - ((nmax - nmin) * (v - kDsSpeedLo) + span / 2) / span;
 }
 
 /* Source pixels -> viewport pixels (360x270 viewport from 256x192 source rows = 45/32), rounded away from zero. */
@@ -63,6 +83,18 @@ static inline int DsWalkSteps(unsigned dir, int distance) {
   int n = (distance + kDsWalkSpeed - 1) / kDsWalkSpeed;
   if (distance < 0)
     n = 0;
+  if (n < kDsWalkMin)
+    n = kDsWalkMin;
+  return n > DsSteps(dir) ? DsSteps(dir) : n;
+}
+
+/* The walk continues at her entry speed (clamped to a sensible walking range) instead of a fixed pace, so she carries on through
+ * the door as she came in. speed_q8 as above. Same limits as DsWalkSteps. */
+enum { kDsWalkSpeedLo = 256, kDsWalkSpeedHi = 768 };
+
+static inline int DsWalkStepsSpeed(unsigned dir, int distance, int speed_q8) {
+  const int v = speed_q8 < kDsWalkSpeedLo ? kDsWalkSpeedLo : speed_q8 > kDsWalkSpeedHi ? kDsWalkSpeedHi : speed_q8;
+  int n = distance > 0 ? (distance * 256 + v - 1) / v : 0;
   if (n < kDsWalkMin)
     n = kDsWalkMin;
   return n > DsSteps(dir) ? DsSteps(dir) : n;

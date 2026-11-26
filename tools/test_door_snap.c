@@ -67,8 +67,8 @@ static void check_shared_code(void) {
 }
 
 /* One door: the game's scroll, replayed, against the snapshot offsets. */
-static void check_door(unsigned dir, int align, uint16_t dest_main, uint16_t dest_perp) {
-  const int n = DsSteps(dir), total = (dir & 2) ? kDsTotalV : kDsTotalH;
+static void check_door(unsigned dir, int n, int align, uint16_t dest_main, uint16_t dest_perp) {
+  const int total = (dir & 2) ? kDsTotalV : kDsTotalH;
   const int sign = (dir & 1) ? -1 : 1;  /* camera moves +x / +y for right / down doors, -x / -y for left / up */
   /* DoorTransitionScrollingSetup: new camera on the destination, the axis across the door offset by -align; the main axis
    * starts `total` before the end of its travel */
@@ -83,7 +83,12 @@ static void check_door(unsigned dir, int align, uint16_t dest_main, uint16_t des
       REF_PerpStep(&perp, dest_perp, i, n);
     }
     int o[4];
-    DsOffsets(dir, k, align, o);
+    DsOffsetsN(dir, n, k, align, o);
+    if (n == DsSteps(dir)) {  /* the default length: DsOffsets is DsOffsetsN with it */
+      int d[4];
+      DsOffsets(dir, k, align, d);
+      CHECK(d[0] == o[0] && d[1] == o[1] && d[2] == o[2] && d[3] == o[3], "DsOffsets != DsOffsetsN dir %u k %d", dir, k);
+    }
     const int new_main = (int16_t)(uint16_t)(dest_main - main), new_perp = (int16_t)(uint16_t)(dest_perp - perp);
     const int old_main = -(int16_t)(uint16_t)(main - main0), old_perp = -(int16_t)(uint16_t)(perp - perp0);
     const int onm = (dir & 2) ? o[3] : o[2], onp = (dir & 2) ? o[2] : o[3];
@@ -113,15 +118,52 @@ int main(void) {
   for (unsigned dir = 0; dir < 4; dir++)
     for (int align = -256; align <= 256; align++)
       for (unsigned a = 0; a < sizeof dests / sizeof dests[0]; a++) {
-        check_door(dir, align, dests[a], dests[(a * 5 + 3) % (sizeof dests / sizeof dests[0])]);
+        check_door(dir, DsSteps(dir), align, dests[a], dests[(a * 5 + 3) % (sizeof dests / sizeof dests[0])]);
         doors++;
       }
   /* the alignments the game can actually produce (DoorAlignDistance of any camera position) */
   for (unsigned dir = 0; dir < 4; dir++)
     for (int pos = 0; pos < 0x10000; pos += 7) {
-      check_door(dir, REF_DoorAlignDistance((uint16_t)pos), (uint16_t)(pos * 3), (uint16_t)(pos ^ 0x5a5a));
+      check_door(dir, DsSteps(dir), REF_DoorAlignDistance((uint16_t)pos), (uint16_t)(pos * 3), (uint16_t)(pos ^ 0x5a5a));
       doors++;
     }
+  /* momentum-scaled slide lengths: every length the speed mapping can give lands exactly, like the default one */
+  {
+    static const int lens[] = {42, 45, 48, 56, 64, 70, 80};
+    long varied = 0;
+    for (unsigned dir = 0; dir < 4; dir++)
+      for (unsigned li = 0; li < sizeof lens / sizeof lens[0]; li++)
+        for (int align = -256; align <= 256; align += (align > -8 && align < 8) ? 1 : 37)
+          for (unsigned a = 0; a < sizeof dests / sizeof dests[0]; a += 2) {
+            check_door(dir, lens[li], align, dests[a], dests[(a * 5 + 3) % (sizeof dests / sizeof dests[0])]);
+            varied++;
+          }
+    printf("variable length: %ld door replays\n", varied);
+    for (unsigned dir = 0; dir < 4; dir++) {
+      const int nmin = (dir & 2) ? kDsStepsVMin : kDsStepsHMin, nmax = (dir & 2) ? kDsStepsVMax : kDsStepsHMax;
+      int prev = 1 << 30;
+      for (int v = 0; v <= 0x4000; v += 8) {
+        const int n = DsStepsForSpeed(dir, v);
+        CHECK(n >= nmin && n <= nmax, "steps %d out of [%d,%d] dir %u v %d", n, nmin, nmax, dir, v);
+        CHECK(n <= prev, "faster Samus, longer slide: dir %u v %d", dir, v);  /* never longer for a higher speed */
+        prev = n;
+      }
+      CHECK(DsStepsForSpeed(dir, 0) == nmax && DsStepsForSpeed(dir, kDsSpeedLo) == nmax, "slowest dir %u", dir);
+      CHECK(DsStepsForSpeed(dir, (dir & 2) ? kDsSpeedHiV : kDsSpeedHiH) == nmin && DsStepsForSpeed(dir, 0x4000) == nmin, "fastest dir %u", dir);
+    }
+    /* an ordinary run / jump gets about the original length */
+    CHECK(abs(DsStepsForSpeed(0, 640) - kDsStepsH) <= 1 && abs(DsStepsForSpeed(2, 896) - kDsStepsV) <= 1, "ordinary speeds ~ original length: %d %d", DsStepsForSpeed(0, 640), DsStepsForSpeed(2, 896));
+    /* walk-in pace */
+    for (unsigned dir = 0; dir < 4; dir++)
+      for (int dist = 0; dist <= 400; dist++)
+        for (int v = 0; v <= 1200; v += 16) {
+          const int n = DsWalkStepsSpeed(dir, dist, v), cv = v < kDsWalkSpeedLo ? kDsWalkSpeedLo : v > kDsWalkSpeedHi ? kDsWalkSpeedHi : v;
+          CHECK(n >= kDsWalkMin && n <= DsSteps(dir), "walk n %d dir %u dist %d v %d", n, dir, dist, v);
+          CHECK(n * cv >= dist * 256 || n == DsSteps(dir), "walk faster than her pace: n %d dist %d v %d", n, dist, v);
+          CHECK(n == kDsWalkMin || n == DsSteps(dir) || (n - 1) * cv < dist * 256, "walk longer than needed: n %d dist %d v %d", n, dist, v);
+        }
+    CHECK(DsWalkStepsSpeed(0, 63, kDsWalkSpeed * 256) == DsWalkSteps(0, 63) && DsWalkStepsSpeed(2, 96, kDsWalkSpeed * 256) == DsWalkSteps(2, 96), "the old pace is the 2 px/frame special case");
+  }
   /* Samus's walk-in: exact start and end, monotonic toward the end, never past it, steady speed, short way round a wrap */
   long walks = 0;
   for (unsigned dir = 0; dir < 4; dir++) {

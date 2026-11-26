@@ -2304,7 +2304,7 @@ bool PspRenderer_DoorTransitionArmed(void) {
 enum { kDsIdle, kDsArmed, kDsHaveA, kDsWaitB, kDsPlay };
 enum { kDsMaxWaitB = 8, kDsMaxHaveA = 4 };
 CASSERT(kImgBytes >= 256 * 256 * 2);  /* a snapshot is described to the GE as 256x256 RGB565 and must fit its slot */
-static uint8_t g_ds_state, g_ds_frames, g_ds_dir;
+static uint8_t g_ds_state, g_ds_frames, g_ds_dir, g_ds_n;  /* g_ds_n: slide length in steps (DsStepsForSpeed) */
 static uint16_t g_ds_step;
 static int16_t g_ds_align;
 static bool g_ds_ok, g_ds_saved_img_ok, g_ds_saved_imgh_ok, g_ds_saved_skip_ok;
@@ -2374,16 +2374,24 @@ static void DoorSnapRelease(void) {
 }
 #endif
 
+bool PspRenderer_DoorSnapCanArm(void) {
+#if SM_PSP_DOOR_SNAP
+#if SM_PSP_DOOR_GE
+  if (g_door_reserved)
+    return false;
+#endif
+  return g_ds_ok && g_ds_state == kDsIdle && g_ge_active;
+#else
+  return false;
+#endif
+}
+
 void PspRenderer_DoorSnapArm(unsigned direction) {
 #if SM_PSP_DOOR_SNAP
-  if (!g_ds_ok || g_ds_state != kDsIdle || !g_ge_active)
+  if (!PspRenderer_DoorSnapCanArm())
     return;
   g_ds_arm_dir = (uint8_t)(direction & 3);
   g_ds_top[0] = g_ds_top[1] = g_ds_top_ready = false;
-#if SM_PSP_DOOR_GE
-  if (g_door_reserved)
-    return;
-#endif
   g_ds_saved_img_ok = g_img_ok;
   g_ds_saved_imgh_ok = g_imgh_ok;
   g_ds_saved_skip_ok = g_img_skip_ok;
@@ -2411,17 +2419,18 @@ void PspRenderer_DoorSnapAbort(void) {
 #endif
 }
 
-void PspRenderer_DoorSnapBegin(unsigned direction, int align_px) {
+void PspRenderer_DoorSnapBegin(unsigned direction, int align_px, int steps) {
 #if SM_PSP_DOOR_SNAP
   if (g_ds_state != kDsHaveA)
     return;
   g_ds_dir = (uint8_t)(direction & 3);
+  g_ds_n = (uint8_t)(steps < 1 ? DsSteps(g_ds_dir) : steps > 255 ? 255 : steps);
   g_ds_align = (int16_t)(align_px < -256 ? -256 : align_px > 256 ? 256 : align_px);
   g_ds_step = 0;
   g_ds_frames = 0;
   g_ds_state = kDsWaitB;
 #else
-  (void)direction, (void)align_px;
+  (void)direction, (void)align_px, (void)steps;
 #endif
 }
 
@@ -2445,7 +2454,7 @@ bool PspRenderer_DoorSnapHold(void) {
   case kDsPlay:
     /* Frame N+k draws step k (the capture frame drew step 0), so steps 0..N are all shown and the last one is the exact
      * destination; the frame after it is the first live one. */
-    if (g_ds_step >= (unsigned)DsSteps(g_ds_dir)) {
+    if (g_ds_step >= (unsigned)g_ds_n) {
       DoorSnapRelease();
       return false;
     }
@@ -5265,7 +5274,7 @@ static void DsImage(const void *tex, int dx, int dy, int rx0, int ry0, int rx1, 
 static void DrawDoorSnap(const ComposeSrc *s) {
   const int step = g_ds_state == kDsPlay ? (int)g_ds_step : 0;  /* until the new snapshot exists the old one stays put */
   int o[4];
-  DsOffsets(g_ds_dir, step, g_ds_align, o);
+  DsOffsetsN(g_ds_dir, g_ds_n, step, g_ds_align, o);
   const int vx0 = kCompX, vx1 = kCompX + kCompW, vy0 = kCompY, vy1 = kCompY + kCompH;
   const int oldx = kCompX + DsDispPx(o[0]), oldy = kCompY + DsDispPx(o[1]);
   const int newx = kCompX + DsDispPx(o[2]), newy = kCompY + DsDispPx(o[3]);

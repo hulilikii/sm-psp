@@ -60,7 +60,8 @@ bool PspRenderer_DoorTransitionArmed(void);                                   //
 void PspRenderer_DoorSnapArm(unsigned direction);                                  // door hit (game_state 9, normal door): snapshot this frame as the old room
 bool PspRenderer_DoorSnapReady(void);                                // the old snapshot exists: the game may load the room instantly
 void PspRenderer_DoorSnapAbort(void);                                // no snapshot / no instant load: drop everything, the game's own transition runs
-void PspRenderer_DoorSnapBegin(unsigned direction, int align_px);    // room loaded: direction = door_direction & 3, align_px = old camera's distance to a 256 boundary across the door
+bool PspRenderer_DoorSnapCanArm(void);                               // DoorSnapArm would take the snapshot this frame (the game then keeps Samus out of it)
+void PspRenderer_DoorSnapBegin(unsigned direction, int align_px, int steps);  // room loaded: direction = door_direction & 3, align_px = old camera's distance to a 256 boundary across the door, steps = slide length (DsStepsForSpeed)
 bool PspRenderer_DoorSnapHold(void);                                 // once per game frame: true = hold the game logic (the slide is running)
 
 enum PspButtonIcon {

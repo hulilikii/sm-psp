@@ -864,6 +864,14 @@ CoroutineRet GameState_28_Unused(void) {  // 0x828B3F
   return kCoroutineNone;
 }
 
+bool g_door_snap_hide_samus;
+
+#if SM_PSP_DOOR_SNAP
+static bool DoorSnapHitNormalDoor(void) {  // Samus hit a normal door this frame (elevator doors keep their own transition)
+  return game_state == kGameState_9_HitDoorBlock && !elevator_flags && (get_DoorDef(door_def_ptr)->door_bitflags & 0x80) == 0;
+}
+#endif
+
 CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
   COROUTINE_BEGIN(coroutine_state_1, 0);
   DetermineWhichEnemiesToProcess();
@@ -893,7 +901,15 @@ CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
     int debug_scrolling_enabled = 0;
     if (debug_scrolling_enabled)
       DebugScrollPosSaveLoad();
+#if SM_PSP_DOOR_SNAP
+    // The frame that becomes the outgoing room's snapshot is drawn without Samus: she is in the doorway, and she is not part of
+    // the picture the GE slides (she walks in once the slide is over).
+    g_door_snap_hide_samus = DoorSnapHitNormalDoor() && PspRenderer_DoorSnapCanArm();
+#endif
     DrawSamusEnemiesAndProjectiles();
+#if SM_PSP_DOOR_SNAP
+    g_door_snap_hide_samus = false;
+#endif
     QueueEnemyBG2TilemapTransfers();
   }
   HandleHudTilemap();
@@ -905,7 +921,7 @@ CoroutineRet GameState_8_MainGameplay(void) {  // 0x828B44
 #if SM_PSP_DOOR_SNAP
   // Samus hit a normal door this frame (elevator doors keep their own transition): this frame, now fully built, is the
   // outgoing room's last picture. The renderer snapshots it when the frame is composed.
-  if (game_state == kGameState_9_HitDoorBlock && !elevator_flags && (get_DoorDef(door_def_ptr)->door_bitflags & 0x80) == 0)
+  if (DoorSnapHitNormalDoor())
     PspRenderer_DoorSnapArm(get_DoorDef(door_def_ptr)->door_orientation & 3);  // the direction decides which room is the lower one
 #endif
   COROUTINE_END(0);
@@ -3849,6 +3865,17 @@ static void DoorSnapWalkEnd(void) {  // back to the logical (end) position
   samus_prev_y_pos = g_walk_epy;
 }
 
+// Samus's speed along the door's axis as the hit frame left it, in 1/256 px per frame (0 = unknown). The slide's length and her
+// walk-in pace follow it (DsStepsForSpeed, DsWalkStepsSpeed), so the room moves with her instead of as a fixed animation.
+static int DoorSnapEntrySpeed(unsigned dir) {
+  uint32 v;
+  if (dir & 2)
+    v = ((uint32)samus_y_speed << 8) + (samus_y_subspeed >> 8);
+  else
+    v = (((uint32)samus_x_base_speed + samus_x_extra_run_speed) << 8) + (samus_x_base_subspeed >> 8) + (samus_x_extra_run_subspeed >> 8);
+  return v > 0x4000 ? 0x4000 : (int)v;
+}
+
 static int DoorSnapAlign(uint16 pos) {  // sm_80.c DoorAlignDistance
   const int low = pos & 0xFF;
   return (low & 0x80) ? 256 - low : -low;
@@ -3856,10 +3883,13 @@ static int DoorSnapAlign(uint16 pos) {  // sm_80.c DoorAlignDistance
 
 static CoroutineRet DoorSnap_Run(void) {
   const uint16 old_x = layer1_x_pos, old_y = layer1_y_pos;
+  // Samus has not moved since the hit frame and the door states below do not touch her speed yet: take her momentum now
+  const int entry_x_speed = DoorSnapEntrySpeed(0), entry_y_speed = DoorSnapEntrySpeed(2);
   g_door_instant = true;
   DoorTransitionFunction_HandleElevator();  // game_state 9 -> 11, GameState_10: target palettes, sounds
   DoorTransitionFunction_LoadDoorHeaderEtc();
   const unsigned dir = door_direction & 3;
+  const int entry_speed = (dir & 2) ? entry_y_speed : entry_x_speed;
   const int align = DoorSnapAlign((dir & 2) ? old_x : old_y);  // across the door
   DoorTransitionFunction_ScrollScreenToAlignment();
   DoorTransitionFunction_FixDoorsMovingUp();
@@ -3889,13 +3919,15 @@ static CoroutineRet DoorSnap_Run(void) {
     // she enters through the doorway (the destination door cap) instead of a screen beyond it; see DsWalkStartAxis
     const DoorDef *dd = get_DoorDef(door_def_ptr);
     if (dir < 2)
-      g_walk_sx = DsWalkStartAxis(dir, (uint16)(dd->x_pos_plm * 16), g_walk_sx, g_walk_ex);
+      g_walk_sx = DsWalkStartAxis(dir, (uint16)(dd->x_pos_plm * 16 + 8), g_walk_sx, g_walk_ex);  // the middle of the door shell, whichever way she walks
     else
       g_walk_sy = DsWalkStartAxis(dir, (uint16)(dd->y_pos_plm * 16 + (dir == 2 ? 0x10 : -0x38)), g_walk_sy, g_walk_ey);
   }
   {
     const int dx = (int16)(g_walk_ex - g_walk_sx), dy = (int16)(g_walk_ey - g_walk_sy);
-    g_walk_n = (uint8)DsWalkSteps(dir, (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy) ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy));
+    const int dist = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy) ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+    // she walks on at the pace she came in (the original pace if her speed was not captured)
+    g_walk_n = (uint8)DsWalkStepsSpeed(dir, dist, entry_speed > 0 ? entry_speed : kDsWalkSpeed * 256);
   }
   g_walk_k = 0;
   memcpy(palette_buffer, target_palettes, 0x200);
@@ -3909,10 +3941,10 @@ static CoroutineRet DoorSnap_Run(void) {
   DetermineWhichEnemiesToProcess();
   EnemyMain();
   EprojRunAll();
-  DoorSnapWalkPose(0);  // the new room's snapshot is taken from this frame: Samus has not entered yet
+  // The new room's snapshot is taken from this frame: the room as it is, without Samus (she walks in when the slide is over).
+  g_door_snap_hide_samus = true;
   DrawSamusEnemiesAndProjectiles();
-  EnsureSamusDrawnEachFrame();
-  DoorSnapWalkEnd();
+  g_door_snap_hide_samus = false;
   QueueEnemyBG2TilemapTransfers();
   if (timer_status)
     DrawTimer();
@@ -3921,7 +3953,7 @@ static CoroutineRet DoorSnap_Run(void) {
   PspRenderer_EndDoorTransition();
   // game_state stays 11 and door_transition_function is DoorTransition_FadeInScreenAndFinish (set above): once the slide
   // is over, the fade in's frames walk Samus in (DoorTransition_FadeInScreenAndFinish) and then end the transition.
-  PspRenderer_DoorSnapBegin(dir, align);
+  PspRenderer_DoorSnapBegin(dir, align, entry_speed > 0 ? DsStepsForSpeed(dir, entry_speed) : DsSteps(dir));
   return kCoroutineNone;
 }
 #endif

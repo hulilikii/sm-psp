@@ -2,6 +2,9 @@
 
 void RunOneFrameOfGame(void);
 
+// PSP door snapshots (sm_82.c): while set, DrawSamusAndProjectiles leaves Samus out of the frame being drawn (always false otherwise)
+extern bool g_door_snap_hide_samus;
+
 // Bank 80
 uint16 CheckEventHappened(uint16 a);
 uint16 NextRandom(void);

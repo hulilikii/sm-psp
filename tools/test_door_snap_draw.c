@@ -22,7 +22,8 @@ enum { GU_PSM_5650 = 0, GU_PSM_8888 = 3, GU_FALSE = 0 };
 typedef struct TileVert { float u, v; int16_t x, y, z; } TileVert;
 typedef struct ComposeSrc { const void *ptr; int psm, w, h, stride; } ComposeSrc;
 static float g_uvh[2] = {0.5f, 0.5f};
-static uint8_t g_ds_state, g_ds_dir;
+static uint8_t g_ds_state, g_ds_dir, g_ds_n;
+static int g_test_n;  /* 0: the default slide length of the direction */
 enum { kDsTopRows = 32, kDsTopRow0 = 192 };
 static bool g_ds_top[2];
 static uint16_t g_ds_step;
@@ -72,6 +73,7 @@ static void run(unsigned state, unsigned dir, int step, int align, int *tex_seen
   g_mem_n = 0;
   g_ds_state = (uint8_t)state;
   g_ds_dir = (uint8_t)dir;
+  g_ds_n = (uint8_t)(g_test_n ? g_test_n : DsSteps(dir));
   g_ds_step = (uint16_t)step;
   g_ds_align = (int16_t)align;
   g_ds_top[0] = g_with_top && dir == 3;  /* the lower room of a vertical door: up door = old room, down door = new room */
@@ -139,6 +141,21 @@ int main(void) {
       }
     }
   }
+  /* momentum-scaled slide lengths: the quads still tile the viewport exactly once at every step of every length */
+  {
+    static const int lens[] = {42, 48, 56, 64, 70, 80};
+    for (g_with_top = 0; g_with_top < 2; g_with_top++)
+      for (unsigned dir = 0; dir < 4; dir++)
+        for (unsigned li = 0; li < sizeof lens / sizeof lens[0]; li++) {
+          g_test_n = lens[li];
+          for (int step = 0; step <= g_test_n; step++)
+            for (int align = -256; align <= 256; align += 83) {
+              run(kDsPlay, dir, step, align, seen);
+              runs++;
+            }
+        }
+    g_test_n = 0;
+  }
   /* the gap between the leading image and the lower one is the lower room's rows under the HUD: 45 viewport rows of the band,
    * continuous with the image (the band's last row meets row 0), nothing replicated in between (at most the rounding row) */
   g_with_top = 1;
@@ -172,7 +189,7 @@ int main(void) {
       for (int step = 0; step <= DsSteps(dir); step++)
         for (int st = kDsWaitB; st <= kDsPlay; st++) {
           g_ds_top[0] = g_with_top && dir == 3; g_ds_top[1] = g_with_top && dir == 2;
-          g_ds_state = (uint8_t)st; g_ds_dir = (uint8_t)dir; g_ds_step = (uint16_t)step; g_ds_align = (int16_t)align;
+          g_ds_state = (uint8_t)st; g_ds_dir = (uint8_t)dir; g_ds_n = (uint8_t)DsSteps(dir); g_ds_step = (uint16_t)step; g_ds_align = (int16_t)align;
           g_nrect = 0; g_mem_n = 0; g_bytes = g_calls = 0;
           static const int tag;
           const ComposeSrc s = {&tag, GU_PSM_8888, 512, 256, 512};

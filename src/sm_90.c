@@ -6345,7 +6345,13 @@ void Samus_Func10(void) {  // 0x90EB02
 }
 
 void DrawSamusAndProjectiles(void) {  // 0x90EB35
+  const uint16 oam_mark = oam_next_ptr;
   SamusDrawSprites();
+  if (g_door_snap_hide_samus) {  // PSP door snapshots: the captured frame has no Samus in it; her logic above ran as usual
+    for (int i = oam_mark >> 2; i < (oam_next_ptr >> 2) && i < 0x80; i++)
+      oam_ext[i >> 3] &= (uint16)~(3 << (2 * (i & 7)));  // the size / x bits are OR-ed in: leave none behind
+    oam_next_ptr = oam_mark;
+  }
   DrawPlayerExplosions2();
   Samus_JumpCheck();
   Samus_ShootCheck();
