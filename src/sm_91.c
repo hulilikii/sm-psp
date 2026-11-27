@@ -65,6 +65,10 @@ void Samus_UpdateRunButtonMode(void) {
     return;
   }
 
+// Preserve the toggle during the pause resume fade.
+  if (game_state == 18)
+    return;
+
   if (game_state != 8) {
     Samus_SetRunButtonMode(kRunButtonMode_Off);
     run_button_mode_latched = 0;
