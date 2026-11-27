@@ -1354,6 +1354,7 @@ void InitializeHud(void) {  // 0x809A79
     AddSuperMissilesToHudTilemap();
   if (samus_max_power_bombs)
     AddPowerBombsToHudTilemap();
+  g_hud_refill_preview = 0;
   samus_prev_health = 0;
   samus_prev_missiles = 0;
   samus_prev_super_missiles = 0;
@@ -1404,7 +1405,21 @@ static uint16 UpdateHudCounterScaled(uint16 previous, uint16 current, uint16 fra
   return previous;
 }
 
+uint8 g_hud_refill_preview;
+
 void HandleHudTilemap(void) {  // 0x809B44
+  // While connected to a refill station the counters show the values the station is about to give (display only).
+  uint16 hud_health = samus_health;
+  uint16 hud_missiles = samus_missiles;
+  uint16 hud_super_missiles = samus_super_missiles;
+  uint16 hud_power_bombs = samus_power_bombs;
+  if (g_hud_refill_preview == 1) {
+    hud_health = samus_max_health;
+  } else if (g_hud_refill_preview == 2) {
+    hud_missiles = samus_max_missiles;
+    hud_super_missiles = samus_max_super_missiles;
+    hud_power_bombs = samus_max_power_bombs;
+  }
   if (reserve_health_mode == 1) {
     const unaligned_uint16 *v1 = (const unaligned_uint16 *)RomPtr_80(addr_kHudTilemaps_AutoReserve);
     if (!samus_reserve_health)
@@ -1416,9 +1431,9 @@ void HandleHudTilemap(void) {  // 0x809B44
     hud_tilemap[72] = v1[4];
     hud_tilemap[73] = v1[5];
   }
-  if (samus_health != samus_prev_health) {
+  if (hud_health != samus_prev_health) {
     samus_prev_health = UpdateHudCounterScaled(
-        samus_prev_health, samus_health, 0);
+        samus_prev_health, hud_health, 0);
 
     uint16 r20 = SnesDivide(samus_prev_health, 100);
     uint16 r18 = SnesModulus(samus_prev_health, 100);
@@ -1437,22 +1452,22 @@ void HandleHudTilemap(void) {  // 0x809B44
     } while ((int16)(v2 - 28) < 0);
     DrawTwoHudDigits(addrl_kDigitTilesetsHealth, r18, 0x8C);
   }
-  if (samus_max_missiles && samus_missiles != samus_prev_missiles) {
+  if (samus_max_missiles && hud_missiles != samus_prev_missiles) {
     samus_prev_missiles = UpdateHudCounterScaled(
-        samus_prev_missiles, samus_missiles, 3);
+        samus_prev_missiles, hud_missiles, 3);
     DrawThreeHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_missiles, 0x94);
   }
-  if (samus_max_super_missiles && samus_super_missiles != samus_prev_super_missiles) {
+  if (samus_max_super_missiles && hud_super_missiles != samus_prev_super_missiles) {
     samus_prev_super_missiles = UpdateHudCounterScaled(
-        samus_prev_super_missiles, samus_super_missiles, 3);
+        samus_prev_super_missiles, hud_super_missiles, 3);
     if ((joypad_dbg_flags & 0x1F40) != 0)
       DrawThreeHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_super_missiles, 0x9C);
     else
       DrawTwoHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_super_missiles, 0x9C);
   }
-  if (samus_max_power_bombs && samus_power_bombs != samus_prev_power_bombs) {
+  if (samus_max_power_bombs && hud_power_bombs != samus_prev_power_bombs) {
     samus_prev_power_bombs = UpdateHudCounterScaled(
-        samus_prev_power_bombs, samus_power_bombs, 3);
+        samus_prev_power_bombs, hud_power_bombs, 3);
     DrawTwoHudDigits(addrl_kDigitTilesetsWeapon, samus_prev_power_bombs, 0xA2);
   }
   if (hud_item_index != samus_prev_hud_item_index) {

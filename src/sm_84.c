@@ -812,10 +812,8 @@ const uint8 *PlmInstr_ActivateMapStation(const uint8 *plmp, uint16 k) {  // 0x84
   return plmp;
 }
 
-// The station list reaches this instruction only after PlmInstr_GotoIfSamusHealthFull found Samus not full and refilled her,
-// so the box is always shown. The refill is repeated (a no-op unless Samus was hurt during the animation) so health is
-// full whenever the box shows, as in the original.
 const uint8 *PlmInstr_ActivateEnergyStation(const uint8 *plmp, uint16 k) {  // 0x848CAF
+  g_hud_refill_preview = 0;
   samus_health = samus_max_health;
   samus_reserve_health = samus_max_reserve_health;
   DisplayMessageBox(0x15);
@@ -823,8 +821,8 @@ const uint8 *PlmInstr_ActivateEnergyStation(const uint8 *plmp, uint16 k) {  // 0
   return plmp;
 }
 
-// As PlmInstr_ActivateEnergyStation: PlmInstr_GotoIfMissilesFull has already refilled the ammo.
 const uint8 *PlmInstr_ActivateMissileStation(const uint8 *plmp, uint16 k) {  // 0x848CD0
+  g_hud_refill_preview = 0;
   samus_missiles = samus_max_missiles;
   samus_super_missiles = samus_max_super_missiles;
   samus_power_bombs = samus_max_power_bombs;
@@ -1189,29 +1187,19 @@ const uint8 *PlmInstr_Draw0x38FramesOfLeftTreadmill(const uint8 *plmp, uint16 k)
   return plmp;
 }
 
-// Refill happens here, at the start of the refill animation, so the HUD counters (HandleHudTilemap) count up during it
-// instead of after the message box.
 const uint8 *PlmInstr_GotoIfSamusHealthFull(const uint8 *plmp, uint16 k) {  // 0x84AE35
   if (samus_max_health != samus_health ||
-      samus_max_reserve_health != samus_reserve_health) {
-    samus_health = samus_max_health;
-    samus_reserve_health = samus_max_reserve_health;
+      samus_max_reserve_health != samus_reserve_health)
     return plmp + 2;
-  }
   CallSomeSamusCode(1);
   return INSTRB_RETURN_ADDR(GET_WORD(plmp));
 }
 
-// As PlmInstr_GotoIfSamusHealthFull, for missiles, super missiles and power bombs.
 const uint8 *PlmInstr_GotoIfMissilesFull(const uint8 *plmp, uint16 k) {  // 0x84AEBF
   if (samus_max_missiles != samus_missiles ||
       samus_max_super_missiles != samus_super_missiles ||
-      samus_max_power_bombs != samus_power_bombs) {
-    samus_missiles = samus_max_missiles;
-    samus_super_missiles = samus_max_super_missiles;
-    samus_power_bombs = samus_max_power_bombs;
+      samus_max_power_bombs != samus_power_bombs)
     return plmp + 2;
-  }
   CallSomeSamusCode(1);
   return INSTRB_RETURN_ADDR(GET_WORD(plmp));
 }
@@ -1284,6 +1272,12 @@ uint8 ActivateStationIfSamusCannonLinedUp(uint16 a, uint16 j) {  // 0x84B146
     int v3 = v2 >> 1;
     plm_instr_list_ptrs[v3] = plm_instruction_list_link_reg[v3];
     plm_instruction_timer[v3] = 1;
+    // Samus has connected: let the HUD counters count up during the refill animation. Display only; the real values are
+    // set by the activate instruction at the original point, so the PLM lists and their health/ammo polls are unchanged.
+    if (plm_header_ptr[v3] == 0xB6DF)
+      g_hud_refill_preview = 1;
+    else if (plm_header_ptr[v3] == 0xB6EB)
+      g_hud_refill_preview = 2;
     CallSomeSamusCode(6);
     return 1;
   }

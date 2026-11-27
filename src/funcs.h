@@ -5,6 +5,10 @@ void RunOneFrameOfGame(void);
 // PSP door snapshots (sm_82.c): while set, DrawSamusAndProjectiles leaves Samus out of the frame being drawn (always false otherwise)
 extern bool g_door_snap_hide_samus;
 
+// Refill-station HUD preview (sm_80.c): display-only. 0 = off, 1 = energy station, 2 = missile station. Set when Samus connects
+// (sm_84.c), cleared when the station activates. Game variables are untouched until the original activation point.
+extern uint8 g_hud_refill_preview;
+
 // Bank 80
 uint16 CheckEventHappened(uint16 a);
 uint16 NextRandom(void);
