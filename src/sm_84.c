@@ -1333,6 +1333,37 @@ uint8 PlmSetup_BTS_Brinstar_0x81_Ceilingplant(uint16 j) {  // 0x84B113
   return 0;
 }
 
+// Frames from the start of PLM instruction list [ptr] until it executes the instruction [activate]: 1 (initial timer) plus the
+// timers of the draw entries before it. Returns 0 (unknown) if the list holds anything else, so the caller falls back.
+static uint16 StationFramesUntilActivate(uint16 ptr, uint16 activate) {
+  const uint8 *base = RomBankBase(0x84);
+  uint32 frames = 1;
+  for (int n = 0; n < 32; n++) {
+    uint16 w = GET_WORD(base + ptr);
+    if (!(w & 0x8000)) {  // draw entry: timer, draw instruction pointer
+      frames += w;
+      ptr += 4;
+      continue;
+    }
+    if (w == activate)
+      return frames < 0xFFFF ? frames : 0;
+    ptr += 2;
+    switch (w) {
+    case 0x86C1: case 0x8A24: case 0xAE35: case 0xAEBF:  // pre-instruction, link, health/ammo full checks: word argument
+      ptr += 2;
+      break;
+    case 0x86CA:  // clear pre-instruction: no argument
+      break;
+    case 0x8C07: case 0x8C10: case 0x8C19: case 0x8C46: case 0x8C7C:  // queue sound: byte argument
+      ptr += 1;
+      break;
+    default:  // sleep, goto, call, return, delete, ...: the animation length can't be read linearly
+      return 0;
+    }
+  }
+  return 0;
+}
+
 uint8 ActivateStationIfSamusCannonLinedUp(uint16 a, uint16 j) {  // 0x84B146
   uint16 v2 = 78;
   while (a != plm_block_indices[v2 >> 1]) {
@@ -1345,12 +1376,13 @@ uint8 ActivateStationIfSamusCannonLinedUp(uint16 a, uint16 j) {  // 0x84B146
     int v3 = v2 >> 1;
     plm_instr_list_ptrs[v3] = plm_instruction_list_link_reg[v3];
     plm_instruction_timer[v3] = 1;
-    // Samus has connected: let the HUD counters count up during the refill animation. Display only; the real values are
-    // set by the activate instruction at the original point, so the PLM lists and their health/ammo polls are unchanged.
+    // Samus has connected: let the HUD counters count up during the refill animation, finishing when the station
+    // activates. Display only; the real values are set by the activate instruction at the original point, so the PLM lists
+    // and their health/ammo polls are unchanged.
     if (plm_header_ptr[v3] == 0xB6DF)
-      g_hud_refill_preview = 1;
+      HudRefillPreviewStart(1, StationFramesUntilActivate(plm_instr_list_ptrs[v3], fnPlmInstr_ActivateEnergyStation & 0xFFFF));
     else if (plm_header_ptr[v3] == 0xB6EB)
-      g_hud_refill_preview = 2;
+      HudRefillPreviewStart(2, StationFramesUntilActivate(plm_instr_list_ptrs[v3], fnPlmInstr_ActivateMissileStation & 0xFFFF));
     CallSomeSamusCode(6);
     return 1;
   }
