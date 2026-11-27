@@ -117,13 +117,11 @@
 #endif
 
 /* SM_PSP_DOOR_SNAP=1 (PSP_DOOR_SNAP in the Makefile): instant door load, then the GE slides two frozen snapshots of the old and
- * the new room (see "Instant door transition" below). Needs the synchronous present: the snapshots are written into the layer
- * image slots, which the CPU rewrites after the transition, and the compose list is unaudited for the extra quads. */
+ * the new room (see "Instant door transition" below). Works with PSP_ASYNC 0, 1 and 2: the snapshots are copied and drawn by the
+ * compose list only, the CPU touches the layer image slots they live in only after GeWait() (EndDraw), and the snapshot code is
+ * part of the compose-list bound (ComposeBytesBound) like the rest of the composition. */
 #ifndef SM_PSP_DOOR_SNAP
 #define SM_PSP_DOOR_SNAP 0
-#endif
-#if SM_PSP_DOOR_SNAP && SM_PSP_ASYNC
-#error "PSP_DOOR_SNAP=1 needs PSP_ASYNC=0"
 #endif
 #if SM_PSP_DOOR_SNAP
 #include "src/psp/psp_door_snap.h"
@@ -342,10 +340,10 @@ static uint8_t g_mosaic_size = 1;
 static LineSnap g_lines[kMaxLines];
 static int g_line_count;
 static uint16_t g_frame_reasons;
+extern uint8_t g_ram[0x20000];  /* sm_rtl.c; read bytewise (no unaligned loads) */
+static inline unsigned GameRam16(unsigned a) { return g_ram[a] | (unsigned)g_ram[a + 1] << 8; }  /* the glow (GlowStateOk) reads it in every build */
 #if SM_PSP_LOG
 /* Every distinct register signature that sends a frame to software is logged once (up to 48). */
-extern uint8_t g_ram[0x20000];  /* sm_rtl.c; log only, read bytewise (no unaligned loads) */
-static inline unsigned GameRam16(unsigned a) { return g_ram[a] | (unsigned)g_ram[a + 1] << 8; }
 typedef struct Sig { uint32_t a, b, c, d; } Sig;  /* d: game state, so the same registers in another scene are logged again */
 static Sig g_sigs[48];
 static int g_nsigs;
@@ -5311,7 +5309,7 @@ static void DrawDoorSnap(const ComposeSrc *s) {
   sceGuTexFlush();
 }
 
-/* Display-list use of the snapshot code (compose list, PSP_ASYNC=0 only). Every libgu call is one or a few 4 byte commands
+/* Display-list use of the snapshot code (the compose commands, whichever list they go to). Every libgu call is one or a few 4 byte commands
  * (pspsdk/gu sources): sceGuTexMode 2 + flush 1, sceGuTexImage 3 + flush 1, sceGuTexFlush 1, sceGuDrawArray 4 (vertex type,
  * base, address, prim), sceGuCopyImage 8, sceGuTexSync 1; sceGuGetMemory(n) takes n rounded up to 4, plus an 8 byte jump.
  * DrawDoorSnap changes only the texture mode / image (restored at the end) and draws sprites: no other GE state.
@@ -6500,7 +6498,7 @@ static void ApplyMosaicTransition(void) {
   sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
 
-#if SM_PSP_ASYNC || SM_PSP_DOOR_SNAP  /* the bound is also what PSP_DOOR_SNAP checks the (synchronous) compose list against */
+#if SM_PSP_ASYNC || SM_PSP_DOOR_SNAP  /* the bound is also what PSP_DOOR_SNAP checks the compose list against (DsListFits) */
 /* Compose-list bound. sceGuGetMemory and sceGuCopyImage..sceGuFinish never check the list end, so ComposeDraw only
  * runs on g_gu_list2 if ComposeBytesBound() <= kComposeAsyncMax (half of the list). The bound is mem + calls *
  * kGuCallMax, from a complete audit of what ComposeGeAsync, ComposeDraw, DrawDoorTransition and DrawNativeMessage emit:
@@ -6516,7 +6514,7 @@ static void ApplyMosaicTransition(void) {
  *   ComposeGeAsync 5 (start, draw buffer, copy, sync, finish) + marker 6 (3 states, scissor x2, draw; mem 2 ColorVert);
  *   ComposeDraw preamble 19, door capture 2, base quad 2,
  *   door transition 7, HUD 17, button header 7, trailer 5; DrawNativeMessage fixed part 12 (71 + 5 = 76);
- *   SM_PSP_DOOR_SNAP (synchronous only): kDsMaxCalls + kDsMaxMem, see DrawDoorSnap;
+ *   SM_PSP_DOOR_SNAP: kDsMaxCalls + kDsMaxMem, see DrawDoorSnap (charged on every frame, snapshot or not);
  *   button overlay: 3 set-up + 2 per run (colour, draw); message: 5 per glyph run (colour, mode, image, flush, draw)
  *   and 5 per icon (the same, its vertices counted in mem).
  *   kComposeEvolutionCalls (20) is head-room for edits of ComposeDraw; ComposeCheckUsed catches an edit that exceeds it.
@@ -6537,6 +6535,9 @@ CASSERT(kComposeAsyncMax + kComposeTail <= kComposeCap);
 CASSERT(kDsExactBytes <= kDsMaxMem + kDsMaxCalls * kGuCallMax);
 CASSERT(kDsMaxMem + kDsMaxCalls * kGuCallMax <= 8 * 1024);
 CASSERT(kDsMaxMem + kDsMaxCalls * kGuCallMax + kComposeTail < kListBytes / 32);
+#if SM_PSP_ASYNC
+CASSERT(kDsMaxMem + kDsMaxCalls * kGuCallMax + kComposeTail < kComposeAsyncMax / 16);  /* a small share of what async allows the compose commands */
+#endif
 #endif
 
 static inline uint32_t GuMem(uint32_t n) {
@@ -6625,15 +6626,16 @@ static uint32_t CurListUsed(void) {
 }
 
 #if SM_PSP_DOOR_SNAP
-/* Synchronous compose with snapshots. Both callers of ComposeDraw (ComposeGeFrame and the software path) start g_gu_list right
- * before it, so CurListUsed(g_gu_list) is what the compose has emitted so far. The rest of the composition is charged with the
- * whole bound again (the commands already emitted are counted twice: conservative), snapshots included. If that plus the tail
- * does not fit the list, the transition is dropped before it adds a single command. The snapshots' share of the bound is
- * 29 * 128 + 720 = 4432 B of the 512 KB list; this never trips in practice, it is the guard, not the budget. */
+/* Compose with snapshots. Every caller of ComposeDraw has the list it composes into open: ComposeGeFrame and the software path
+ * start g_gu_list right before it, ComposeGeAsync appends to the scene list (PSP_ASYNC=2) or starts g_gu_list2 (PSP_ASYNC=1), so
+ * CurListUsed() is what that list holds so far and g_gl_cap its capacity. The rest of the composition is charged with the whole
+ * bound again (the commands already emitted are counted twice: conservative), snapshots included. If that plus the tail does not
+ * fit the list, the transition is dropped before it adds a single command. The snapshots' share of the bound is
+ * 33 * 128 + 840 = 5064 B of a 256 / 512 KB list; this never trips in practice, it is the guard, not the budget. */
 static bool DsListFits(void) {
   uint32_t mem, calls;
   const uint32_t bound = ComposeBytesBound(&mem, &calls);
-  return CurListUsed() + bound + kComposeTail <= (uint32_t)kListBytes;
+  return CurListUsed() + bound + kComposeTail <= g_gl_cap;  /* the open list's own capacity: g_gu_list, or g_gu_list2 (PSP_ASYNC=1) */
 }
 #endif
 

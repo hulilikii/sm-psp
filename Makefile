@@ -72,7 +72,8 @@ PSP_MOS_GE ?= 1
 PSP_DOOR_GE ?= 0
 # PSP_DOOR_SNAP=1: instant door transition. The game state jumps to the destination room within one frame (the states of
 # door_speedup.asm run back to back, using the game's own room loader) while the GE slides two frozen snapshots (old room,
-# new room) with the default eased, diagonal door motion; game logic is held for the slide. Needs PSP_ASYNC=0 and uses the two
+# new room) with the default eased, diagonal door motion; game logic is held for the slide. Works with PSP_ASYNC=0, 1 and 2 and
+# with PSP_GE_GLOW (no glow while the game is in a door state) and uses the two
 # layer image slots (no extra eDRAM). Falls back to the normal transition when a snapshot cannot be taken. 0 = unchanged.
 PSP_DOOR_SNAP ?= 0
 # PSP_LAYER_IMG: BG2/BG3 layers split into many scroll runs are drawn from a cached 8 bit image (one strip per run).

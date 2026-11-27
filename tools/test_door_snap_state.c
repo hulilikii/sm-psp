@@ -50,8 +50,9 @@ static void sceGuTexSync(void) { g_cap_bytes += 4; }
 static bool g_ds_ok_init = true;
 
 /* the compose-list guard: DsListFits is the renderer's own; the bound and the list position are stand-ins */
-enum { kListBytes = 512 * 1024, kComposeTail = 1024 };
+enum { kListBytes = 512 * 1024, kComposeListBytes = 256 * 1024, kComposeTail = 1024 };
 static uint32_t g_gu_list[4], g_mock_used, g_mock_bound;
+static uint32_t g_gl_cap = kListBytes;  /* the open list's capacity (psp_gl_guard.h): g_gu_list, or the 256 KB g_gu_list2 of PSP_ASYNC=1 */
 static uint32_t CurListUsed(void) { return g_mock_used; }
 static uint32_t ComposeBytesBound(uint32_t *mem, uint32_t *calls) { *mem = *calls = 0; return g_mock_bound; }
 #include "/tmp/door_snap_fits.inc"
@@ -228,8 +229,19 @@ int main(void) {
   CHECK(DsListFits(), "fits exactly at the limit");
   g_mock_bound++;
   CHECK(!DsListFits(), "one byte over does not fit");
-  g_mock_used = 0; g_mock_bound = 4432 + 20000;  /* a realistic bound (snapshots 4432 B + the rest of the composition) */
+  g_mock_used = 0; g_mock_bound = 5064 + 20000;  /* a realistic bound (snapshots 5064 B + the rest of the composition) */
   CHECK(DsListFits(), "realistic bound fits");
+  /* PSP_ASYNC=1 composes into the 256 KB g_gu_list2: the check is against that list's capacity, not the 512 KB frame list's */
+  g_gl_cap = kComposeListBytes;
+  g_mock_used = 40; g_mock_bound = (uint32_t)kComposeListBytes - kComposeTail - 40;
+  CHECK(DsListFits(), "256 KB list: fits exactly at the limit");
+  g_mock_bound++;
+  CHECK(!DsListFits(), "256 KB list: one byte over does not fit");
+  g_mock_used = 200 * 1024; g_mock_bound = 60 * 1024;  /* fits the 512 KB list, not the 256 KB one */
+  CHECK(!DsListFits(), "256 KB list: 200 KB used + 60 KB bound is refused");
+  g_gl_cap = kListBytes;
+  CHECK(DsListFits(), "the same position fits the 512 KB list (PSP_ASYNC=0 / 2)");
+  g_mock_used = 0;
   g_mock_used = (uint32_t)kListBytes; g_mock_bound = 0;
   PspRenderer_DoorSnapArm(dir_for_arm);
   g_copies = 0;
