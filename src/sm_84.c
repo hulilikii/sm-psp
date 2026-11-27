@@ -812,26 +812,23 @@ const uint8 *PlmInstr_ActivateMapStation(const uint8 *plmp, uint16 k) {  // 0x84
   return plmp;
 }
 
+// The station list reaches this instruction only after PlmInstr_GotoIfSamusHealthFull found Samus not full and refilled her,
+// so the box is always shown. The refill is repeated (a no-op unless Samus was hurt during the animation) so health is
+// full whenever the box shows, as in the original.
 const uint8 *PlmInstr_ActivateEnergyStation(const uint8 *plmp, uint16 k) {  // 0x848CAF
-  if (samus_max_health != samus_health ||
-      samus_max_reserve_health != samus_reserve_health) {
-    samus_health = samus_max_health;
-    samus_reserve_health = samus_max_reserve_health;
-    DisplayMessageBox(0x15);
-  }
+  samus_health = samus_max_health;
+  samus_reserve_health = samus_max_reserve_health;
+  DisplayMessageBox(0x15);
   CallSomeSamusCode(1);
   return plmp;
 }
 
+// As PlmInstr_ActivateEnergyStation: PlmInstr_GotoIfMissilesFull has already refilled the ammo.
 const uint8 *PlmInstr_ActivateMissileStation(const uint8 *plmp, uint16 k) {  // 0x848CD0
-  if (samus_max_missiles != samus_missiles ||
-      samus_max_super_missiles != samus_super_missiles ||
-      samus_max_power_bombs != samus_power_bombs) {
-    samus_missiles = samus_max_missiles;
-    samus_super_missiles = samus_max_super_missiles;
-    samus_power_bombs = samus_max_power_bombs;
-    DisplayMessageBox(0x16);
-  }
+  samus_missiles = samus_max_missiles;
+  samus_super_missiles = samus_max_super_missiles;
+  samus_power_bombs = samus_max_power_bombs;
+  DisplayMessageBox(0x16);
   CallSomeSamusCode(1);
   return plmp;
 }
@@ -1192,19 +1189,29 @@ const uint8 *PlmInstr_Draw0x38FramesOfLeftTreadmill(const uint8 *plmp, uint16 k)
   return plmp;
 }
 
+// Refill happens here, at the start of the refill animation, so the HUD counters (HandleHudTilemap) count up during it
+// instead of after the message box.
 const uint8 *PlmInstr_GotoIfSamusHealthFull(const uint8 *plmp, uint16 k) {  // 0x84AE35
   if (samus_max_health != samus_health ||
-      samus_max_reserve_health != samus_reserve_health)
+      samus_max_reserve_health != samus_reserve_health) {
+    samus_health = samus_max_health;
+    samus_reserve_health = samus_max_reserve_health;
     return plmp + 2;
+  }
   CallSomeSamusCode(1);
   return INSTRB_RETURN_ADDR(GET_WORD(plmp));
 }
 
+// As PlmInstr_GotoIfSamusHealthFull, for missiles, super missiles and power bombs.
 const uint8 *PlmInstr_GotoIfMissilesFull(const uint8 *plmp, uint16 k) {  // 0x84AEBF
   if (samus_max_missiles != samus_missiles ||
       samus_max_super_missiles != samus_super_missiles ||
-      samus_max_power_bombs != samus_power_bombs)
+      samus_max_power_bombs != samus_power_bombs) {
+    samus_missiles = samus_max_missiles;
+    samus_super_missiles = samus_max_super_missiles;
+    samus_power_bombs = samus_max_power_bombs;
     return plmp + 2;
+  }
   CallSomeSamusCode(1);
   return INSTRB_RETURN_ADDR(GET_WORD(plmp));
 }
