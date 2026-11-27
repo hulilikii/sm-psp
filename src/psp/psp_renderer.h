@@ -28,6 +28,8 @@ typedef struct PspGlowBox { int16_t x0, y0, x1, y1; } PspGlowBox;
 // sm_84.c: boxes (picture pixels) of the door caps in view: coloured / opening-blue door PLMs by their current draw instruction, and the
 // closed blue caps in the level data (type 0xC, BTS 0x40..0x43, with their 0xD / 0x5 continuation blocks). At most max; returns how many.
 int PspGlow_DoorBoxes(PspGlowBox *out, int max);
+// sm_84.c: boxes of the whitelist's things in view (src/psp/psp_glow_list.h): out[i], lights[i] = 1 (only coloured pixels) or 0 (all).
+int PspGlow_ListBoxes(PspGlowBox *out, uint8_t *lights, int max);
 // sm_88.c, every frame the Ceres haze object runs: fade level 0..16 and colour channel (0x80 blue, 0x20 red) of the haze.
 void PspRenderer_SetHazeLight(unsigned level, unsigned mask);
 

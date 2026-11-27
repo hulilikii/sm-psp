@@ -111,7 +111,7 @@
 #error "SM_PSP_GE_GLOW_SRC is a mask of 1 (sprites), 2 (doors), 4 (environment)"
 #endif
 /* Ceres haze light (PSP_GE_HAZE_LIGHT=1, SM_PSP_GE_HAZE_LIGHT in psp_renderer.h): the game no longer writes the haze colour gradient
- * (sm_88.c); ComposeHazeLight adds four GE point lights shining up from below the picture instead. GAIN: percent of the default strength. */
+ * (sm_88.c); ComposeHazeLight adds the gradient it would have written as one smooth GE ramp instead. GAIN: percent of the default strength. */
 #ifndef SM_PSP_GE_HAZE_LIGHT_GAIN
 #define SM_PSP_GE_HAZE_LIGHT_GAIN 100
 #endif
@@ -657,6 +657,12 @@ static uint32_t g_ver2[4096], g_ver4[2048];    /* gate 5l: bumped whenever a til
 static uint16_t g_stamp;
 static uint32_t g_clut2[16][8][8] __attribute__((aligned(64)));
 static uint32_t g_clut4[16][8][16] __attribute__((aligned(64)));
+/* Glow "lights" CLUTs (GlowBuildLights): only the coloured entries of the full-brightness CLUTs, normalised to full strength; the rest
+ * transparent. Bound instead of g_clut2 / g_clut4 / g_clutobj while g_clut_sat is set. */
+static uint32_t g_clut2s[8][8] __attribute__((aligned(64)));
+static uint32_t g_clut4s[8][16] __attribute__((aligned(64)));
+static uint32_t g_clutobjs[8][16] __attribute__((aligned(64)));
+static bool g_clut_sat;
 static uint16_t g_clut2_stamp[16], g_clut4_stamp[16];
 static uint32_t g_clut2h[8][8] __attribute__((aligned(64)));  /* gate 4t-d: BG3 on the half-colour target, opaque = alpha 0x80 */
 static uint16_t g_clut2h_stamp;
@@ -5648,22 +5654,37 @@ static void DrawNativeMessage(void) {
   }
 }
 
+#if SM_PSP_GE_GLOW || SM_PSP_GE_HAZE_LIGHT
+/* The GE's ordered dither (4 x 4, -4..3 on the 8-bit scale: one step of a 5-bit channel) for the additive passes that draw smooth
+ * gradients into the 16-bit frame buffer: without it the 5-bit steps show as bands. */
+static void GeDitherOn(void) {
+  static const int kDither[16] __attribute__((aligned(16))) = {-4, 0, -3, 1, 2, -2, 3, -1, -3, 1, -4, 0, 3, -1, 2, -2};
+  sceGuSetDither((const ScePspIMatrix4 *)kDither);
+  sceGuEnable(GU_DITHER);
+}
+static void GeDitherOff(void) { sceGuDisable(GU_DITHER); }
+#endif
+
 #if SM_PSP_GE_HAZE_LIGHT
-/* Ceres haze light. The game gives the haze its fade level (0..16) and colour channel (0x80 blue while Ridley lives, 0x20 red after:
- * the escape) every frame it runs the haze object (PspRenderer_SetHazeLight, sm_88.c). Four GE point lights below the gameplay
- * rectangle shine up on a flat quad mesh (normals towards the viewer); the GE lights it per vertex and the triangle strips
- * interpolate. Light height 140, 10 px below the picture, attenuation 1 / (1 + d^2 / 10000): measured on the model, the brightness
- * up the middle of the picture is 100%, 93%, 81%, 67%, 54%, 43%, 33%, 26%, 21%, 17% every 30 px from the bottom edge, so it reaches
- * the top of the picture as the original gradient did (which ran the full height), with 91% at the bottom between two lights. The peak
- * (bottom edge) is 0.40 of full scale at GAIN 100 (the original gradient peaked at 15/31 = 0.48 and fell to 0 at the top). The red light ebbs like an emergency light
- * (HazePulse). Drawn twice: SM_PSP_GE_HAZE_GLOW percent into the glow chain (so it blooms; PSP_GE_GLOW) and the rest on the picture
- * with the GE's ordered dither on (no banding from the 5-bit blue). The projection maps the picture rectangle onto the target
- * (frame buffer or the half-resolution glow image); lighting, lights, dither and flat shading are put back. */
+/* Ceres haze light. The game gives the haze its fade level A (0..16) and colour channel (0x80 blue while Ridley lives, 0x20 red after:
+ * the escape) every frame it runs the haze object (PspRenderer_SetHazeLight, sm_88.c), and writes no gradient (PSP_GE_HAZE_LIGHT).
+ * The renderer draws the gradient the game would have written, but as a smooth ramp: hdma_table_2 holds 16 entries of 14 scanlines
+ * (a 224-line picture), entry i = max(min(A, 15) - 15 + i, 0) in 5-bit units of ONE colour channel (blue, or red for 0x20), brightest at
+ * the bottom (15/31 = 0.48 at A >= 15), 0 at the top, so the intensity and the reach are the game's own, and the 14-line steps are
+ * the straight line through them. One Gouraud strip (a vertex where the ramp leaves zero, one where it reaches its top), added to the
+ * picture with the GE's ordered dither on so the 5-bit steps blend. The red light ebbs like an alarm beacon (HazePulse).
+ * Drawn twice: SM_PSP_GE_HAZE_GLOW percent into the glow chain (so it blooms; PSP_GE_GLOW) and the rest on the picture. */
 #ifndef SM_PSP_GE_HAZE_GLOW
 #define SM_PSP_GE_HAZE_GLOW 35
 #endif
 #ifndef SM_PSP_GE_HAZE_PULSE_FRAMES
-#define SM_PSP_GE_HAZE_PULSE_FRAMES 112 /* the red light's ebb: one full cycle, frames (60 per second) */
+#define SM_PSP_GE_HAZE_PULSE_FRAMES 36 /* the red light's ebb: one full cycle, frames (60 per second): an alarm beacon, 1.7 per second */
+#endif
+#if SM_PSP_GE_HAZE_PULSE_FRAMES < 2
+#error "SM_PSP_GE_HAZE_PULSE_FRAMES must be at least 2"
+#endif
+#if SM_PSP_GE_HAZE_GLOW < 0 || SM_PSP_GE_HAZE_GLOW > 100
+#error "SM_PSP_GE_HAZE_GLOW must be 0..100"
 #endif
 static unsigned g_haze_level, g_haze_mask;
 static uint32_t g_haze_frame;
@@ -5675,101 +5696,71 @@ void PspRenderer_SetHazeLight(unsigned level, unsigned mask) {
   g_haze_frame = g_frame;  /* g_frame++ opens EndDraw, after the game logic that calls this */
 }
 
-enum { kHazeCols = 12, kHazeRows = 9, kHazeCell = 30, kHazeVerts = kHazeRows * 2 * (kHazeCols + 1), kHazeCalls = 80 };
-typedef struct LitVert { float nx, ny, nz, x, y, z; } LitVert;
+enum { kHazeCalls = 32 };  /* the haze strip: state, vertices (4 rows), blend, dither, shading: well under 32 calls */
 
 static inline bool HazeLightOn(void) { return g_ge_ok && g_haze_level && (uint32_t)(g_frame - g_haze_frame) <= 1u; }
 
-/* 0.15 .. 1: smoothstep up and down over SM_PSP_GE_HAZE_PULSE_FRAMES for the red (escape) light, steady for the blue one */
+/* 0.10 .. 1: smoothstep up and down over SM_PSP_GE_HAZE_PULSE_FRAMES for the red (escape) light, steady for the blue one */
 static float HazePulse(void) {
   if (g_haze_mask != 0x20)
     return 1.0f;
   const unsigned half = SM_PSP_GE_HAZE_PULSE_FRAMES / 2, p = g_frame % (2 * half);
   const float t = (float)(p < half ? p : 2 * half - p) / (float)half;
-  return 0.15f + 0.85f * (t * t * (3.0f - 2.0f * t));
+  return 0.10f + 0.90f * (t * t * (3.0f - 2.0f * t));
 }
 
-/* ABGR light colour; scale 1 = the full haze light */
-static unsigned HazeColor(float scale) {
-  static const uint8_t kBlue[3] = {40, 90, 255}, kRed[3] = {255, 80, 32};
-  const uint8_t *base = g_haze_mask == 0x20 ? kRed : kBlue;
-  const float k = (115.0f / 255.0f) * (float)g_haze_level * (1.0f / 16.0f) * ((float)SM_PSP_GE_HAZE_LIGHT_GAIN * 0.01f) * HazePulse() * scale;
-  unsigned c[3];
-  for (int i = 0; i < 3; i++) {
-    const float f = (float)base[i] * k + 0.5f;
-    c[i] = f > 255.0f ? 255u : (unsigned)f;
-  }
-  return 0xff000000u | c[2] << 16 | c[1] << 8 | c[0];
+/* The game's gradient (5-bit units of the haze channel) at picture row r (0..224) for fade level `level`: entry i of 16, 14 rows each
+ * (centre 14 i + 7), is max(min(level, 15) - 15 + i, 0); linear through the entries' centres, flat beyond the first and last. */
+static float HazeRamp(float r, unsigned level) {
+  const float p = (float)(level > 15 ? 15 : level);
+  float e = (r - 7.0f) / 14.0f;
+  e = e < 0.0f ? 0.0f : (e > 15.0f ? 15.0f : e);
+  const float v = p - 15.0f + e;
+  return v > 0.0f ? v : 0.0f;
 }
 
-/* Draws the lit mesh additively. The picture rectangle (kCompX.. + kCompW, kCompY.. + kCompH) lands on the rectangle of size tw x th
- * whose top-left corner is the target pixel (ox, oy): (0, 0) in the glow targets, (kCompX, kCompY) in the 480 x 272 frame buffer.
- * The target, scissor and blend source are the caller's; the blend is set here. */
-static void HazeDrawMesh(unsigned col, float tw, float th, float ox, float oy, bool dither) {
-  LitVert *v = sceGuGetMemory((int)(kHazeVerts * sizeof(LitVert)));
-  const float x0 = (float)kCompX, y_bot = (float)(kCompY + kCompH);
-  int n = 0;
-  for (int r = 0; r < kHazeRows; r++) {
-    const float ya = y_bot - (float)(r * kHazeCell), yb = ya - (float)kHazeCell;
-    for (int k = 0; k <= kHazeCols; k++) {
-      const float x = x0 + (float)(k * kHazeCell);
-      v[n++] = (LitVert){0.0f, 0.0f, 1.0f, x, ya, 0.0f};
-      v[n++] = (LitVert){0.0f, 0.0f, 1.0f, x, yb, 0.0f};
-    }
+/* Draws the haze strip additively (dst + haze) on a target whose rectangle (ox, oy, tw, th) shows the picture rows srow0..kSrcRows: the
+ * frame buffer (kCompX, kCompY, kCompW, kCompH) or the half-resolution glow image (0, 0, kGlowW1, rows). The target, scissor and 2D
+ * through mode are the caller's. scale 1 = the full haze. */
+static void HazeDrawMesh(float scale, float tw, float th, float ox, float oy, bool dither, int srow0) {
+  const float p = (float)(g_haze_level > 15 ? 15 : g_haze_level);
+  float rows[4];
+  int nrow = 0;
+  rows[nrow++] = (float)srow0;
+  const float r_zero = 14.0f * (15.0f - p) + 7.0f;  /* where the ramp leaves zero */
+  if (r_zero > rows[nrow - 1])
+    rows[nrow++] = r_zero;
+  if (217.0f > rows[nrow - 1])  /* the ramp's top: entry 15's centre */
+    rows[nrow++] = 217.0f;
+  rows[nrow++] = (float)kSrcRows;
+  const float k = (255.0f / 31.0f) * ((float)SM_PSP_GE_HAZE_LIGHT_GAIN * 0.01f) * HazePulse() * scale;
+  ColorVertF *v = sceGuGetMemory((int)(2 * nrow * sizeof(ColorVertF)));
+  const float span = (float)(kSrcRows - srow0);
+  for (int i = 0; i < nrow; i++) {
+    const float f = HazeRamp(rows[i], g_haze_level) * k + 0.5f;
+    const unsigned c8 = f > 255.0f ? 255u : (unsigned)f;
+    const uint32_t col = 0xff000000u | (g_haze_mask == 0x20 ? c8 : c8 << 16);  /* ABGR: red, or blue */
+    const float y = oy + (rows[i] - (float)srow0) * th / span;
+    v[2 * i] = (ColorVertF){col, ox, y, 0.0f};
+    v[2 * i + 1] = (ColorVertF){col, ox + tw, y, 0.0f};
   }
-  /* world pixel (x, y) -> target pixel (ox + (x - kCompX) * sx, oy + (y - kCompY) * sy); the GE maps NDC to pixels with 240 / -136
-   * about the centre of the 480 x 272 viewport, so the matrix is that mapping inverted (column-major, translation in 12..14).
-   * ox = kCompX, oy = kCompY, sx = sy = 1 is glOrtho(0, 480, 272, 0, -1, 1), what the first version drew with. */
-  const float sx = tw / (float)kCompW, sy = th / (float)kCompH;
-  float proj[16] __attribute__((aligned(16))) = {0}, ident[16] __attribute__((aligned(16))) = {0};
-  proj[0] = sx / 240.0f;
-  proj[5] = -sy / 136.0f;
-  proj[10] = -1.0f;
-  proj[12] = (ox - (float)kCompX * sx) / 240.0f - 1.0f;
-  proj[13] = 1.0f + ((float)kCompY * sy - oy) / 136.0f;
-  proj[15] = 1.0f;
-  ident[0] = ident[5] = ident[10] = ident[15] = 1.0f;
-  sceGuSetMatrix(GU_PROJECTION, (const ScePspFMatrix4 *)proj);
-  sceGuSetMatrix(GU_VIEW, (const ScePspFMatrix4 *)ident);
-  sceGuSetMatrix(GU_MODEL, (const ScePspFMatrix4 *)ident);
-
   sceGuDisable(GU_TEXTURE_2D);
   sceGuEnable(GU_BLEND);
-  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x00ffffffu, 0x00ffffffu);  /* dst + lit colour */
-  if (dither) {
-    static const int kDither[16] __attribute__((aligned(16))) = {-4, 0, -3, 1, 2, -2, 3, -1, -3, 1, -4, 0, 3, -1, 2, -2};
-    sceGuSetDither((const ScePspIMatrix4 *)kDither);
-    sceGuEnable(GU_DITHER);
-  }
+  sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x00ffffffu, 0x00ffffffu);  /* dst + haze */
+  if (dither)
+    GeDitherOn();
   sceGuShadeModel(GU_SMOOTH);
-  sceGuColorMaterial(0);
-  sceGuMaterial(GU_AMBIENT | GU_DIFFUSE, 0xffffffffu);
-  sceGuAmbient(0xff000000u);
-  sceGuLightMode(GU_SINGLE_COLOR);
-  for (int i = 0; i < 4; i++) {
-    const ScePspFVector3 pos = {x0 + (float)(45 + 90 * i), y_bot + 10.0f, 140.0f};
-    sceGuLight(i, GU_POINTLIGHT, GU_DIFFUSE, &pos);
-    sceGuLightColor(i, GU_AMBIENT, 0);
-    sceGuLightColor(i, GU_DIFFUSE, col);
-    sceGuLightAtt(i, 1.0f, 0.0f, 1.0f / 10000.0f);
-    sceGuEnable(GU_LIGHT0 + i);
-  }
-  sceGuEnable(GU_LIGHTING);
-  for (int r = 0; r < kHazeRows; r++)
-    sceGuDrawArray(GU_TRIANGLE_STRIP, GU_NORMAL_32BITF | GU_VERTEX_32BITF | GU_TRANSFORM_3D, 2 * (kHazeCols + 1), 0,
-                   v + r * 2 * (kHazeCols + 1));
-  sceGuDisable(GU_LIGHTING);
-  for (int i = 0; i < 4; i++)
-    sceGuDisable(GU_LIGHT0 + i);
+  sceGuDrawArray(GU_TRIANGLE_STRIP, kVtColorF, 2 * nrow, NULL, v);
   sceGuShadeModel(GU_FLAT);
   if (dither)
-    sceGuDisable(GU_DITHER);
+    GeDitherOff();
   sceGuDisable(GU_BLEND);
 }
 
 /* on the picture, after the scaled image */
-static void ComposeHazeLight(void) {
-  HazeDrawMesh(HazeColor(g_haze_via_glow ? 1.0f - (float)SM_PSP_GE_HAZE_GLOW * 0.01f : 1.0f), (float)kCompW, (float)kCompH, (float)kCompX, (float)kCompY, true);
+static void ComposeHazeLight(int srow0) {
+  HazeDrawMesh(g_haze_via_glow ? 1.0f - (float)SM_PSP_GE_HAZE_GLOW * 0.01f : 1.0f, (float)kCompW, (float)kCompH, (float)kCompX, (float)kCompY, true,
+               srow0);
   sceGuEnable(GU_TEXTURE_2D);
 }
 #endif
@@ -5787,8 +5778,21 @@ enum { kGlowMaxBoxes = 16, kGlowDoorMax = 8, kGlowMargin = 24, kGlowCalls = 320 
 #ifndef SM_PSP_GE_GLOW_CORE
 #define SM_PSP_GE_GLOW_CORE 35 /* percent of the half-resolution emitter image added back at screen resolution, hugging the shape */
 #endif
+#if SM_PSP_GE_GLOW_CORE < 0 || SM_PSP_GE_GLOW_CORE > 100
+#error "SM_PSP_GE_GLOW_CORE must be 0..100"
+#endif
 typedef struct GlowBox { int16_t x0, y0, x1, y1; } GlowBox;
 static GlowBox g_glow_box[kGlowMaxBoxes];
+/* The whitelist's "lights" things in view (src/psp/psp_glow_list.h): drawn from their own tiles / sprites, coloured pixels only */
+enum { kGlowLtMax = 8, kGlowListMax = 8 };
+#ifndef SM_PSP_GE_GLOW_SAT
+#define SM_PSP_GE_GLOW_SAT 72 /* how coloured (max channel - min channel, 0..255) a palette entry must be to be a "light" */
+#endif
+#if SM_PSP_GE_GLOW_SAT < 0 || SM_PSP_GE_GLOW_SAT > 255
+#error "SM_PSP_GE_GLOW_SAT must be 0..255"
+#endif
+static GlowBox g_glow_lt[kGlowLtMax];
+static int g_glow_nlt;
 static int g_glow_nbox, g_glow_ux0, g_glow_uy0, g_glow_ux1, g_glow_uy1;
 static bool g_glow_obj, g_glow_bg3, g_glow_live;
 static TileVert *g_glow_vc;  /* the two additive quads of the last step, built in GlowPrep (list memory) */
@@ -5822,14 +5826,50 @@ static void GlowAddBox(int x0, int y0, int x1, int y1, int srow0) {
   GlowBBox(x0, y0, x1, y1, srow0);
 }
 
+static void GlowAddLight(int x0, int y0, int x1, int y1, int srow0) {
+  x0 = x0 < 0 ? 0 : x0;
+  y0 = y0 < srow0 ? srow0 : y0;
+  x1 = x1 > kGameWidth ? kGameWidth : x1;
+  y1 = y1 > kSrcRows ? kSrcRows : y1;
+  if (x1 <= x0 || y1 <= y0 || g_glow_nlt >= kGlowLtMax)
+    return;
+  g_glow_lt[g_glow_nlt++] = (GlowBox){(int16_t)x0, (int16_t)y0, (int16_t)x1, (int16_t)y1};
+  GlowBBox(x0, y0, x1, y1, srow0);
+}
+
+/* A palette entry as a light: transparent unless it is coloured (max - min of its channels >= SM_PSP_GE_GLOW_SAT: pink, yellow, green,
+ * blue lights; not grey metal, black or white), then scaled so its strongest channel is 255 (the hue kept, so a dim lamp passes the
+ * bright pass). Entries are ABGR 8888; alpha 0 is transparent. */
+static uint32_t GlowLightEntry(uint32_t c) {
+  const uint32_t r = c & 255u, g = (c >> 8) & 255u, b = (c >> 16) & 255u;
+  const uint32_t mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+  if ((c >> 24) == 0 || mx < 80u || mx - mn < (uint32_t)SM_PSP_GE_GLOW_SAT)  /* a dark shade of a colour is not a lamp */
+    return 0;
+  return 0xff000000u | (b * 255u / mx) << 16 | (g * 255u / mx) << 8 | (r * 255u / mx);
+}
+
+static void GlowBuildLights(void) {
+  for (int pal = 0; pal < 8; pal++) {
+    for (int j = 0; j < 16; j++) {
+      g_clut4s[pal][j] = GlowLightEntry(g_clut4[kClutBright][pal][j]);
+      g_clutobjs[pal][j] = GlowLightEntry(g_clutobj[kClutBright][pal][j]);
+    }
+    for (int j = 0; j < 8; j++)
+      g_clut2s[pal][j] = GlowLightEntry(g_clut2[kClutBright][pal][j]);
+  }
+  sceKernelDcacheWritebackRange(g_clut2s, sizeof(g_clut2s));
+  sceKernelDcacheWritebackRange(g_clut4s, sizeof(g_clut4s));
+  sceKernelDcacheWritebackRange(g_clutobjs, sizeof(g_clutobjs));
+}
+
 #if SM_PSP_LOG
 /* Why a frame has (or has no) glow, once per change of room / emitter set (first 64 lines): lets a room that should glow and does not
  * (Maridia) be told apart: state or start-up (why = 0), no emitter found (1), or emitters present (2). */
 static void GlowLog(int why, int srow0) {
   static unsigned last, nlog;
   const unsigned room = GameRam16(0x79B);
-  const unsigned sig = room ^ (unsigned)why << 16 ^ (unsigned)g_glow_nbox << 20 ^ (g_glow_obj ? 1u << 24 : 0) ^ (g_glow_bg3 ? 1u << 25 : 0);
-  if (sig == last || nlog >= 64)
+  const unsigned sig = room ^ (unsigned)why << 16;  /* one line per room and cause: boxes and sprites change every few frames */
+  if (sig == last || nlog >= 96)
     return;
   last = sig;
   nlog++;
@@ -5839,8 +5879,9 @@ static void GlowLog(int why, int srow0) {
 }
 #endif
 
-static bool GlowCollect(int srow0) {
+static bool GlowCollect(int srow0, bool ge_scene) {
   g_glow_nbox = 0;
+  g_glow_nlt = 0;
   g_glow_obj = g_glow_bg3 = false;
 #if SM_PSP_GE_HAZE_LIGHT
   g_haze_via_glow = false;
@@ -5874,20 +5915,40 @@ static bool GlowCollect(int srow0) {
 #endif
   }
 #endif
+  {  /* the whitelist */
+    PspGlowBox lb[kGlowListMax];
+    uint8_t lm[kGlowListMax];
+    const int n = PspGlow_ListBoxes(lb, lm, kGlowListMax);
+    for (int i = 0; i < n; i++) {
+      if (!lm[i])
+        GlowAddBox(lb[i].x0, lb[i].y0, lb[i].x1, lb[i].y1, srow0);
+      else if (ge_scene)  /* the lights are redrawn from the GE scene's geometry: not from a software frame */
+        GlowAddLight(lb[i].x0, lb[i].y0, lb[i].x1, lb[i].y1, srow0);
+    }
+#if SM_PSP_LOG
+    static int last_n = -1;
+    static unsigned nlog;
+    if (n != last_n && nlog < 64) {
+      nlog++;
+      PspLog("glow: list boxes=%d lights=%d room=%04x f=%u", n, g_glow_nlt, (unsigned)GameRam16(0x79B), (unsigned)g_frame);
+    }
+    last_n = n;
+#endif
+  }
 #if SM_PSP_GE_GLOW_SRC & 4
   {
     const unsigned fx = GameRam16(0x196E), surf = GameRam16(0x1962);  /* fx_type, lava_acid_y_pos */
     if (fx == 0x0A) {  /* rain: the lightning flashes the whole picture */
       if (g_glow_nbox < kGlowMaxBoxes)
         GlowAddBox(0, srow0, kGameWidth, kSrcRows, srow0);
-    } else if ((fx == 0x02 || fx == 0x04) && surf < 0x4000 && !g_img_on[2] && !g_mos[2].on) {  /* lava, acid: the layer-3 pixels */
+    } else if (ge_scene && (fx == 0x02 || fx == 0x04) && surf < 0x4000 && !g_img_on[2] && !g_mos[2].on) {  /* lava, acid: the layer-3 pixels */
       g_glow_bg3 = true;
       GlowBBox(0, (int)surf - cy > 32 ? (int)surf - cy : 32, kGameWidth, kSrcRows, srow0);
     }
   }
 #endif
 #if SM_PSP_GE_GLOW_SRC & 1
-  if (g_nobjseg > 0) {
+  if (ge_scene && g_nobjseg > 0) {
     g_glow_obj = true;
     for (int i = 0; i < g_glow_obj_n; i++) {
       const Sprite *sp = &g_spr[i];
@@ -5937,7 +5998,8 @@ static void ComposeGlowTaps(TileVert *v, int n, int rows, int src_w, uint32_t we
 static bool GlowPrep(const ComposeSrc *s, int srow0) {
   enum { kThr = SM_PSP_GE_GLOW_THRESH, kGain = (SM_PSP_GE_GLOW_GAIN * 255 + 200) / 400, kStrips = COMPOSE_STRIPS(kCompW) };
   g_glow_live = false;
-  if (!GlowCollect(srow0))
+  const bool ge_scene = s->psm == GU_PSM_5650 && s->w == kGameWidth;  /* the GE drew this frame's geometry (not the software image) */
+  if (!GlowCollect(srow0, ge_scene))
     return false;
   const int nr = (kSrcRows - srow0) / 2;  /* half-resolution rows covering the source rows the picture shows */
   const int nr2 = (nr + 1) / 2;           /* quarter-resolution rows */
@@ -5973,7 +6035,7 @@ static bool GlowPrep(const ComposeSrc *s, int srow0) {
   sceGuTexWrap(GU_CLAMP, GU_CLAMP);
   sceGuTexScale(1.0f, 1.0f);
   sceGuTexOffset(0.0f, 0.0f);
-  if (g_glow_obj || g_glow_bg3) {
+  if (g_glow_obj || g_glow_bg3 || g_glow_nlt) {
     sceGuEnable(GU_ALPHA_TEST);
     sceGuAlphaFunc(GU_GREATER, 0, 0xff);
     sceGuEnable(GU_DEPTH_TEST);
@@ -5985,6 +6047,24 @@ static bool GlowPrep(const ComposeSrc *s, int srow0) {
       GlowScissor(kLeft, kTop + 32, kLeft + kGameWidth, kTop + kSrcRows);
       DrawBgPass(2, 0);
       DrawBgPass(2, 1);
+      GlowScissor(kLeft, kTop, kLeft + kGameWidth, kTop + kSrcRows);
+    }
+    if (g_glow_nlt) {  /* the whitelist's lights: layers 1 and 2 and the sprites inside each box, coloured entries only */
+      GlowBuildLights();
+      g_clut_sat = true;
+      for (int b = 0; b < g_glow_nlt; b++) {
+        const GlowBox *bx = &g_glow_lt[b];
+        GlowScissor(kLeft + bx->x0, kTop + bx->y0, kLeft + bx->x1, kTop + bx->y1);
+        for (int pr = 0; pr < 2; pr++) {
+          if (!g_img_on[0] && !g_mos[0].on)
+            DrawBgPass(0, pr);
+          if (!g_img_on[1] && !g_mos[1].on)
+            DrawBgPass(1, pr);
+        }
+        if (g_nobjseg > 0)
+          DrawObjSegs(g_objseg, g_nobjseg, g_objbase, kClutBright, false, 0);
+      }
+      g_clut_sat = false;
       GlowScissor(kLeft, kTop, kLeft + kGameWidth, kTop + kSrcRows);
     }
     sceGuDepthMask(GU_FALSE);
@@ -6028,7 +6108,7 @@ static bool GlowPrep(const ComposeSrc *s, int srow0) {
   GeDraw(kVtColor, 2, &cv[2]);
 #if SM_PSP_GE_HAZE_LIGHT && SM_PSP_GE_HAZE_GLOW > 0
   if (g_haze_via_glow)  /* the glow chain multiplies by GAIN / 100: feed the share divided by it */
-    HazeDrawMesh(HazeColor((float)SM_PSP_GE_HAZE_GLOW / (float)SM_PSP_GE_GLOW_GAIN), (float)kGlowW1, (float)nr, 0.0f, 0.0f, false);
+    HazeDrawMesh((float)SM_PSP_GE_HAZE_GLOW / (float)SM_PSP_GE_GLOW_GAIN, (float)kGlowW1, (float)nr, 0.0f, 0.0f, false, srow0);
 #endif
 
   /* 2. quarter-resolution blur */
@@ -6093,6 +6173,7 @@ static void ComposeGlowAdd(const ComposeSrc *s, int srow0) {
   sceGuEnable(GU_BLEND);
   sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, 0x00ffffffu, 0x00ffffffu);
   GlowScissor(sx0, sy0, sx1, sy1);
+  GeDitherOn();  /* the soft falloff of a glow is as banded as the haze without it */
   GeDraw(kVtTile, nbl, g_glow_vc);
 #if SM_PSP_GE_GLOW_CORE > 0
   sceGuTexImage(0, kGlowW1, kGlowW1, kGlowW1, g_vram_u + kVramGlow1);
@@ -6100,6 +6181,7 @@ static void ComposeGlowAdd(const ComposeSrc *s, int srow0) {
   sceGuBlendFunc(GU_ADD, GU_FIX, GU_FIX, (uint32_t)(SM_PSP_GE_GLOW_CORE * 255 / 100) * 0x010101u, 0x00ffffffu);
   GeDraw(kVtTile, nbl, g_glow_vc + nbl);
 #endif
+  GeDitherOff();
   sceGuScissor(0, 0, kPspWidth, kPspHeight);
 
   /* state for what follows (the HUD samples the source image again) */
@@ -6240,7 +6322,7 @@ static void ComposeDraw(const ComposeSrc *s) {
 #endif
 #if SM_PSP_GE_HAZE_LIGHT
   if (HazeLightOn())
-    ComposeHazeLight();
+    ComposeHazeLight(srow0);
 #endif
 #if SM_PSP_GE_GLOW
   ComposeGlowAdd(s, srow0);
@@ -6577,6 +6659,16 @@ static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
 #if SM_PSP_GE_GLOW_SRC & 1
     calls += 6u * (uint32_t)g_nobjseg;  /* DrawObjSegs again: per segment clut mode, clut load, texture mode, texture image, draw */
 #endif
+    {  /* the whitelist's lights, worst case kGlowLtMax boxes: layers 1 and 2 (both priorities) and the sprites in each */
+      uint32_t per = 2u + 6u * (uint32_t)g_nobjseg;  /* + the box's scissor */
+      for (int l = 0; l < 2; l++)
+        for (int i = 0; i < g_nruns[l]; i++)
+          for (int pr = 0; pr < 2; pr++)
+            for (int p = 0; p < 8; p++)
+              if (g_geom[l][i][pr][p].n)
+                per += 6u;
+      calls += (uint32_t)kGlowLtMax * per;
+    }
 #if SM_PSP_GE_GLOW_SRC & 4
     for (int i = 0; i < g_nruns[2]; i++)  /* DrawBgPass(2, 0 / 1) again (GlowCollect skips an image / mosaic layer 3): bind + draw per cell */
       for (int pr = 0; pr < 2; pr++)
@@ -6588,7 +6680,7 @@ static uint32_t ComposeBytesBound(uint32_t *mem_out, uint32_t *calls_out) {
 #endif
 #if SM_PSP_GE_HAZE_LIGHT
   if (HazeLightOn()) {  /* the picture's mesh, and the glow chain's */
-    mem += 2 * GuMem(kHazeVerts * sizeof(LitVert));
+    mem += 2 * GuMem(8 * sizeof(ColorVertF));
     calls += 2 * kHazeCalls;
   }
 #endif
@@ -6763,11 +6855,11 @@ static void BindBg(int l, int b, int p) {
   PROF(g_c_clut++;)
   sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
   if (l < 2) {
-    sceGuClutLoad(2, g_clut4[b][p]);
+    sceGuClutLoad(2, g_clut_sat ? g_clut4s[p] : g_clut4[b][p]);
     sceGuTexMode(GU_PSM_T4, 0, 0, SWZ_FLAG(SM_PSP_SWZ_BG));
     sceGuTexImage(0, 256, 512, 256, g_atlas4);
   } else {
-    sceGuClutLoad(1, g_clut2[b][p]);
+    sceGuClutLoad(1, g_clut_sat ? g_clut2s[p] : g_clut2[b][p]);
     sceGuTexMode(GU_PSM_T4, 0, 0, SWZ_FLAG(SM_PSP_SWZ_BG));
     sceGuTexImage(0, 512, 512, 512, g_atlas2);
   }
@@ -6966,7 +7058,7 @@ static void DrawObjSegs(const ObjSeg *segs, int n, const BgVert *base, int brigh
       continue;
     PROF(g_c_clut++;)
     sceGuClutMode(GU_PSM_8888, 0, 0x0f, 0);
-    sceGuClutLoad(2, g_clutobj[bright][sg->pal]);
+    sceGuClutLoad(2, g_clut_sat ? g_clutobjs[sg->pal] : g_clutobj[bright][sg->pal]);
     sceGuTexMode(GU_PSM_T4, 0, 0, SWZ_FLAG(SM_PSP_SWZ_BG));
     sceGuTexImage(0, 256, 512, 256, g_atlas4);
     GeDraw(kVtBg, sg->n, base + sg->first);
@@ -8473,6 +8565,9 @@ static __attribute__((noinline)) bool DrawGeBody(void) {
  * DrawGeBody (never expected: ListBytesNeeded() has admitted the frame). Present() and the compose / mosaic functions it
  * calls arm their own recovery point for their own list, so by the time DrawGeBody returns nothing is armed. */
 static bool DrawGe(void) {
+#if SM_PSP_GE_GLOW
+  g_clut_sat = false;
+#endif
   if (setjmp(g_gl_jb)) {
     GlAborted("scene");
     g_verify_now = false;

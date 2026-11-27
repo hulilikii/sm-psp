@@ -336,6 +336,79 @@ int PspGlow_DoorBoxes(PspGlowBox *out, int max) {
   }
   return n;
 }
+
+// The whitelist (src/psp/psp_glow_list.h): PLMs by setup routine (their drawn blocks, the same walk as the doors) and enemy species by
+// init routine (their hit box). lights[i] is the entry's mode (1 GLOW_LIGHTS, 0 GLOW_ALL).
+#define GLOW_LIGHTS 1
+#define GLOW_ALL 0
+int PspGlow_ListBoxes(PspGlowBox *out, uint8_t *lights, int max) {
+  const int w = room_width_in_blocks, h = room_height_in_blocks, cx = layer1_x_pos, cy = layer1_y_pos;
+  int n = 0;
+  if (w <= 0 || w > 0x100 || h <= 0 || h > 0x100)
+    return 0;
+  for (int i = 0; i < 40 && n < max; i++) {
+    const uint16 hdr = plm_header_ptr[i];
+    if (!(hdr & 0x8000))
+      continue;
+    const uint16 setup = GET_WORD(RomPtr_84(hdr));
+    int mode = -1;
+#define GLOW_PLM(fn, m) if (setup == (uint16)((fn) & 0xFFFF)) mode = (m); else
+#define GLOW_ENEMY(fn, m)
+#include "src/psp/psp_glow_list.h"
+#undef GLOW_PLM
+#undef GLOW_ENEMY
+    {}
+    if (mode < 0)
+      continue;
+    const uint16 dp = plm_instruction_draw_ptr[i];
+    if (!(dp & 0x8000))
+      continue;
+    const unaligned_uint16 *p = (const unaligned_uint16 *)RomPtr_84orRAM(dp);
+    const int blk = plm_block_indices[i] >> 1, bx = blk % w, by = blk / w;
+    int x0 = bx, y0 = by, x1 = bx + 1, y1 = by + 1, gx = bx, gy = by;
+    for (int seg = 0; seg < 8; seg++) {
+      const uint16 v = *p++;
+      const int cnt = (uint8)v;
+      if (cnt == 0)
+        break;
+      p += cnt;
+      const int ex = (v & 0x8000) ? gx + 1 : gx + cnt, ey = (v & 0x8000) ? gy + cnt : gy + 1;
+      x0 = gx < x0 ? gx : x0;
+      y0 = gy < y0 ? gy : y0;
+      x1 = ex > x1 ? ex : x1;
+      y1 = ey > y1 ? ey : y1;
+      const uint16 off = *p;
+      if (!off)
+        break;
+      gx = bx + (int8)off;
+      gy = by + (int8)(off >> 8);
+      p++;
+    }
+    out[n] = (PspGlowBox){(int16_t)(x0 * 16 - cx), (int16_t)(y0 * 16 - cy), (int16_t)(x1 * 16 - cx), (int16_t)(y1 * 16 - cy)};
+    lights[n++] = (uint8_t)mode;
+  }
+  const int ne = num_enemies_in_room < 32 ? num_enemies_in_room : 32;
+  for (int i = 0; i < ne && n < max; i++) {
+    const EnemyData *e = &enemy_data[i];
+    if (!(e->enemy_ptr & 0x8000) || (e->properties & (kEnemyProps_Deleted | kEnemyProps_Invisible)))  // a destroyed or hidden one has no lights
+      continue;
+    const EnemyDef *ed = get_EnemyDef_A2(e->enemy_ptr);
+    const uint32 init = (uint32)ed->bank << 16 | ed->ai_init;  // the full address: another bank's routine may share the low 16 bits
+    int mode = -1;
+#define GLOW_PLM(fn, m)
+#define GLOW_ENEMY(fn, m) if (init == (uint32)(fn)) mode = (m); else
+#include "src/psp/psp_glow_list.h"
+#undef GLOW_PLM
+#undef GLOW_ENEMY
+    {}
+    if (mode < 0)
+      continue;
+    const int px = (int)e->x_pos - cx, py = (int)e->y_pos - cy, rx = e->x_width, ry = e->y_height;
+    out[n] = (PspGlowBox){(int16_t)(px - rx), (int16_t)(py - ry), (int16_t)(px + rx), (int16_t)(py + ry)};
+    lights[n++] = (uint8_t)mode;
+  }
+  return n;
+}
 #endif
 
 void ProcessPlmDrawInstruction(uint16 v0) {  // 0x84861E
