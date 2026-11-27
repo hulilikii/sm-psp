@@ -6291,6 +6291,7 @@ void Samus_PauseCheck(void) {  // 0x90EA45
       && (joypad1_newkeys & kButton_Start) != 0) {
     screen_fade_delay = 1;
     screen_fade_counter = 1;
+    Samus_SaveRunButtonModeForPause();
     game_state = kGameState_12_Pausing;
   }
 }

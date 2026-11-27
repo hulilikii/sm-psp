@@ -39,6 +39,10 @@ enum {
 static uint8 run_button_mode = kRunButtonMode_Off;
 static uint8 run_button_mode_latched = 0;
 static uint8 run_button_mode_armed = 0;
+static uint8 run_button_mode_pause_saved = 0;
+static uint8 run_button_mode_pause_latched = 0;
+static uint8 run_button_mode_pause_armed = 0;
+static uint8 run_button_mode_pause_valid = 0;
 
 static void Samus_SetRunButtonMode(uint8 mode) {
   if (run_button_mode == mode)
@@ -55,6 +59,24 @@ void Samus_ResetRunButtonMode(void) {
   Samus_SetRunButtonMode(kRunButtonMode_Off);
   run_button_mode_latched = 0;
   run_button_mode_armed = 0;
+  run_button_mode_pause_valid = 0;
+}
+
+void Samus_SaveRunButtonModeForPause(void) {
+  run_button_mode_pause_saved = run_button_mode;
+  run_button_mode_pause_latched = run_button_mode_latched;
+  run_button_mode_pause_armed = run_button_mode_armed;
+  run_button_mode_pause_valid = 1;
+}
+
+void Samus_RestoreRunButtonModeAfterPause(void) {
+  if (!run_button_mode_pause_valid)
+    return;
+
+  Samus_SetRunButtonMode(run_button_mode_pause_saved);
+  run_button_mode_latched = run_button_mode_pause_latched;
+  run_button_mode_armed = run_button_mode_pause_armed;
+  run_button_mode_pause_valid = 0;
 }
 
 void Samus_UpdateRunButtonMode(void) {
@@ -1907,6 +1929,7 @@ void Samus_Initialize(void) {  // 0x91E00D
   run_button_mode = kRunButtonMode_Off;
   run_button_mode_latched = 0;
   run_button_mode_armed = 0;
+  run_button_mode_pause_valid = 0;
   static const uint16 word_909EAF = 0;
   static const uint16 word_909EAD = 1;
   static const uint16 word_909EB3 = 0;

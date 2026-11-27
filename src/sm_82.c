@@ -1573,6 +1573,7 @@ CoroutineRet GameState_18_Unpausing(void) {  // 0x8293A1
     screen_fade_delay = 0;
     screen_fade_counter = 0;
     game_state = kGameState_8_MainGameplay;
+    Samus_RestoreRunButtonModeAfterPause();
   }
   return kCoroutineNone;
 }
